@@ -6,13 +6,40 @@ from ..utils.log import log
 BAUD_DEFAULT = 250000
 BAUD_FALLBACK = 115200
 
+EXPECTED_MACHINE_NAME = "MicroStageController"
+EXPECTED_UUID = "a3a4637a-68c4-4340-9fda-847b4fe0d3fc"
+
 def _ts():
     return time.perf_counter()
 
 class ProbeError(Exception):
     pass
 
+
+def parse_m115_info(resp: str):
+    resp_low = resp or ""
+    is_marlin = ("FIRMWARE_NAME:Marlin" in resp_low)
+    machine_name = None
+    uuid = None
+    for tok in resp_low.replace("|", " ").split():
+        if tok.startswith("MACHINE_NAME:"):
+            machine_name = tok.split(":",1)[1]
+        if tok.startswith("UUID:"):
+            uuid = tok.split(":",1)[1]
+    return {"is_marlin": is_marlin, "machine_name": machine_name, "uuid": uuid}
+
+
+def is_expected_board(info: dict) -> bool:
+    if not info.get("is_marlin"):
+        return False
+    if info.get("machine_name") == EXPECTED_MACHINE_NAME:
+        return True
+    if info.get("uuid") == EXPECTED_UUID:
+        return True
+    return False
+
 def _probe_port(device: str, baud: int, time_wait: float = 2.0) -> bool:
+    """Legacy boolean probe kept for compatibility."""
     try:
         log(f"Stage: probing {device} @ {baud}")
         with serial.Serial(device, baudrate=baud, timeout=1.0, write_timeout=1.0) as ser:
@@ -21,15 +48,27 @@ def _probe_port(device: str, baud: int, time_wait: float = 2.0) -> bool:
             ser.write(b"M115\n")
             time.sleep(0.3)
             resp = ser.read(4096).decode(errors="ignore")
-            if "FIRMWARE_NAME:Marlin" in resp:
-                log(f"Stage: Marlin detected on {device} @ {baud}")
-                return True
-            else:
-                log(f"Stage: {device} not Marlin (got {resp[:120]!r})")
-                return False
+            info = parse_m115_info(resp)
+            return bool(info.get("is_marlin"))
     except Exception as e:
         log(f"Stage: probe error {device}@{baud}: {e}")
         return False
+
+
+def _probe_port_info(device: str, baud: int, time_wait: float = 2.0):
+    try:
+        log(f"Stage: probing {device} @ {baud}")
+        with serial.Serial(device, baudrate=baud, timeout=1.0, write_timeout=1.0) as ser:
+            time.sleep(time_wait)
+            ser.reset_input_buffer()
+            ser.write(b"M115\n")
+            time.sleep(0.3)
+            resp = ser.read(4096).decode(errors="ignore")
+            info = parse_m115_info(resp)
+            return info, resp
+    except Exception as e:
+        log(f"Stage: probe error {device}@{baud}: {e}")
+        return {"is_marlin": False, "machine_name": None, "uuid": None}, ""
 
 def find_marlin_port(time_wait: float = 2.0):
     ports = list(list_ports.comports())
@@ -44,14 +83,25 @@ def find_marlin_port(time_wait: float = 2.0):
 
     ports.sort(key=score, reverse=True)
 
+    preferred = []
+    generic = []
     for p in ports:
-        if not p.device:
+        if not getattr(p, "device", None):
             continue
-        # Try default first, then fallback
-        if _probe_port(p.device, BAUD_DEFAULT, time_wait):
-            return (p.device, BAUD_DEFAULT)
-        if _probe_port(p.device, BAUD_FALLBACK, time_wait):
-            return (p.device, BAUD_FALLBACK)
+        for baud in (BAUD_DEFAULT, BAUD_FALLBACK):
+            info, resp = _probe_port_info(p.device, baud, time_wait)
+            if not info.get("is_marlin"):
+                continue
+            if is_expected_board(info):
+                log(f"Stage: expected board detected on {p.device} @ {baud}")
+                preferred.append((p.device, baud))
+            else:
+                log(f"Stage: generic Marlin on {p.device} @ {baud} ({info})")
+                generic.append((p.device, baud))
+    if preferred:
+        return preferred[0]
+    if generic:
+        return generic[0]
 
     log("Stage: no Marlin device found")
     return None
