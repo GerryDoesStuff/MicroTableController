@@ -61,6 +61,8 @@ class ToupcamCamera:
         self._fps_n = 0
         self._fps_t0 = time.time()
 
+        self._is_streaming = False
+
         self._open()
 
     # ---------------- internal ----------------
@@ -147,12 +149,40 @@ class ToupcamCamera:
         except Exception:
             pass
 
+        self._is_streaming = True
+
     # ---------------- public API used by UI ----------------
 
     def name(self):
         return f"Toupcam ({self._name})"
 
-    def start_stream(self): pass
+    def start_stream(self):
+        if self._cam is None:
+            self._open()
+            return
+
+        if self._is_streaming:
+            return
+
+        try:
+            if self._buf is None:
+                self._w, self._h = self._cam.get_Size()
+                self._realloc_buffer()
+
+            self._force_rgb_or_raw()
+            try:
+                self._cam.put_AutoExpoEnable(0)
+            except Exception:
+                pass
+
+            try:
+                self._cam.StartPullModeWithCallback(self._on_event, self)
+            except TypeError:
+                self._cam.StartPullModeWithCallback(self._on_event)
+            log("Camera: pull mode started")
+            self._is_streaming = True
+        except Exception as e:
+            log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
         try:
@@ -162,6 +192,7 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: stop error: {e}")
         finally:
+            self._is_streaming = False
             try:
                 if self._cam:
                     self._cam.Close()
