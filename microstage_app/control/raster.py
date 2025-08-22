@@ -29,7 +29,7 @@ class RasterRunner:
                     self.stage.move_relative(dx=step_x)
             # move to next row
             if r < self.cfg.rows - 1:
-                self.stage.move_relative(dy=self.cfg.pitch_y_mm)
-                # if not serpentine, return X to starting edge
+                # if not serpentine, return X to starting edge before moving to next row
                 if not self.cfg.serpentine and self.cfg.cols > 1:
                     self.stage.move_relative(dx=-step_x * (self.cfg.cols - 1))
+                self.stage.move_relative(dy=self.cfg.pitch_y_mm)

@@ -15,7 +15,8 @@ class FakeCam:
         self.n = 0
     def snap(self):
         self.n += 1
-        return None
+        # return a non-None placeholder to trigger writer.save_tile
+        return object()
 
 class FakeWriter:
     def __init__(self):
@@ -32,7 +33,7 @@ def test_raster_serpentine_moves_and_tiles():
     assert writer.tiles == [(0,0),(0,1),(0,2),(1,2),(1,1),(1,0)]
     # Moves: between tile columns and to next row; number of X moves per row = cols-1; plus Y move between rows
     x_moves = [m for m in stage.moves if m[0]=='move' and m[1] != 0]
-    y_moves = [m for m in stage.moves if m[0]=='move' and m[2] == 0 and m[1]==0]
+    y_moves = [m for m in stage.moves if m[0]=='move' and m[1] == 0 and m[2] != 0]
     assert len(x_moves) == (cfg.cols-1) + (cfg.cols-1)  # two rows
     assert len(y_moves) == 1
 
@@ -47,7 +48,7 @@ def test_raster_non_serpentine_returns_to_start_edge():
     # Look for a return move of -3.0 after first row
     moves = [m for m in stage.moves if m[0]=='move']
     # Find the first Y move to separate rows
-    y_index = next(i for i,m in enumerate(moves) if m[2]==0 and m[1]==0 and m[3]==0)
+    y_index = next(i for i,m in enumerate(moves) if m[1]==0 and m[2]!=0)
     # The move right before Y should be the return move
     ret = moves[y_index-1]
     assert ret[1] == - (cfg.cols-1) * cfg.pitch_x_mm
