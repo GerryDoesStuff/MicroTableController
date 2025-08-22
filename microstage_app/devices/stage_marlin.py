@@ -83,12 +83,6 @@ def find_marlin_port(
 
     log("Stage: no Marlin device found")
     return None
-    
-    def _ts():  # tiny helper for elapsed timing
-        return time.perf_counter()
-
-    def _line_preview(s, n=120):
-        return repr(s[:n])
 
 class StageMarlin:
     def __init__(self, port, baud=BAUD, timeout=1.0):
@@ -112,24 +106,6 @@ class StageMarlin:
         line = (cmd.strip() + "\n").encode()
         log(f"TX >> {cmd}")
         self.ser.write(line)
-
-    def _read_until_ok(self, overall_timeout=3.0):
-        start = _ts()
-        buf = ""
-        while (_ts() - start) < overall_timeout:
-            b = self.ser.readline()  # ends at '\n' or times out
-            if not b:
-                continue
-            s = b.decode(errors="ignore")
-            buf += s
-            s_stripped = s.strip()
-            if s_stripped:
-                log(f"RX << {s_stripped}")
-            if "ok" in s.lower():
-                log(f"Stage: ok in {(_ts()-start):.3f}s")
-                return buf
-        log(f"Stage: timeout waiting ok after {overall_timeout:.1f}s")
-        return buf
 
     def _write(self, cmd):
         self.ser.write((cmd.strip() + '\n').encode())
