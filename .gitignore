@@ -1,2 +1,12 @@
 **/__pycache__/
 *.pyc
+
+# Diagnostics logs
+diagnostics/
+
+# Personal configuration
+profiles.yaml
+
+# Hardware libraries
+toupcam.dll
+toupcam.lib
