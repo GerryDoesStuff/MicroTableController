@@ -27,6 +27,7 @@ def main():
     try:
         import serial
         from serial.tools import list_ports
+        from ..config import EXPECTED_MACHINE_NAME, EXPECTED_MACHINE_UUID
         ports = list(list_ports.comports())
         if not ports:
             log('[INFO] No COM ports found.')
@@ -39,8 +40,18 @@ def main():
                 time.sleep(0.3)
                 resp = ser.read(4096).decode(errors='ignore')
                 ser.close()
-                if 'FIRMWARE_NAME:Marlin' in resp:
-                    log(f'[OK] Marlin detected on {p.device}')
+                low = resp.lower()
+                if 'firmware_name:marlin' in low:
+                    if EXPECTED_MACHINE_NAME and EXPECTED_MACHINE_NAME.lower() not in low:
+                        log(
+                            f"[WARN] {p.device} Marlin but machine name mismatch. Response snippet: {resp[:120]!r}"
+                        )
+                    elif EXPECTED_MACHINE_UUID and EXPECTED_MACHINE_UUID.lower() not in low:
+                        log(
+                            f"[WARN] {p.device} Marlin with matching machine name but UUID mismatch. Response snippet: {resp[:120]!r}"
+                        )
+                    else:
+                        log(f'[OK] Marlin matched on {p.device}')
                 else:
                     log(f'[INFO] No Marlin signature on {p.device}. Response snippet: {resp[:120]!r}')
             except Exception as e:

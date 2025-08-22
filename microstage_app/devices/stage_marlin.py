@@ -2,11 +2,23 @@ import time
 import serial
 from serial.tools import list_ports
 from ..utils.log import log
-import time
+from ..config import EXPECTED_MACHINE_NAME, EXPECTED_MACHINE_UUID
 
 BAUD = 250000  # fixed baud
 
-def find_marlin_port(time_wait=2.0):
+def find_marlin_port(
+    time_wait: float = 2.0,
+    machine_name: str = EXPECTED_MACHINE_NAME,
+    machine_uuid: str = EXPECTED_MACHINE_UUID,
+):
+    """Find the serial port running the expected Marlin stage.
+
+    The custom MACHINE_NAME is treated as the *required* identifier so the
+    app only connects to boards built for this project.  If ``machine_uuid`` is
+    provided it is used to disambiguate between multiple compatible boards, but
+    a UUID mismatch will not prevent a connection as long as the name matches.
+    """
+
     from serial.tools import list_ports
     import serial, time
     from ..utils.log import log
@@ -15,10 +27,15 @@ def find_marlin_port(time_wait=2.0):
     # prefer CH340/1A86:7523; push COM1 to the end
     def score(p):
         s = 0
-        if str(p.device).upper() == "COM1": s -= 100
-        if getattr(p, "vid", None) == 0x1A86 and getattr(p, "pid", None) == 0x7523: s += 100
+        if str(p.device).upper() == "COM1":
+            s -= 100
+        if getattr(p, "vid", None) == 0x1A86 and getattr(p, "pid", None) == 0x7523:
+            s += 100
         return s
+
     ports.sort(key=score, reverse=True)
+
+    fallback = None  # first port with matching name but wrong/missing UUID
 
     for p in ports:
         if not p.device:
@@ -26,18 +43,44 @@ def find_marlin_port(time_wait=2.0):
         try:
             log(f"Stage: probing {p.device} @ {BAUD}")
             with serial.Serial(p.device, baudrate=BAUD, timeout=1.0, write_timeout=1.0) as ser:
-                time.sleep(time_wait)      # Arduino auto-reset on open; give it time
+                time.sleep(time_wait)  # Arduino auto-reset on open; give it time
                 ser.reset_input_buffer()
                 ser.write(b"M115\n")
                 time.sleep(0.3)
                 resp = ser.read(4096).decode(errors="ignore")
-                if "FIRMWARE_NAME:Marlin" in resp:
-                    log(f"Stage: Marlin detected on {p.device} @ {BAUD}")
-                    return p.device
-                else:
+                low = resp.lower()
+                if "firmware_name:marlin" not in low:
                     log(f"Stage: {p.device} not Marlin (got {resp[:120]!r})")
+                    continue
+
+                if machine_name and machine_name.lower() not in low:
+                    log(
+                        f"Stage: {p.device} Marlin but machine name mismatch (got {resp[:120]!r})"
+                    )
+                    continue
+
+                if machine_uuid and machine_uuid.lower() in low:
+                    log(
+                        f"Stage: Marlin detected on {p.device} @ {BAUD} "
+                        f"(name={machine_name}, uuid={machine_uuid})"
+                    )
+                    return p.device
+
+                if fallback is None:
+                    log(
+                        f"Stage: {p.device} has matching machine name but UUID mismatch "
+                        f"(got {resp[:120]!r})"
+                    )
+                    fallback = p.device
         except Exception as e:
             log(f"Stage: probe error {p.device}@{BAUD}: {e}")
+
+    if fallback:
+        log(
+            f"Stage: using {fallback} with matching machine name despite UUID mismatch"
+        )
+        return fallback
+
     log("Stage: no Marlin device found")
     return None
     

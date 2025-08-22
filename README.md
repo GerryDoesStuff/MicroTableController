@@ -27,7 +27,7 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 > No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
 
 ## Features
-- Device discovery: auto-detects Marlin via `M115` and ToupCam via SDK enumerate.
+- Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID) and ToupCam via SDK enumerate.
 - Live preview + jog controls (XY/Z), home, go-to.
 - Capture primitives: move → settle → snap.
 - Modes: Timelapse, Raster (serpentine), Combined.
