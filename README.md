@@ -52,12 +52,16 @@ pip install -r requirements.txt
 
 3) Run diagnostics
 ```
-python -m microstage_app.tools.diagnose
+python -m microstage_app
+# or
+microstage-app.tools.diagnose
 ```
 
 4) Launch UI
 ```
 python -m microstage_app
+# or
+microstage-app
 ```
 If toupcam is missing or no devices are found, the app uses the mock camera.
 
@@ -75,9 +79,15 @@ Current tests cover:
 - The probe now returns (port, baud); the UI passes the detected baud to StageMarlin
 
 ## License
-TBD (MIT/Apache-2.0 recommended). Ensure vendor SDK licenses are followed.
+MIT. See LICENSE for details. Ensure vendor SDK licenses are followed for camera SDK files.
 
 
 ## Headless/CI notes
 - Qt on Linux headless may require QT_QPA_PLATFORM=offscreen and QT_OPENGL=software.
 - Real camera requires Toupcam SDK present; otherwise app uses MockCamera and tests still pass.
+
+
+## Install from source
+```
+pip install -e .[dev]
+```

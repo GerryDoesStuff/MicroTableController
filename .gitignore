@@ -26,3 +26,4 @@ diagnostics/
 .vscode/
 .idea/
 .DS_Store
+*.py[cod]
