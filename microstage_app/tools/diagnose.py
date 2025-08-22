@@ -88,8 +88,11 @@ def main():
                 except Exception as e:
                     log('[ERR] StartPullModeWithCallback failed:', e)
                 finally:
-                    try: cam.Close()
-                    except Exception: pass
+                    try:
+                        cam.Close()
+                    except Exception as e:
+                        log('[WARN] camera close failed:', e)
+                    cam = None
             else:
                 log('[INFO] No ToupCam devices detected by EnumV2().')
         except Exception as e:
