@@ -1,6 +1,7 @@
 PySide6>=6.7
 pyserial>=3.5
 numpy>=1.24
+# OpenCV requires system libGL.so.1; install libgl1 or use opencv-python-headless on headless systems
 opencv-python>=4.9
 tifffile>=2024.2.12
 pyyaml>=6.0
