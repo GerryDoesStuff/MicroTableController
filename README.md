@@ -36,3 +36,7 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 ```bash
 pyinstaller -F -w -n MicroStageApp microstage_app/main.py
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
