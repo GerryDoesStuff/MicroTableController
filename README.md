@@ -1,0 +1,38 @@
+# MicroStage App v0.1
+
+A Windows-first Python/Qt application that controls a **Marlin-based microscope stage** (MEGA2560+RAMPS)
+and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **autofocus**, **focus plane correction (multi-area)**,
+**raster & timelapse acquisition**, **profiles/presets**, **robust device handling**, and **scripting hooks**.
+
+## Quick start (Windows 10/11, 64‑bit)
+
+1. Install **Python 3.10+ (64‑bit)**.
+2. Create & activate a venv, then install deps:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Install the **ToupTek / Toupcam SDK for Windows**. Copy the `toupcam.dll` (x64) next to `main.py` (or put it in your PATH).
+   The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
+4. Connect your **Marlin** stage (Mega2560+RAMPS), power it on.
+5. Run the app:
+   ```bash
+   python -m microstage_app
+   ```
+
+> No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
+
+## Features
+- Device discovery: auto-detects Marlin via `M115` and ToupCam via SDK enumerate.
+- Live preview + jog controls (XY/Z), home, go-to.
+- Capture primitives: move → settle → snap.
+- Modes: Timelapse, Raster (serpentine), Combined.
+- Autofocus: Laplacian & Tenengrad metrics, coarse→fine search.
+- Focus planes: planar/quadratic fits; **multiple areas** with priority.
+- Profiles & presets: YAML, per-device and per-scan; import/export.
+- Robustness: hot-plug (to be expanded), watchdogs (to be expanded), structured logs.
+- Scripting: run custom recipes from `microstage_app/scripts/` with a safe API.
+
+## Packaging
+```bash
+pyinstaller -F -w -n MicroStageApp microstage_app/main.py
+```

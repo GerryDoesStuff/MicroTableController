@@ -1,0 +1,9 @@
+PySide6>=6.7
+pyserial>=3.5
+numpy>=1.24
+opencv-python>=4.9
+tifffile>=2024.2.12
+pyyaml>=6.0
+loguru>=0.7
+scipy>=1.11
+ome-types>=0.5

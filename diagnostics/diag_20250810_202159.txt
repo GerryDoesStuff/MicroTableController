@@ -1,0 +1,18 @@
+=== MicroStage Diagnostics === 20250810_202159
+Python: 3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)]
+[OK] module available: serial
+[WARN] module missing: toupcam | ModuleNotFoundError("No module named 'toupcam'")
+[OK] module available: numpy
+[OK] module available: PySide6
+[OK] module available: opencv-python
+
+-- Serial / Marlin discovery --
+Port: COM1 | VID:PID=None:None | desc="Communications Port (COM1)" | hwid="ACPI\PNP0501\0"
+[INFO] No Marlin signature on COM1. Response snippet: ''
+Port: COM4 | VID:PID=6790:29987 | desc="USB-SERIAL CH340 (COM4)" | hwid="USB VID:PID=1A86:7523 SER= LOCATION=1-4"
+[INFO] No Marlin signature on COM4. Response snippet: 'F0mXHI;\x17BpGF"J{I\x1c>tyLEX\x0bMzM>vBf\x18MQBp|HN\x13n\x05P:M\'%\x18\x07*&E\x03\x0bMzC:7d&pp\x16e8&Ypt\x18\x13h\x04\x17z@NaFP"Qp|\x10\x14aM`\x17z"]\x1fX\x13>\x17T.l\x1b\x1e\x07JJ\x00\x151\x07zړH\x13X6vBB'
+
+-- Camera / ToupCam SDK --
+[WARN] toupcam module not importable (SDK/DLL missing?): No module named 'toupcam'
+
+Done. Log saved at: C:\Users\HS00019\OneDrive\Documents\Apps\microstage-app-v0.1_20250810_151933\diagnostics\diag_20250810_202159.txt
