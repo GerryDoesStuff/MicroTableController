@@ -78,7 +78,9 @@ QUICK START
 4) Diagnostics
    python -m microstage_app.tools.diagnose
 
-Ports & baud: We probe for Marlin by opening the COM port at 250000 and sending M115 to find 'FIRMWARE_NAME:Marlin'. If that fails, try 115200.
+Ports & baud: We probe for Marlin by opening the COM port at 250000 and sending M115 to find
+    'FIRMWARE_NAME:Marlin' and the expected MACHINE_NAME. If a MACHINE_UUID is provided, it is used
+    to choose between multiple compatible boards. If that fails, try 115200.
 
 --------------------------------------------------------------------------
 USING THE APP
@@ -129,7 +131,7 @@ THREADING & SAFETY
 --------------------------------------------------------------------------
 MARLIN PROTOCOL QUICK REF
 --------------------------------------------------------------------------
-- Probe: M115 -> parse 'FIRMWARE_NAME:Marlin' to confirm device.
+- Probe: M115 -> parse 'FIRMWARE_NAME:Marlin' and custom MACHINE_NAME to confirm device (UUID optional).
 - Home: G28 (all axes by default).
 - Jog (relative): G91 -> G1 X/Y/Z... F... -> G90 (feed in mm/min).
 - Wait: M400 before capture/critical sequencing.
