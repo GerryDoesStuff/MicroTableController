@@ -12,6 +12,10 @@
 
 6. ✅ Update README.txt to reflect accurate state and usage
 
-7. 🔄 Provide improvement recommendations
+7. ✅ Provide improvement recommendations
+
+8. ✅ Hygiene: untrack __pycache__ and pytest cache artifacts and commit
+Executed git rm --cached and committed removal. .gitignore already covers these.
+9. ✅ Ensure camera import fallback handles vendored wrapper and satisfies tests
 
 
