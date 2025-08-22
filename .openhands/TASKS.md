@@ -8,10 +8,10 @@
 
 4. ✅ Identify mismatches or missing items; propose minimal fixes/additions
 
-5. 🔄 Implement fixes/additions in repo (code/config/docs)
+5. ✅ Implement fixes/additions in repo (code/config/docs)
 
-6. ⏳ Update README.txt to reflect accurate state and usage
+6. ✅ Update README.txt to reflect accurate state and usage
 
-7. ⏳ Provide improvement recommendations
+7. 🔄 Provide improvement recommendations
 
 

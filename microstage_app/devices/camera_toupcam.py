@@ -1,4 +1,5 @@
 from __future__ import annotations
+import importlib
 import threading
 import time
 import numpy as np
@@ -6,12 +7,16 @@ from ..utils.log import log
 
 
 def _import_toupcam():
+    # Try system toupcam module first
     try:
-        import toupcam as tp
-        return tp
-    except Exception as e:
-        log(f"Camera: toupcam import failed: {e}")
-        raise
+        return importlib.import_module("toupcam")
+    except Exception as e1:
+        # Fallback: vendored wrapper inside this package (if provided)
+        try:
+            return importlib.import_module("microstage_app.toupcam")
+        except Exception as e2:
+            log(f"Camera: toupcam import failed: {e1} / {e2}")
+            raise
 
 
 def create_camera():
