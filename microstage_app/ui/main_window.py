@@ -288,10 +288,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # STAGE async
         def connect_stage():
-            port = find_marlin_port()
-            if not port:
+            res = find_marlin_port()
+            if not res:
                 return None
-            return StageMarlin(port)
+            if isinstance(res, tuple):
+                port, baud = res
+            else:
+                port, baud = res, 250000
+            return StageMarlin(port, baud=baud)
 
         self._conn_thread, self._conn_worker = run_async(connect_stage)
 
