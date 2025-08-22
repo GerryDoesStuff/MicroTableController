@@ -63,7 +63,7 @@ If toupcam is missing or no devices are found, the app uses the mock camera.
 
 ## Tests
 ```
-pytest -q
+pytest -q microstage_app/tools/tests
 ```
 Current tests cover:
 - Camera fallback when toupcam module is unavailable
@@ -76,3 +76,8 @@ Current tests cover:
 
 ## License
 TBD (MIT/Apache-2.0 recommended). Ensure vendor SDK licenses are followed.
+
+
+## Headless/CI notes
+- Qt on Linux headless may require QT_QPA_PLATFORM=offscreen and QT_OPENGL=software.
+- Real camera requires Toupcam SDK present; otherwise app uses MockCamera and tests still pass.
