@@ -19,10 +19,6 @@ def find_marlin_port(
     a UUID mismatch will not prevent a connection as long as the name matches.
     """
 
-    from serial.tools import list_ports
-    import serial, time
-    from ..utils.log import log
-
     ports = list(list_ports.comports())
     # prefer CH340/1A86:7523; push COM1 to the end
     def score(p):
@@ -124,7 +120,13 @@ class StageMarlin:
         self._send_log(cmd)
         return self._read_until_ok() if wait_ok else ""
 
-    def home_xyz(self):     return self.send("G28")
+    def home_all(self):
+        """Home Z first, then X and Y to avoid crashing into optics."""
+        self.send("G28 Z")
+        return self.send("G28 X Y")
+    def home_x(self):       return self.send("G28 X")
+    def home_y(self):       return self.send("G28 Y")
+    def home_z(self):       return self.send("G28 Z")
     def absolute_mode(self):return self.send("G90", wait_ok=True)
     def relative_mode(self):return self.send("G91", wait_ok=True)
 
@@ -158,6 +160,35 @@ class StageMarlin:
             elif token.startswith("MACHINE_UUID:"):
                 uuid = token.split(":", 1)[1]
         return {"name": name, "uuid": uuid, "raw": resp}
+
+    def get_bounds(self):
+        resp = self.send("M211")
+        xmin = ymin = zmin = xmax = ymax = zmax = None
+        for line in resp.splitlines():
+            line = line.strip()
+            if line.lower().startswith("min"):
+                parts = line.split()
+                for p in parts:
+                    if p.startswith("X:"):
+                        xmin = float(p[2:])
+                    elif p.startswith("Y:"):
+                        ymin = float(p[2:])
+                    elif p.startswith("Z:"):
+                        zmin = float(p[2:])
+            elif line.lower().startswith("max"):
+                parts = line.split()
+                for p in parts:
+                    if p.startswith("X:"):
+                        xmax = float(p[2:])
+                    elif p.startswith("Y:"):
+                        ymax = float(p[2:])
+                    elif p.startswith("Z:"):
+                        zmax = float(p[2:])
+        return {
+            "xmin": xmin, "xmax": xmax,
+            "ymin": ymin, "ymax": ymax,
+            "zmin": zmin, "zmax": zmax,
+        }
 
     def get_position(self):
         resp = self.send("M114")
