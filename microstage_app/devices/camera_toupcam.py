@@ -49,6 +49,9 @@ class ToupcamCamera:
         self._stride = 0
         self._bits = 24       # 24 = RGB24, 8 = RAW8/mono
         self._raw_mode = False
+        # Original sensor dimensions (without ROI) used for ROI coordinates
+        self._sensor_w = 0
+        self._sensor_h = 0
 
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
@@ -74,6 +77,17 @@ class ToupcamCamera:
         self._buf = bytes(self._stride * self._h)
         log(f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B")
 
+    def _update_dimensions(self):
+        """Refresh width/height using final output size after ROI/resolution."""
+        try:
+            if hasattr(self._cam, "get_FinalSize"):
+                self._w, self._h = self._cam.get_FinalSize()
+            else:
+                self._w, self._h = self._cam.get_Size()
+        except Exception:
+            self._w, self._h = self._cam.get_Size()
+        self._realloc_buffer()
+
     def _force_rgb_or_raw(self):
         # 0 = RGB, 1 = RAW (per SDK); not all models implement this option
         try:
@@ -92,8 +106,12 @@ class ToupcamCamera:
         self._raw_mode = False
         self._bits = 24
         self._force_rgb_or_raw()
-        self._w, self._h = self._cam.get_Size()
-        self._realloc_buffer()
+        # Record the full sensor dimensions for ROI calculations
+        try:
+            self._sensor_w, self._sensor_h = self._cam.get_Size()
+        except Exception:
+            self._sensor_w = self._sensor_h = 0
+        self._update_dimensions()
 
         def _on_event(evt, ctx=None):
             try:
@@ -121,13 +139,16 @@ class ToupcamCamera:
                 arr = np.frombuffer(mv, dtype=np.uint8).reshape(self._h, self._stride)
                 if self._bits == 24:
                     bgr = arr[:, : self._w * 3].reshape(self._h, self._w, 3)
-                    rgb = bgr[..., ::-1].copy()
+                    img = bgr[..., ::-1].copy()
                 else:  # 8-bit RAW/mono preview
-                    mono = arr[:, : self._w].reshape(self._h, self._w)
-                    rgb = np.repeat(mono[..., None], 3, axis=2).copy()
+                    # Keep the grayscale frame instead of expanding to RGB.
+                    # Converting to 3-channel was creating extra copies that
+                    # slowed down the raw path and negated its bandwidth
+                    # advantage.
+                    img = arr[:, : self._w].reshape(self._h, self._w).copy()
 
                 with self._lock:
-                    self._last = rgb
+                    self._last = img
 
                 if not self._first_logged:
                     log(f"Camera: first frame {self._w}x{self._h}")
@@ -166,8 +187,7 @@ class ToupcamCamera:
 
         try:
             if self._buf is None:
-                self._w, self._h = self._cam.get_Size()
-                self._realloc_buffer()
+                self._update_dimensions()
 
             self._force_rgb_or_raw()
             try:
@@ -232,30 +252,64 @@ class ToupcamCamera:
     def set_resolution_index(self, idx: int):
         try:
             self._cam.put_eSize(int(idx))
-            self._w, self._h = self._cam.get_Size()
-            self._realloc_buffer()
+            # Resolution change resets the full sensor size
+            try:
+                self._sensor_w, self._sensor_h = self._cam.get_Size()
+            except Exception:
+                pass
+            self._update_dimensions()
             log(f"Camera: resolution index={idx} -> {self._w}x{self._h}")
         except Exception as e:
             log(f"Camera: set_resolution_index failed: {e}")
 
     def set_center_roi(self, w: int, h: int):
         """Center a ROI via put_Roi if supported; otherwise try put_Size."""
-        w = max(16, int(w)); h = max(16, int(h))
         try:
             if hasattr(self._cam, "put_Roi"):
-                # center in current sensor size
-                cw, ch = self._cam.get_Size()
-                x = max(0, (cw - w) // 2); y = max(0, (ch - h) // 2)
-                self._cam.put_Roi(x, y, w, h)
-                self._w, self._h = self._cam.get_Size()
-                self._realloc_buffer()
-                log(f"Camera: ROI {x},{y},{w},{h}")
+                was_streaming = self._is_streaming
+                if was_streaming:
+                    try:
+                        self._cam.Stop()
+                    except Exception:
+                        pass
+                    self._is_streaming = False
+
+                if w <= 0 or h <= 0:
+                    # clear ROI and refresh full sensor size
+                    self._cam.put_Roi(0, 0, 0, 0)
+                    try:
+                        self._sensor_w, self._sensor_h = self._cam.get_Size()
+                    except Exception:
+                        pass
+                    log("Camera: ROI cleared")
+                else:
+                    w = max(16, min(int(w), self._sensor_w))
+                    h = max(16, min(int(h), self._sensor_h))
+                    # center in original sensor coordinates
+                    x = max(0, (self._sensor_w - w) // 2)
+                    y = max(0, (self._sensor_h - h) // 2)
+                    self._cam.put_Roi(x, y, w, h)
+                    log(f"Camera: ROI {x},{y},{w},{h}")
+
+                self._update_dimensions()
+
+                if was_streaming:
+                    try:
+                        self._cam.StartPullModeWithCallback(self._on_event, self)
+                    except TypeError:
+                        self._cam.StartPullModeWithCallback(self._on_event)
+                    self._is_streaming = True
+
             else:
                 # fall back to put_Size if exposed by wrapper
                 if hasattr(self._cam, "put_Size"):
+                    w = max(16, int(w)); h = max(16, int(h))
                     self._cam.put_Size(w, h)
-                    self._w, self._h = self._cam.get_Size()
-                    self._realloc_buffer()
+                    try:
+                        self._sensor_w, self._sensor_h = self._cam.get_Size()
+                    except Exception:
+                        pass
+                    self._update_dimensions()
                     log(f"Camera: Size {w}x{h}")
                 else:
                     log("Camera: ROI/Size not supported by this wrapper")
@@ -268,8 +322,8 @@ class ToupcamCamera:
         try:
             self._force_rgb_or_raw()
         finally:
-            # size unchanged, but stride changes with bits
-            self._realloc_buffer()
+            # size unchanged, but stride may change with bits
+            self._update_dimensions()
             log(f"Camera: RAW8 fast mono={'ON' if self._raw_mode else 'OFF'}")
 
     def set_speed_level(self, level: int):
@@ -287,13 +341,18 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: set_speed_level failed: {e}")
 
+    def set_exposure_ms(self, ms: float, auto: bool = False):
+        """Set exposure time in milliseconds to match the UI units."""
+        us = int(ms * 1000.0)
+        self.set_exposure_us(us, auto)
+
     def set_exposure_us(self, us: int, auto: bool = False):
         try:
             if hasattr(self._cam, "put_AutoExpoEnable"):
                 self._cam.put_AutoExpoEnable(1 if auto else 0)
             if not auto:
                 self._cam.put_ExpoTime(int(us))
-            log(f"Camera: exposure {'auto' if auto else f'{us} us'}")
+            log(f"Camera: exposure {'auto' if auto else f'{us/1000.0:.3f} ms'}")
         except Exception as e:
             log(f"Camera: set_exposure_us failed: {e}")
 
