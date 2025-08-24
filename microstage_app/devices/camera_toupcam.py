@@ -2,6 +2,7 @@ from __future__ import annotations
 import importlib
 import threading
 import time
+import ctypes
 import numpy as np
 from ..utils.log import log
 
@@ -46,6 +47,7 @@ class ToupcamCamera:
         self._cam = None
         # bytearray buffer for PullImageV2; reshaped view cached in _arr
         self._buf = None
+        self._buf_ptr = None
         self._arr = None
         self._w = self._h = 0
         self._stride = 0
@@ -83,6 +85,7 @@ class ToupcamCamera:
         self._stride = rowbytes
         # use mutable bytearray so the SDK can fill in-place and cache a NumPy view
         self._buf = bytearray(self._stride * self._h)
+        self._buf_ptr = (ctypes.c_char * len(self._buf)).from_buffer(self._buf)
         self._arr = np.frombuffer(self._buf, dtype=np.uint8).reshape(self._h, self._stride)
         log(
             f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B"
@@ -184,11 +187,11 @@ class ToupcamCamera:
                 self._event_count += 1
                 if (self._event_count % max(1, self._display_every)) != 0:
                     # drain but skip UI update to reduce CPU load
-                    self._cam.PullImageV2(self._buf, self._bits, None)
+                    self._cam.PullImageV2(self._buf_ptr, self._bits, None)
                     return
 
                 t0 = time.perf_counter()
-                self._cam.PullImageV2(self._buf, self._bits, None)
+                self._cam.PullImageV2(self._buf_ptr, self._bits, None)
                 t1 = time.perf_counter()
 
                 # Update FPS
@@ -290,6 +293,7 @@ class ToupcamCamera:
             finally:
                 self._cam = None
                 self._buf = None
+                self._buf_ptr = None
 
     def get_latest_frame(self):
         with self._lock:
