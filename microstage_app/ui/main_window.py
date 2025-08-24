@@ -492,8 +492,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_exposure(self):
         if not self.camera: return
         auto = self.autoexp_chk.isChecked()
-        us = int(self.exp_spin.value() * 1000.0)
-        self.camera.set_exposure_us(us, auto)
+        ms = self.exp_spin.value()
+        self.camera.set_exposure_ms(ms, auto)
 
     def _apply_gain(self):
         if not self.camera: return
