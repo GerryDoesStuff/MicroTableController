@@ -71,6 +71,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pos_timer = QtCore.QTimer(self)
         self.pos_timer.setInterval(250)
         self.pos_timer.timeout.connect(self._poll_stage_position)
+        # jog hold / repeat
+        self._jog_hold_timer = QtCore.QTimer(self)
+        self._jog_hold_timer.setSingleShot(True)
+        self._jog_hold_timer.timeout.connect(self._start_jog_repeat)
+        self._jog_timer = QtCore.QTimer(self)
+        self._jog_timer.timeout.connect(self._repeat_jog)
+        self._jog_dir = None
 
         # UI
         self._build_ui()
@@ -283,12 +290,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
         self.btn_home_y.clicked.connect(lambda: self._home_axis('y'))
         self.btn_home_z.clicked.connect(lambda: self._home_axis('z'))
-        self.btn_xm.clicked.connect(lambda: self._jog(dx=-self.step_spin.value()))
-        self.btn_xp.clicked.connect(lambda: self._jog(dx=+self.step_spin.value()))
-        self.btn_ym.clicked.connect(lambda: self._jog(dy=-self.step_spin.value()))
-        self.btn_yp.clicked.connect(lambda: self._jog(dy=+self.step_spin.value()))
-        self.btn_zm.clicked.connect(lambda: self._jog(dz=-self.step_spin.value()))
-        self.btn_zp.clicked.connect(lambda: self._jog(dz=+self.step_spin.value()))
+        self._setup_jog_button(self.btn_xm, sx=-1)
+        self._setup_jog_button(self.btn_xp, sx=1)
+        self._setup_jog_button(self.btn_ym, sy=-1)
+        self._setup_jog_button(self.btn_yp, sy=1)
+        self._setup_jog_button(self.btn_zm, sz=-1)
+        self._setup_jog_button(self.btn_zp, sz=1)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
@@ -308,6 +315,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
+
+    def _setup_jog_button(self, btn, sx=0, sy=0, sz=0):
+        def _pressed():
+            step = self.step_spin.value()
+            self._jog(step * sx, step * sy, step * sz)
+            self._jog_dir = (sx, sy, sz)
+            self._jog_hold_timer.start(1000)
+
+        def _released():
+            self._jog_hold_timer.stop()
+            self._jog_timer.stop()
+            self._jog_dir = None
+
+        btn.pressed.connect(_pressed)
+        btn.released.connect(_released)
+
+    def _start_jog_repeat(self):
+        if self._jog_dir:
+            self._jog_timer.start(100)
+
+    def _repeat_jog(self):
+        if not self._jog_dir:
+            return
+        sx, sy, sz = self._jog_dir
+        step = self.step_spin.value()
+        self._jog(step * sx, step * sy, step * sz)
 
     @QtCore.Slot(str)
     def _append_log(self, line: str):
