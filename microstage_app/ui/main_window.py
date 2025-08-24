@@ -13,7 +13,23 @@ from ..utils.log import LOG, log
 from ..utils.serial_worker import SerialWorker
 from ..utils.workers import run_async
 
+from pathlib import Path
+import re
 import time
+
+
+def _load_feed_limits():
+    cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
+    try:
+        text = cfg.read_text()
+        m = re.search(r"DEFAULT_MAX_FEEDRATE\s*{([^}]+)}", text)
+        if not m:
+            return None
+        vals = [float(v.strip()) for v in m.group(1).split(',')[:3]]
+        return [v * 60.0 for v in vals]  # mm/min
+    except Exception as e:
+        LOG.warning("Failed to load feed limits: %s", e)
+        return None
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -51,6 +67,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fps_timer = QtCore.QTimer(self)
         self.fps_timer.setInterval(500)             # update FPS label
         self.fps_timer.timeout.connect(self._update_fps)
+        self.pos_timer = QtCore.QTimer(self)
+        self.pos_timer.setInterval(250)
+        self.pos_timer.timeout.connect(self._poll_stage_position)
 
         # UI
         self._build_ui()
@@ -72,13 +91,22 @@ class MainWindow(QtWidgets.QMainWindow):
         leftw = QtWidgets.QWidget()
         left = QtWidgets.QVBoxLayout(leftw)
         self.stage_status = QtWidgets.QLabel("Stage: —")
+        self.stage_pos = QtWidgets.QLabel("Pos: —")
+        self.btn_stage_connect = QtWidgets.QPushButton("Connect Stage")
+        self.btn_stage_disconnect = QtWidgets.QPushButton("Disconnect Stage")
         self.cam_status = QtWidgets.QLabel("Camera: —")
-        self.btn_connect = QtWidgets.QPushButton("Connect Devices")
+        self.btn_cam_connect = QtWidgets.QPushButton("Connect Camera")
+        self.btn_cam_disconnect = QtWidgets.QPushButton("Disconnect Camera")
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         left.addWidget(self.stage_status)
+        left.addWidget(self.stage_pos)
+        left.addWidget(self.btn_stage_connect)
+        left.addWidget(self.btn_stage_disconnect)
+        left.addSpacing(8)
         left.addWidget(self.cam_status)
-        left.addWidget(self.btn_connect)
+        left.addWidget(self.btn_cam_connect)
+        left.addWidget(self.btn_cam_disconnect)
         left.addSpacing(8)
         left.addWidget(QtWidgets.QLabel("Profile:"))
         left.addWidget(self.profile_combo)
@@ -111,8 +139,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.step_spin.setRange(0.001, 1000.0)  # allow big moves
         self.step_spin.setValue(0.100)
         self.feed_spin = QtWidgets.QDoubleSpinBox()
-        self.feed_spin.setRange(0.1, 500.0)  # mm/s -> we convert to mm/min when sending
-        self.feed_spin.setValue(5.0)
+        limits = _load_feed_limits()
+        max_feed = (min(limits) / 60.0) if limits else 1.0
+        self.feed_spin.setRange(0.01, max_feed)
+        self.feed_spin.setValue(20.0 / 60.0)
+        self.feed_limits = QtWidgets.QLabel()
+        if limits:
+            self.feed_limits.setText(
+                f"Limits: X {limits[0]:.0f} / Y {limits[1]:.0f} / Z {limits[2]:.0f} mm/min"
+            )
         self.btn_home = QtWidgets.QPushButton("Home XYZ")
         self.btn_xm = QtWidgets.QPushButton("X-")
         self.btn_xp = QtWidgets.QPushButton("X+")
@@ -124,13 +159,14 @@ class MainWindow(QtWidgets.QMainWindow):
         j.addWidget(self.step_spin, 0, 1)
         j.addWidget(QtWidgets.QLabel("Feed (mm/s):"), 1, 0)
         j.addWidget(self.feed_spin, 1, 1)
-        j.addWidget(self.btn_home, 2, 0, 1, 2)
-        j.addWidget(self.btn_xm, 3, 0)
-        j.addWidget(self.btn_xp, 3, 1)
-        j.addWidget(self.btn_ym, 4, 0)
-        j.addWidget(self.btn_yp, 4, 1)
-        j.addWidget(self.btn_zm, 5, 0)
-        j.addWidget(self.btn_zp, 5, 1)
+        j.addWidget(self.feed_limits, 2, 0, 1, 2)
+        j.addWidget(self.btn_home, 3, 0, 1, 2)
+        j.addWidget(self.btn_xm, 4, 0)
+        j.addWidget(self.btn_xp, 4, 1)
+        j.addWidget(self.btn_ym, 5, 0)
+        j.addWidget(self.btn_yp, 5, 1)
+        j.addWidget(self.btn_zm, 6, 0)
+        j.addWidget(self.btn_zp, 6, 1)
         rightw.addTab(jog, "Jog")
 
         # ---- Camera tab (performance controls)
@@ -227,9 +263,14 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(vsplit)
 
         self._reload_profiles()
+        self._update_stage_buttons()
+        self._update_cam_buttons()
 
     def _connect_signals(self):
-        self.btn_connect.clicked.connect(self._auto_connect_async)
+        self.btn_stage_connect.clicked.connect(self._connect_stage_async)
+        self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
+        self.btn_cam_connect.clicked.connect(self._connect_camera)
+        self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.btn_home.clicked.connect(self._home)
         self.btn_xm.clicked.connect(lambda: self._jog(dx=-self.step_spin.value()))
@@ -265,28 +306,62 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------- CONNECT ---------------------------
 
     def _auto_connect_async(self):
-        # CAMERA (quick); don’t reopen if we already have one
-        if self.camera is None:
-            try:
-                cam = create_camera()
-                self.camera = cam
-                self.cam_status.setText(f"Camera: {self.camera.name()}")
-                self.camera.start_stream()
-                self._populate_resolutions()
-                self.preview_timer.start()
-                self.fps_timer.start()
-                log("UI: camera connected")
-            except Exception as e:
-                log(f"UI: camera connect failed: {e}")
-        else:
-            log("UI: camera already connected; skip re-open")
+        self._connect_camera()
+        self._connect_stage_async()
 
-        # If stage already running, don't re-probe
+    def _attach_stage_worker(self):
+        if not self.stage or self.stage_thread:
+            return
+        self.stage_thread = QtCore.QThread(self)
+        self.stage_worker = SerialWorker(self.stage)
+        self.stage_worker.moveToThread(self.stage_thread)
+        self.stage_worker.result.connect(self._dispatch_stage_result)
+        self.stage_thread.started.connect(self.stage_worker.loop)
+        self.stage_thread.start()
+        self.pos_timer.start()
+
+    def _dispatch_stage_result(self, cb, res):
+        if cb:
+            cb(res)
+
+    # --------------------------- CONNECT/DISCONNECT ---------------------------
+
+    def _connect_camera(self):
+        if self.camera is not None:
+            log("UI: camera already connected; skip re-open")
+            return
+        try:
+            cam = create_camera()
+            self.camera = cam
+            self.cam_status.setText(f"Camera: {self.camera.name()}")
+            self.camera.start_stream()
+            self._populate_resolutions()
+            self.preview_timer.start()
+            self.fps_timer.start()
+            log("UI: camera connected")
+        except Exception as e:
+            log(f"UI: camera connect failed: {e}")
+        self._update_cam_buttons()
+
+    def _disconnect_camera(self):
+        if not self.camera:
+            return
+        try:
+            self.camera.stop_stream()
+        except Exception:
+            pass
+        self.camera = None
+        self.cam_status.setText("Camera: —")
+        self.preview_timer.stop()
+        self.fps_timer.stop()
+        self.live_label.clear()
+        self._update_cam_buttons()
+
+    def _connect_stage_async(self):
         if self.stage is not None:
             log("UI: stage already connected; skip re-probe")
             return
 
-        # STAGE async
         def connect_stage():
             port = find_marlin_port()
             if not port:
@@ -296,29 +371,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self._conn_thread, self._conn_worker = run_async(connect_stage)
 
         def _done(stage, err):
-            if err:
-                log(f"UI: stage connect failed: {err}")
+            if err or not stage:
+                if err:
+                    log(f"UI: stage connect failed: {err}")
+                else:
+                    log("UI: stage not found")
                 self.stage_status.setText("Stage: not found")
+                self._update_stage_buttons()
                 return
-            if stage:
-                self.stage = stage
-                self.stage_status.setText("Stage: connected")
-                log("UI: stage connected (async)")
-                self._attach_stage_worker()
-            else:
-                self.stage_status.setText("Stage: not found")
-                log("UI: stage not found")
+            self.stage = stage
+            info = self.stage.get_info()
+            name = info.get("name") or "connected"
+            uuid = info.get("uuid")
+            text = f"Stage: {name}"
+            if uuid:
+                text += f" ({uuid})"
+            self.stage_status.setText(text)
+            log("UI: stage connected (async)")
+            self._attach_stage_worker()
+            self._update_stage_buttons()
 
         self._conn_worker.finished.connect(_done)
 
-    def _attach_stage_worker(self):
-        if not self.stage or self.stage_thread:
+    def _disconnect_stage(self):
+        if self.stage_worker:
+            self.stage_worker.stop()
+        if self.stage_thread:
+            self.stage_thread.quit()
+            self.stage_thread.wait(2000)
+            self.stage_thread = None
+            self.stage_worker = None
+        if self.stage:
+            try:
+                self.stage.ser.close()
+            except Exception:
+                pass
+            self.stage = None
+        self.stage_status.setText("Stage: —")
+        self.stage_pos.setText("Pos: —")
+        self.pos_timer.stop()
+        self._update_stage_buttons()
+
+    def _update_stage_buttons(self):
+        connected = self.stage is not None
+        self.btn_stage_connect.setEnabled(not connected)
+        self.btn_stage_disconnect.setEnabled(connected)
+
+    def _update_cam_buttons(self):
+        connected = self.camera is not None
+        self.btn_cam_connect.setEnabled(not connected)
+        self.btn_cam_disconnect.setEnabled(connected)
+
+    def _poll_stage_position(self):
+        if not self.stage_worker:
             return
-        self.stage_thread = QtCore.QThread(self)
-        self.stage_worker = SerialWorker(self.stage)
-        self.stage_worker.moveToThread(self.stage_thread)
-        self.stage_thread.started.connect(self.stage_worker.loop)
-        self.stage_thread.start()
+        self.stage_worker.enqueue(self.stage.get_position, callback=self._on_stage_position)
+
+    def _on_stage_position(self, pos):
+        if not pos:
+            return
+        x, y, z = pos
+        if x is None or y is None or z is None:
+            return
+        self.stage_pos.setText(f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}")
 
     # --------------------------- PREVIEW ---------------------------
 
