@@ -373,3 +373,75 @@ class ToupcamCamera:
             log(f"Camera: gain {again}")
         except Exception as e:
             log(f"Camera: set_gain failed: {e}")
+
+    # ---- image controls ----
+
+    def get_brightness(self) -> int:
+        try:
+            return int(self._cam.get_Brightness())
+        except Exception as e:
+            log(f"Camera: get_brightness failed: {e}")
+            return 0
+
+    def set_brightness(self, val: int):
+        try:
+            self._cam.put_Brightness(int(val))
+            log(f"Camera: brightness {val}")
+        except Exception as e:
+            log(f"Camera: set_brightness failed: {e}")
+
+    def get_contrast(self) -> int:
+        try:
+            return int(self._cam.get_Contrast())
+        except Exception as e:
+            log(f"Camera: get_contrast failed: {e}")
+            return 0
+
+    def set_contrast(self, val: int):
+        try:
+            self._cam.put_Contrast(int(val))
+            log(f"Camera: contrast {val}")
+        except Exception as e:
+            log(f"Camera: set_contrast failed: {e}")
+
+    def get_saturation(self) -> int:
+        try:
+            return int(self._cam.get_Saturation())
+        except Exception as e:
+            log(f"Camera: get_saturation failed: {e}")
+            return 0
+
+    def set_saturation(self, val: int):
+        try:
+            self._cam.put_Saturation(int(val))
+            log(f"Camera: saturation {val}")
+        except Exception as e:
+            log(f"Camera: set_saturation failed: {e}")
+
+    def get_hue(self) -> int:
+        try:
+            return int(self._cam.get_Hue())
+        except Exception as e:
+            log(f"Camera: get_hue failed: {e}")
+            return 0
+
+    def set_hue(self, val: int):
+        try:
+            self._cam.put_Hue(int(val))
+            log(f"Camera: hue {val}")
+        except Exception as e:
+            log(f"Camera: set_hue failed: {e}")
+
+    def get_gamma(self) -> int:
+        try:
+            return int(self._cam.get_Gamma())
+        except Exception as e:
+            log(f"Camera: get_gamma failed: {e}")
+            return 0
+
+    def set_gamma(self, val: int):
+        try:
+            self._cam.put_Gamma(int(val))
+            log(f"Camera: gamma {val}")
+        except Exception as e:
+            log(f"Camera: set_gamma failed: {e}")
