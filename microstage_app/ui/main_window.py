@@ -458,27 +458,37 @@ class MainWindow(QtWidgets.QMainWindow):
                     log("UI: stage not found")
                 self.stage_status.setText("Stage: not found")
                 self._update_stage_buttons()
-                return
-            self.stage = stage
-            info = self.stage.get_info()
-            name = info.get("name") or "connected"
-            uuid = info.get("uuid")
-            text = f"Stage: {name}"
-            if uuid:
-                text += f" ({uuid})"
-            self.stage_status.setText(text)
-            try:
-                self.stage_bounds = self.stage.get_bounds()
-            except Exception as e:
-                log(f"Stage: failed to get bounds: {e}")
-                self.stage_bounds = None
-            log("UI: stage connected (async)")
-            self._attach_stage_worker()
-            self._update_stage_buttons()
+            else:
+                self.stage = stage
+                info = self.stage.get_info()
+                name = info.get("name") or "connected"
+                uuid = info.get("uuid")
+                text = f"Stage: {name}"
+                if uuid:
+                    text += f" ({uuid})"
+                self.stage_status.setText(text)
+                try:
+                    self.stage_bounds = self.stage.get_bounds()
+                except Exception as e:
+                    log(f"Stage: failed to get bounds: {e}")
+                    self.stage_bounds = None
+                log("UI: stage connected (async)")
+                self._attach_stage_worker()
+                self._update_stage_buttons()
+            thread = self._conn_thread
+            self._conn_thread = None
+            self._conn_worker = None
+            if thread:
+                thread.wait()
 
         self._conn_worker.finished.connect(_done)
 
     def _disconnect_stage(self):
+        if self._conn_thread:
+            self._conn_thread.quit()
+            self._conn_thread.wait()
+            self._conn_thread = None
+            self._conn_worker = None
         if self.stage_worker:
             self.stage_worker.stop()
         if self.stage_thread:
