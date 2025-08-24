@@ -264,6 +264,7 @@ class ToupcamCamera:
 
     def set_center_roi(self, w: int, h: int):
         """Center a ROI via put_Roi if supported; otherwise try put_Size."""
+        was_streaming = False
         try:
             if hasattr(self._cam, "put_Roi"):
                 was_streaming = self._is_streaming
@@ -285,36 +286,46 @@ class ToupcamCamera:
                 else:
                     w = max(16, min(int(w), self._sensor_w))
                     h = max(16, min(int(h), self._sensor_h))
+                    # enforce even alignment to avoid sensor stride issues
+                    w &= ~1
+                    h &= ~1
                     # center in original sensor coordinates
                     x = max(0, (self._sensor_w - w) // 2)
                     y = max(0, (self._sensor_h - h) // 2)
+                    x &= ~1
+                    y &= ~1
                     self._cam.put_Roi(x, y, w, h)
                     log(f"Camera: ROI {x},{y},{w},{h}")
-
-                self._update_dimensions()
-
-                if was_streaming:
-                    try:
-                        self._cam.StartPullModeWithCallback(self._on_event, self)
-                    except TypeError:
-                        self._cam.StartPullModeWithCallback(self._on_event)
-                    self._is_streaming = True
 
             else:
                 # fall back to put_Size if exposed by wrapper
                 if hasattr(self._cam, "put_Size"):
-                    w = max(16, int(w)); h = max(16, int(h))
+                    w = max(16, int(w))
+                    h = max(16, int(h))
+                    w &= ~1
+                    h &= ~1
                     self._cam.put_Size(w, h)
                     try:
                         self._sensor_w, self._sensor_h = self._cam.get_Size()
                     except Exception:
                         pass
-                    self._update_dimensions()
                     log(f"Camera: Size {w}x{h}")
                 else:
                     log("Camera: ROI/Size not supported by this wrapper")
         except Exception as e:
             log(f"Camera: set_center_roi failed: {e}")
+        finally:
+            # Always refresh dimensions so buffer/stride match the new ROI
+            try:
+                self._update_dimensions()
+            except Exception:
+                pass
+            if was_streaming and not self._is_streaming:
+                try:
+                    self._cam.StartPullModeWithCallback(self._on_event, self)
+                except TypeError:
+                    self._cam.StartPullModeWithCallback(self._on_event)
+                self._is_streaming = True
 
     def set_raw_fast_mono(self, enable: bool):
         self._raw_mode = bool(enable)
