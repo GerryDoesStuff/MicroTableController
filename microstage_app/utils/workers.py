@@ -19,5 +19,8 @@ def run_async(fn, *args, **kwargs):
     worker = FuncWorker(fn, *args, **kwargs)
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
+    worker.finished.connect(thread.quit)
+    thread.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
     thread.start()
     return thread, worker
