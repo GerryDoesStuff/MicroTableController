@@ -76,8 +76,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._jog_hold_timer = QtCore.QTimer(self)
         self._jog_hold_timer.setSingleShot(True)
         self._jog_hold_timer.timeout.connect(self._start_jog_repeat)
-        self._jog_timer = QtCore.QTimer(self)
-        self._jog_timer.timeout.connect(self._repeat_jog)
         self._jog_dir = None
 
         # UI
@@ -355,13 +353,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_jog_button(self, btn, sx=0, sy=0, sz=0):
         def _pressed():
             step = self.step_spin.value()
-            self._jog(step * sx, step * sy, step * sz)
+            self._jog(step * sx, step * sy, step * sz, wait_ok=True)
             self._jog_dir = (sx, sy, sz)
             self._jog_hold_timer.start(1000)
 
         def _released():
             self._jog_hold_timer.stop()
-            self._jog_timer.stop()
             self._jog_dir = None
 
         btn.pressed.connect(_pressed)
@@ -369,14 +366,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _start_jog_repeat(self):
         if self._jog_dir:
-            self._jog_timer.start(100)
+            self._repeat_jog()
 
-    def _repeat_jog(self):
+    def _repeat_jog(self, _res=None):
         if not self._jog_dir:
             return
         sx, sy, sz = self._jog_dir
         step = self.step_spin.value()
-        self._jog(step * sx, step * sy, step * sz)
+        self._jog(step * sx, step * sy, step * sz, wait_ok=True, callback=self._repeat_jog)
 
     @QtCore.Slot(str)
     def _append_log(self, line: str):
@@ -684,14 +681,22 @@ class MainWindow(QtWidgets.QMainWindow):
         log(f"Home axis: {axis.upper()}")
         self.stage_worker.enqueue(fn)
 
-    def _jog(self, dx=0, dy=0, dz=0):
+    def _jog(self, dx=0, dy=0, dz=0, *, wait_ok=True, callback=None):
         if not self.stage_worker:
             log("Jog ignored: stage not connected")
             QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
             return
         f = max(1.0, float(self.feed_spin.value()) * 60.0)  # mm/s -> mm/min
         log(f"Jog: dx={dx} dy={dy} dz={dz} F={f}")
-        self.stage_worker.enqueue(self.stage.move_relative, dx, dy, dz, f, False)
+        self.stage_worker.enqueue(
+            self.stage.move_relative,
+            dx,
+            dy,
+            dz,
+            f,
+            wait_ok,
+            callback=callback,
+        )
 
     # --------------------------- CAPTURE / MODES ---------------------------
 
