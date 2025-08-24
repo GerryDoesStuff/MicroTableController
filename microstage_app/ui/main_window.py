@@ -560,16 +560,21 @@ class MainWindow(QtWidgets.QMainWindow):
                         b[k] = v
         if b:
             self.stage_bounds = b
-
-        text = f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}"
+        # always build a deterministic two-line label: first the coordinates,
+        # then the limits. This ensures the limits line never precedes the
+        # coordinates, even if the stage bounds are unavailable.
+        coords_line = f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}"
         if self.stage_bounds:
             b = self.stage_bounds
-            text += (
-                f"\nLimits: X[{b['xmin']:.3f},{b['xmax']:.3f}] "
+            limits_line = (
+                f"Limits: X[{b['xmin']:.3f},{b['xmax']:.3f}] "
                 f"Y[{b['ymin']:.3f},{b['ymax']:.3f}] "
                 f"Z[{b['zmin']:.3f},{b['zmax']:.3f}]"
             )
-        self.stage_pos.setText(text)
+        else:
+            limits_line = "Limits: —"
+
+        self.stage_pos.setText(f"{coords_line}\n{limits_line}")
 
     # --------------------------- PREVIEW ---------------------------
 
