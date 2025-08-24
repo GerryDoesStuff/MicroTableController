@@ -196,6 +196,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gain_spin = QtWidgets.QSpinBox(); self.gain_spin.setRange(1, 400); self.gain_spin.setValue(100)
         c.addWidget(QtWidgets.QLabel("Gain (AGain):"), row, 0); c.addWidget(self.gain_spin, row, 1); row += 1
 
+        self.brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setRange(-255, 255)
+        self.brightness_spin = QtWidgets.QSpinBox(); self.brightness_spin.setRange(-255, 255); self.brightness_spin.setValue(0)
+        c.addWidget(QtWidgets.QLabel("Brightness:"), row, 0); c.addWidget(self.brightness_slider, row, 1); c.addWidget(self.brightness_spin, row, 2); row += 1
+
+        self.contrast_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.contrast_slider.setRange(-255, 255)
+        self.contrast_spin = QtWidgets.QSpinBox(); self.contrast_spin.setRange(-255, 255); self.contrast_spin.setValue(0)
+        c.addWidget(QtWidgets.QLabel("Contrast:"), row, 0); c.addWidget(self.contrast_slider, row, 1); c.addWidget(self.contrast_spin, row, 2); row += 1
+
+        self.saturation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.saturation_slider.setRange(0, 255)
+        self.saturation_spin = QtWidgets.QSpinBox(); self.saturation_spin.setRange(0, 255); self.saturation_spin.setValue(128)
+        c.addWidget(QtWidgets.QLabel("Saturation:"), row, 0); c.addWidget(self.saturation_slider, row, 1); c.addWidget(self.saturation_spin, row, 2); row += 1
+
+        self.hue_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.hue_slider.setRange(-180, 180)
+        self.hue_spin = QtWidgets.QSpinBox(); self.hue_spin.setRange(-180, 180); self.hue_spin.setValue(0)
+        c.addWidget(QtWidgets.QLabel("Hue:"), row, 0); c.addWidget(self.hue_slider, row, 1); c.addWidget(self.hue_spin, row, 2); row += 1
+
+        self.gamma_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.gamma_slider.setRange(20, 180)
+        self.gamma_spin = QtWidgets.QSpinBox(); self.gamma_spin.setRange(20, 180); self.gamma_spin.setValue(100)
+        c.addWidget(QtWidgets.QLabel("Gamma:"), row, 0); c.addWidget(self.gamma_slider, row, 1); c.addWidget(self.gamma_spin, row, 2); row += 1
+
         self.raw_chk = QtWidgets.QCheckBox("RAW8 fast mono (triples bandwidth efficiency)")
         c.addWidget(self.raw_chk, row, 0, 1, 3); row += 1
 
@@ -305,6 +325,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.exp_spin.valueChanged.connect(self._apply_exposure)
         self.autoexp_chk.toggled.connect(self._apply_exposure)
         self.gain_spin.valueChanged.connect(self._apply_gain)
+        self.brightness_slider.valueChanged.connect(self.brightness_spin.setValue)
+        self.brightness_spin.valueChanged.connect(self.brightness_slider.setValue)
+        self.brightness_spin.valueChanged.connect(self._apply_brightness)
+        self.contrast_slider.valueChanged.connect(self.contrast_spin.setValue)
+        self.contrast_spin.valueChanged.connect(self.contrast_slider.setValue)
+        self.contrast_spin.valueChanged.connect(self._apply_contrast)
+        self.saturation_slider.valueChanged.connect(self.saturation_spin.setValue)
+        self.saturation_spin.valueChanged.connect(self.saturation_slider.setValue)
+        self.saturation_spin.valueChanged.connect(self._apply_saturation)
+        self.hue_slider.valueChanged.connect(self.hue_spin.setValue)
+        self.hue_spin.valueChanged.connect(self.hue_slider.setValue)
+        self.hue_spin.valueChanged.connect(self._apply_hue)
+        self.gamma_slider.valueChanged.connect(self.gamma_spin.setValue)
+        self.gamma_spin.valueChanged.connect(self.gamma_slider.setValue)
+        self.gamma_spin.valueChanged.connect(self._apply_gamma)
         self.raw_chk.toggled.connect(self._apply_raw)
         self.res_combo.currentIndexChanged.connect(self._apply_resolution)
         self.btn_roi_full.clicked.connect(lambda: self._apply_roi('full'))
@@ -380,6 +415,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
             self._populate_resolutions()
+            self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
             log("UI: camera connected")
@@ -523,6 +559,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self.res_combo.addItem(f"{w}×{h}", idx)
         self.res_combo.blockSignals(False)
 
+    def _sync_cam_controls(self):
+        if not self.camera:
+            return
+        try:
+            if hasattr(self.camera, "get_brightness"):
+                self.brightness_spin.setValue(int(self.camera.get_brightness()))
+        except Exception:
+            pass
+        try:
+            if hasattr(self.camera, "get_contrast"):
+                self.contrast_spin.setValue(int(self.camera.get_contrast()))
+        except Exception:
+            pass
+        try:
+            if hasattr(self.camera, "get_saturation"):
+                self.saturation_spin.setValue(int(self.camera.get_saturation()))
+        except Exception:
+            pass
+        try:
+            if hasattr(self.camera, "get_hue"):
+                self.hue_spin.setValue(int(self.camera.get_hue()))
+        except Exception:
+            pass
+        try:
+            if hasattr(self.camera, "get_gamma"):
+                self.gamma_spin.setValue(int(self.camera.get_gamma()))
+        except Exception:
+            pass
+
     def _apply_exposure(self):
         if not self.camera: return
         auto = self.autoexp_chk.isChecked()
@@ -532,6 +597,31 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_gain(self):
         if not self.camera: return
         self.camera.set_gain(int(self.gain_spin.value()))
+
+    def _apply_brightness(self):
+        if not self.camera: return
+        if hasattr(self.camera, "set_brightness"):
+            self.camera.set_brightness(int(self.brightness_spin.value()))
+
+    def _apply_contrast(self):
+        if not self.camera: return
+        if hasattr(self.camera, "set_contrast"):
+            self.camera.set_contrast(int(self.contrast_spin.value()))
+
+    def _apply_saturation(self):
+        if not self.camera: return
+        if hasattr(self.camera, "set_saturation"):
+            self.camera.set_saturation(int(self.saturation_spin.value()))
+
+    def _apply_hue(self):
+        if not self.camera: return
+        if hasattr(self.camera, "set_hue"):
+            self.camera.set_hue(int(self.hue_spin.value()))
+
+    def _apply_gamma(self):
+        if not self.camera: return
+        if hasattr(self.camera, "set_gamma"):
+            self.camera.set_gamma(int(self.gamma_spin.value()))
 
     def _apply_raw(self, on: bool):
         if not self.camera: return
