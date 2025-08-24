@@ -139,13 +139,16 @@ class ToupcamCamera:
                 arr = np.frombuffer(mv, dtype=np.uint8).reshape(self._h, self._stride)
                 if self._bits == 24:
                     bgr = arr[:, : self._w * 3].reshape(self._h, self._w, 3)
-                    rgb = bgr[..., ::-1].copy()
+                    img = bgr[..., ::-1].copy()
                 else:  # 8-bit RAW/mono preview
-                    mono = arr[:, : self._w].reshape(self._h, self._w)
-                    rgb = np.repeat(mono[..., None], 3, axis=2).copy()
+                    # Keep the grayscale frame instead of expanding to RGB.
+                    # Converting to 3-channel was creating extra copies that
+                    # slowed down the raw path and negated its bandwidth
+                    # advantage.
+                    img = arr[:, : self._w].reshape(self._h, self._w).copy()
 
                 with self._lock:
-                    self._last = rgb
+                    self._last = img
 
                 if not self._first_logged:
                     log(f"Camera: first frame {self._w}x{self._h}")
