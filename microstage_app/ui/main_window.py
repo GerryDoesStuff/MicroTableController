@@ -71,7 +71,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pos_timer = QtCore.QTimer(self)
         self.pos_timer.setInterval(250)
         self.pos_timer.timeout.connect(self._poll_stage_position)
-
         # jog hold / repeat
         self._jog_hold_timer = QtCore.QTimer(self)
         self._jog_hold_timer.setSingleShot(True)
