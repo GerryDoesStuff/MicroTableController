@@ -18,6 +18,27 @@ import re
 import time
 
 
+def _load_stage_bounds():
+    cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
+    try:
+        text = cfg.read_text()
+    except Exception as e:
+        LOG.warning("Failed to load stage bounds: %s", e)
+        return None
+    def _parse(pattern, name):
+        m = re.search(pattern, text)
+        if not m:
+            LOG.warning("Stage bounds: failed to parse %s", name)
+            return None
+        return float(m.group(1))
+    x = _parse(r"#define\s+X_BED_SIZE\s+(\d+)", "X_BED_SIZE")
+    y = _parse(r"#define\s+Y_BED_SIZE\s+(\d+)", "Y_BED_SIZE")
+    z = _parse(r"#define\s+Z_MAX_POS\s+(\d+)", "Z_MAX_POS")
+    if x is None or y is None or z is None:
+        return None
+    return {"xmin": 0.0, "xmax": x, "ymin": 0.0, "ymax": y, "zmin": 0.0, "zmax": z}
+
+
 def _load_feed_limits():
     cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
     try:
@@ -41,7 +62,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # device handles
         self.stage = None
         self.camera = None
-        self.stage_bounds = None
+        self.stage_bounds = _load_stage_bounds()
+        self._stage_bounds_fallback = self.stage_bounds.copy() if self.stage_bounds else None
 
         # persistent serial worker
         self.stage_thread = None
@@ -526,6 +548,19 @@ class MainWindow(QtWidgets.QMainWindow):
         x, y, z = pos
         if x is None or y is None or z is None:
             return
+        # merge hardware-reported bounds with fallback from config
+        b = self.stage_bounds or {}
+        fb = getattr(self, "_stage_bounds_fallback", None)
+        if fb:
+            if not b:
+                b = fb.copy()
+            else:
+                for k, v in fb.items():
+                    if b.get(k) is None:
+                        b[k] = v
+        if b:
+            self.stage_bounds = b
+
         text = f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}"
         if self.stage_bounds:
             b = self.stage_bounds
