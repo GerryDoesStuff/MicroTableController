@@ -49,6 +49,9 @@ class ToupcamCamera:
         self._stride = 0
         self._bits = 24       # 24 = RGB24, 8 = RAW8/mono
         self._raw_mode = False
+        # Original sensor dimensions (without ROI) used for ROI coordinates
+        self._sensor_w = 0
+        self._sensor_h = 0
 
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
@@ -103,6 +106,11 @@ class ToupcamCamera:
         self._raw_mode = False
         self._bits = 24
         self._force_rgb_or_raw()
+        # Record the full sensor dimensions for ROI calculations
+        try:
+            self._sensor_w, self._sensor_h = self._cam.get_Size()
+        except Exception:
+            self._sensor_w = self._sensor_h = 0
         self._update_dimensions()
 
         def _on_event(evt, ctx=None):
@@ -241,6 +249,11 @@ class ToupcamCamera:
     def set_resolution_index(self, idx: int):
         try:
             self._cam.put_eSize(int(idx))
+            # Resolution change resets the full sensor size
+            try:
+                self._sensor_w, self._sensor_h = self._cam.get_Size()
+            except Exception:
+                pass
             self._update_dimensions()
             log(f"Camera: resolution index={idx} -> {self._w}x{self._h}")
         except Exception as e:
@@ -259,14 +272,19 @@ class ToupcamCamera:
                     self._is_streaming = False
 
                 if w <= 0 or h <= 0:
-                    # clear ROI
+                    # clear ROI and refresh full sensor size
                     self._cam.put_Roi(0, 0, 0, 0)
+                    try:
+                        self._sensor_w, self._sensor_h = self._cam.get_Size()
+                    except Exception:
+                        pass
                     log("Camera: ROI cleared")
                 else:
-                    w = max(16, int(w)); h = max(16, int(h))
-                    # center in current sensor size
-                    cw, ch = self._cam.get_Size()
-                    x = max(0, (cw - w) // 2); y = max(0, (ch - h) // 2)
+                    w = max(16, min(int(w), self._sensor_w))
+                    h = max(16, min(int(h), self._sensor_h))
+                    # center in original sensor coordinates
+                    x = max(0, (self._sensor_w - w) // 2)
+                    y = max(0, (self._sensor_h - h) // 2)
                     self._cam.put_Roi(x, y, w, h)
                     log(f"Camera: ROI {x},{y},{w},{h}")
 
@@ -284,6 +302,10 @@ class ToupcamCamera:
                 if hasattr(self._cam, "put_Size"):
                     w = max(16, int(w)); h = max(16, int(h))
                     self._cam.put_Size(w, h)
+                    try:
+                        self._sensor_w, self._sensor_h = self._cam.get_Size()
+                    except Exception:
+                        pass
                     self._update_dimensions()
                     log(f"Camera: Size {w}x{h}")
                 else:
