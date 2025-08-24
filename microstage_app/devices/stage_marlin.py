@@ -147,6 +147,33 @@ class StageMarlin:
         self.send("G90", wait_ok=True)
         self.send(" ".join(parts), wait_ok=wait_ok)
 
+    # --------------------------- QUERY ---------------------------
+
+    def get_info(self):
+        resp = self.send("M115")
+        name = None; uuid = None
+        for token in resp.replace("\n", " ").split():
+            if token.startswith("MACHINE_NAME:"):
+                name = token.split(":", 1)[1]
+            elif token.startswith("MACHINE_UUID:"):
+                uuid = token.split(":", 1)[1]
+        return {"name": name, "uuid": uuid, "raw": resp}
+
+    def get_position(self):
+        resp = self.send("M114")
+        x = y = z = None
+        for token in resp.replace("Count", "").split():
+            if token.startswith("X:"):
+                try: x = float(token[2:])
+                except ValueError: pass
+            elif token.startswith("Y:"):
+                try: y = float(token[2:])
+                except ValueError: pass
+            elif token.startswith("Z:"):
+                try: z = float(token[2:])
+                except ValueError: pass
+        return (x, y, z)
+
     def wait_for_moves(self, timeout_s=5.0):
         # M400 blocks until the planner is empty; keep it, but it should run off the UI thread.
         self.send("M400", wait_ok=True)
