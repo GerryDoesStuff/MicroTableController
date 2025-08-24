@@ -701,6 +701,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         log("Home: Z then X/Y")
         self.stage_worker.enqueue(self.stage.home_all)
+        self.stage_worker.enqueue(
+            self.stage.get_position, callback=self._on_stage_position
+        )
 
     def _home_axis(self, axis: str):
         if not self.stage_worker:
@@ -715,6 +718,9 @@ class MainWindow(QtWidgets.QMainWindow):
             fn = self.stage.home_z
         log(f"Home axis: {axis.upper()}")
         self.stage_worker.enqueue(fn)
+        self.stage_worker.enqueue(
+            self.stage.get_position, callback=self._on_stage_position
+        )
 
     def _jog(self, dx=0, dy=0, dz=0, *, wait_ok=True, callback=None):
         if not self.stage_worker:
@@ -731,6 +737,9 @@ class MainWindow(QtWidgets.QMainWindow):
             f,
             wait_ok,
             callback=callback,
+        )
+        self.stage_worker.enqueue(
+            self.stage.get_position, callback=self._on_stage_position
         )
 
     # --------------------------- CAPTURE / MODES ---------------------------
