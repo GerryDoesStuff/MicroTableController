@@ -153,11 +153,12 @@ class StageMarlin:
 
     def get_info(self):
         resp = self.send("M115")
-        name = None; uuid = None
+        name = None
+        uuid = None
         for token in resp.replace("\n", " ").split():
-            if token.startswith("MACHINE_NAME:"):
+            if token.startswith("MACHINE_TYPE:") or token.startswith("MACHINE_NAME:"):
                 name = token.split(":", 1)[1]
-            elif token.startswith("MACHINE_UUID:"):
+            elif token.startswith("UUID:") or token.startswith("MACHINE_UUID:"):
                 uuid = token.split(":", 1)[1]
         return {"name": name, "uuid": uuid, "raw": resp}
 

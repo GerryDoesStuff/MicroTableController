@@ -34,7 +34,7 @@ def test_identifiers_match(monkeypatch):
 
         def read(self, n):
             return (
-                b"FIRMWARE_NAME:Marlin MACHINE_NAME:MicroStageController UUID:a3a4637a-68c4-4340-9fda-847b4fe0d3fc\nok\n"
+                b"FIRMWARE_NAME:Marlin MACHINE_TYPE:MicroStageController UUID:a3a4637a-68c4-4340-9fda-847b4fe0d3fc\nok\n"
             )
 
     monkeypatch.setattr(stage_marlin.list_ports, "comports", lambda: [Port()])
@@ -69,7 +69,7 @@ def test_machine_name_mismatch(monkeypatch):
             pass
 
         def read(self, n):
-            return b"FIRMWARE_NAME:Marlin MACHINE_NAME:Other UUID:0000\nok\n"
+            return b"FIRMWARE_NAME:Marlin MACHINE_TYPE:Other UUID:0000\nok\n"
 
     monkeypatch.setattr(stage_marlin.list_ports, "comports", lambda: [Port()])
     monkeypatch.setattr(stage_marlin.serial, "Serial", DummySerial)
@@ -104,7 +104,7 @@ def test_uuid_mismatch_still_accepts(monkeypatch):
             pass
 
         def read(self, n):
-            return b"FIRMWARE_NAME:Marlin MACHINE_NAME:MicroStageController UUID:0000\nok\n"
+            return b"FIRMWARE_NAME:Marlin MACHINE_TYPE:MicroStageController UUID:0000\nok\n"
 
     monkeypatch.setattr(stage_marlin.list_ports, "comports", lambda: [Port()])
     monkeypatch.setattr(stage_marlin.serial, "Serial", DummySerial)
@@ -127,8 +127,8 @@ def test_prefers_uuid_when_multiple(monkeypatch):
         pid = 0x7523
 
     responses = {
-        "COMA": b"FIRMWARE_NAME:Marlin MACHINE_NAME:MicroStageController UUID:0000\nok\n",
-        "COMB": b"FIRMWARE_NAME:Marlin MACHINE_NAME:MicroStageController UUID:a3a4637a-68c4-4340-9fda-847b4fe0d3fc\nok\n",
+        "COMA": b"FIRMWARE_NAME:Marlin MACHINE_TYPE:MicroStageController UUID:0000\nok\n",
+        "COMB": b"FIRMWARE_NAME:Marlin MACHINE_TYPE:MicroStageController UUID:a3a4637a-68c4-4340-9fda-847b4fe0d3fc\nok\n",
     }
 
     class DummySerial:
