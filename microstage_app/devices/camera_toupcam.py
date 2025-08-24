@@ -44,7 +44,9 @@ class ToupcamCamera:
         self._name = name
 
         self._cam = None
-        self._buf = None      # Python 'bytes' buffer for PullImageV2
+        # bytearray buffer for PullImageV2; reshaped view cached in _arr
+        self._buf = None
+        self._arr = None
         self._w = self._h = 0
         self._stride = 0
         self._bits = 24       # 24 = RGB24, 8 = RAW8/mono
@@ -63,6 +65,11 @@ class ToupcamCamera:
         self._fps = 0.0
         self._fps_n = 0
         self._fps_t0 = time.time()
+        # frame timing diagnostics
+        self._pull_acc = 0.0
+        self._proc_acc = 0.0
+        self._avg_pull_ms = 0.0
+        self._avg_proc_ms = 0.0
 
         self._is_streaming = False
 
@@ -74,8 +81,12 @@ class ToupcamCamera:
         # bytes length is stride*height; the wrapper wants c_char_p
         rowbytes = ((self._w * self._bits + 31) // 32) * 4
         self._stride = rowbytes
-        self._buf = bytes(self._stride * self._h)
-        log(f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B")
+        # use mutable bytearray so the SDK can fill in-place and cache a NumPy view
+        self._buf = bytearray(self._stride * self._h)
+        self._arr = np.frombuffer(self._buf, dtype=np.uint8).reshape(self._h, self._stride)
+        log(
+            f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B"
+        )
 
     def _update_dimensions(self):
         """Refresh width/height using final output size after ROI/resolution."""
@@ -96,6 +107,57 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: RAW toggle not supported: {e}")
 
+    def _init_usb_and_speed(self):
+        """Query USB type and maximize bandwidth if possible."""
+        usb_code = None
+        try:
+            if hasattr(self._cam, "get_UsbType"):
+                usb_code = self._cam.get_UsbType()
+            elif hasattr(self._cam, "get_Option") and hasattr(self._tp, "TOUPCAM_OPTION_USB_TYPE"):
+                usb_code = self._cam.get_Option(self._tp.TOUPCAM_OPTION_USB_TYPE)
+        except Exception as e:
+            log(f"Camera: USB type query failed: {e}")
+
+        if usb_code is not None:
+            usb_map = {
+                0: "Unknown",
+                1: "USB 1.x",
+                2: "USB 2.0",
+                3: "USB 3.0",
+                4: "USB 3.1",
+                5: "USB 3.2",
+            }
+            desc = usb_map.get(int(usb_code), f"code {usb_code}")
+            log(f"Camera: USB type {desc}")
+        else:
+            # fall back to capability flags from enumeration
+            try:
+                devs = self._tp.Toupcam.EnumV2() or []
+                for d in devs:
+                    if d.id == self._id:
+                        flags = getattr(d.model, "flag", 0)
+                        if flags & getattr(self._tp, "TOUPCAM_FLAG_USB30_OVER_USB20", 0):
+                            log("Camera: USB 3.x over USB 2.0 port")
+                        elif flags & getattr(self._tp, "TOUPCAM_FLAG_USB30", 0):
+                            log("Camera: USB 3.x")
+                        elif flags & getattr(self._tp, "TOUPCAM_FLAG_USB32", 0):
+                            log("Camera: USB 3.2")
+                        else:
+                            log("Camera: USB 2.0 or unknown")
+                        break
+            except Exception:
+                log("Camera: USB type unknown")
+
+        # ensure highest bandwidth mode if supported
+        try:
+            maxspeed = self._cam.get_MaxSpeed()
+            cur = self._cam.get_Speed() if hasattr(self._cam, "get_Speed") else None
+            log(f"Camera: speed levels 0-{maxspeed}, current {cur}")
+            if cur is None or cur < maxspeed:
+                self.set_speed_level(maxspeed)
+        except Exception as e:
+            log(f"Camera: speed query failed: {e}")
+
     def _open(self):
         log(f"Camera: opening {self._name}")
         self._cam = self._tp.Toupcam.Open(self._id)
@@ -112,6 +174,7 @@ class ToupcamCamera:
         except Exception:
             self._sensor_w = self._sensor_h = 0
         self._update_dimensions()
+        self._init_usb_and_speed()
 
         def _on_event(evt, ctx=None):
             try:
@@ -124,19 +187,23 @@ class ToupcamCamera:
                     self._cam.PullImageV2(self._buf, self._bits, None)
                     return
 
-                # Pull one frame
+                t0 = time.perf_counter()
                 self._cam.PullImageV2(self._buf, self._bits, None)
+                t1 = time.perf_counter()
 
                 # Update FPS
                 self._fps_n += 1
                 now = time.time()
                 if now - self._fps_t0 >= 0.5:
                     self._fps = self._fps_n / (now - self._fps_t0)
+                    self._avg_pull_ms = (self._pull_acc / max(1, self._fps_n)) * 1000.0
+                    self._avg_proc_ms = (self._proc_acc / max(1, self._fps_n)) * 1000.0
                     self._fps_n = 0
                     self._fps_t0 = now
+                    self._pull_acc = 0.0
+                    self._proc_acc = 0.0
 
-                mv = memoryview(self._buf)
-                arr = np.frombuffer(mv, dtype=np.uint8).reshape(self._h, self._stride)
+                arr = self._arr
                 if self._bits == 24:
                     bgr = arr[:, : self._w * 3].reshape(self._h, self._w, 3)
                     img = bgr[..., ::-1].copy()
@@ -146,6 +213,10 @@ class ToupcamCamera:
                     # slowed down the raw path and negated its bandwidth
                     # advantage.
                     img = arr[:, : self._w].reshape(self._h, self._w).copy()
+
+                t2 = time.perf_counter()
+                self._pull_acc += (t1 - t0)
+                self._proc_acc += (t2 - t1)
 
                 with self._lock:
                     self._last = img
@@ -229,6 +300,14 @@ class ToupcamCamera:
 
     def get_fps(self) -> float:
         return float(self._fps)
+
+    def get_capture_stats(self):
+        """Return recent FPS and average pull/processing times in milliseconds."""
+        return {
+            "fps": float(self._fps),
+            "pull_ms": float(self._avg_pull_ms),
+            "proc_ms": float(self._avg_proc_ms),
+        }
 
     # ---- performance knobs ----
 
