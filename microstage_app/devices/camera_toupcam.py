@@ -250,6 +250,14 @@ class ToupcamCamera:
         """Center a ROI via put_Roi if supported; otherwise try put_Size."""
         try:
             if hasattr(self._cam, "put_Roi"):
+                was_streaming = self._is_streaming
+                if was_streaming:
+                    try:
+                        self._cam.Stop()
+                    except Exception:
+                        pass
+                    self._is_streaming = False
+
                 if w <= 0 or h <= 0:
                     # clear ROI
                     self._cam.put_Roi(0, 0, 0, 0)
@@ -261,7 +269,16 @@ class ToupcamCamera:
                     x = max(0, (cw - w) // 2); y = max(0, (ch - h) // 2)
                     self._cam.put_Roi(x, y, w, h)
                     log(f"Camera: ROI {x},{y},{w},{h}")
+
                 self._update_dimensions()
+
+                if was_streaming:
+                    try:
+                        self._cam.StartPullModeWithCallback(self._on_event, self)
+                    except TypeError:
+                        self._cam.StartPullModeWithCallback(self._on_event)
+                    self._is_streaming = True
+
             else:
                 # fall back to put_Size if exposed by wrapper
                 if hasattr(self._cam, "put_Size"):
