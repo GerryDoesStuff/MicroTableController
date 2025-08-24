@@ -71,6 +71,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pos_timer = QtCore.QTimer(self)
         self.pos_timer.setInterval(250)
         self.pos_timer.timeout.connect(self._poll_stage_position)
+
         # jog hold / repeat
         self._jog_hold_timer = QtCore.QTimer(self)
         self._jog_hold_timer.setSingleShot(True)
@@ -545,11 +546,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_roi(self, mode):
         if not self.camera: return
         if mode == 'full':
-            # choose largest entry from list
-            res = self.camera.list_resolutions()
-            if res:
-                biggest = max(res, key=lambda t: t[1]*t[2])
-                self.camera.set_resolution_index(biggest[0])
+            # reset ROI to full frame
+            self.camera.set_center_roi(0, 0)
         else:
             side = int(mode)
             self.camera.set_center_roi(side, side)
