@@ -287,13 +287,18 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: set_speed_level failed: {e}")
 
+    def set_exposure_ms(self, ms: float, auto: bool = False):
+        """Set exposure time in milliseconds to match the UI units."""
+        us = int(ms * 1000.0)
+        self.set_exposure_us(us, auto)
+
     def set_exposure_us(self, us: int, auto: bool = False):
         try:
             if hasattr(self._cam, "put_AutoExpoEnable"):
                 self._cam.put_AutoExpoEnable(1 if auto else 0)
             if not auto:
                 self._cam.put_ExpoTime(int(us))
-            log(f"Camera: exposure {'auto' if auto else f'{us} us'}")
+            log(f"Camera: exposure {'auto' if auto else f'{us/1000.0:.3f} ms'}")
         except Exception as e:
             log(f"Camera: set_exposure_us failed: {e}")
 

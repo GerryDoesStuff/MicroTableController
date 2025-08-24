@@ -13,7 +13,23 @@ from ..utils.log import LOG, log
 from ..utils.serial_worker import SerialWorker
 from ..utils.workers import run_async
 
+from pathlib import Path
+import re
 import time
+
+
+def _load_feed_limits():
+    cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
+    try:
+        text = cfg.read_text()
+        m = re.search(r"DEFAULT_MAX_FEEDRATE\s*{([^}]+)}", text)
+        if not m:
+            return None
+        vals = [float(v.strip()) for v in m.group(1).split(',')[:3]]
+        return [v * 60.0 for v in vals]  # mm/min
+    except Exception as e:
+        LOG.warning("Failed to load feed limits: %s", e)
+        return None
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -25,6 +41,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # device handles
         self.stage = None
         self.camera = None
+        self.stage_bounds = None
 
         # persistent serial worker
         self.stage_thread = None
@@ -123,9 +140,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.step_spin.setRange(0.001, 1000.0)  # allow big moves
         self.step_spin.setValue(0.100)
         self.feed_spin = QtWidgets.QDoubleSpinBox()
-        self.feed_spin.setRange(0.1, 500.0)  # mm/s -> we convert to mm/min when sending
-        self.feed_spin.setValue(5.0)
-        self.btn_home = QtWidgets.QPushButton("Home XYZ")
+        limits = _load_feed_limits()
+        max_feed = (min(limits) / 60.0) if limits else 1.0
+        self.feed_spin.setRange(0.01, max_feed)
+        self.feed_spin.setValue(20.0 / 60.0)
+        self.feed_limits = QtWidgets.QLabel()
+        if limits:
+            self.feed_limits.setText(
+                f"Limits: X {limits[0]:.0f} / Y {limits[1]:.0f} / Z {limits[2]:.0f} mm/min"
+            )
+        self.btn_home_all = QtWidgets.QPushButton("Home All")
+        self.btn_home_x = QtWidgets.QPushButton("Home X")
+        self.btn_home_y = QtWidgets.QPushButton("Home Y")
+        self.btn_home_z = QtWidgets.QPushButton("Home Z")
         self.btn_xm = QtWidgets.QPushButton("X-")
         self.btn_xp = QtWidgets.QPushButton("X+")
         self.btn_ym = QtWidgets.QPushButton("Y-")
@@ -136,13 +163,17 @@ class MainWindow(QtWidgets.QMainWindow):
         j.addWidget(self.step_spin, 0, 1)
         j.addWidget(QtWidgets.QLabel("Feed (mm/s):"), 1, 0)
         j.addWidget(self.feed_spin, 1, 1)
-        j.addWidget(self.btn_home, 2, 0, 1, 2)
-        j.addWidget(self.btn_xm, 3, 0)
-        j.addWidget(self.btn_xp, 3, 1)
-        j.addWidget(self.btn_ym, 4, 0)
-        j.addWidget(self.btn_yp, 4, 1)
-        j.addWidget(self.btn_zm, 5, 0)
-        j.addWidget(self.btn_zp, 5, 1)
+        j.addWidget(self.feed_limits, 2, 0, 1, 2)
+        j.addWidget(self.btn_home_all, 3, 0, 1, 2)
+        j.addWidget(self.btn_home_x, 4, 0)
+        j.addWidget(self.btn_home_y, 4, 1)
+        j.addWidget(self.btn_home_z, 5, 0, 1, 2)
+        j.addWidget(self.btn_xm, 6, 0)
+        j.addWidget(self.btn_xp, 6, 1)
+        j.addWidget(self.btn_ym, 7, 0)
+        j.addWidget(self.btn_yp, 7, 1)
+        j.addWidget(self.btn_zm, 8, 0)
+        j.addWidget(self.btn_zp, 8, 1)
         rightw.addTab(jog, "Jog")
 
         # ---- Camera tab (performance controls)
@@ -248,7 +279,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_cam_connect.clicked.connect(self._connect_camera)
         self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
-        self.btn_home.clicked.connect(self._home)
+        self.btn_home_all.clicked.connect(self._home_all)
+        self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
+        self.btn_home_y.clicked.connect(lambda: self._home_axis('y'))
+        self.btn_home_z.clicked.connect(lambda: self._home_axis('z'))
         self.btn_xm.clicked.connect(lambda: self._jog(dx=-self.step_spin.value()))
         self.btn_xp.clicked.connect(lambda: self._jog(dx=+self.step_spin.value()))
         self.btn_ym.clicked.connect(lambda: self._jog(dy=-self.step_spin.value()))
@@ -363,6 +397,11 @@ class MainWindow(QtWidgets.QMainWindow):
             if uuid:
                 text += f" ({uuid})"
             self.stage_status.setText(text)
+            try:
+                self.stage_bounds = self.stage.get_bounds()
+            except Exception as e:
+                log(f"Stage: failed to get bounds: {e}")
+                self.stage_bounds = None
             log("UI: stage connected (async)")
             self._attach_stage_worker()
             self._update_stage_buttons()
@@ -385,6 +424,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stage = None
         self.stage_status.setText("Stage: —")
         self.stage_pos.setText("Pos: —")
+        self.stage_bounds = None
         self.pos_timer.stop()
         self._update_stage_buttons()
 
@@ -409,7 +449,15 @@ class MainWindow(QtWidgets.QMainWindow):
         x, y, z = pos
         if x is None or y is None or z is None:
             return
-        self.stage_pos.setText(f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}")
+        text = f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}"
+        if self.stage_bounds:
+            b = self.stage_bounds
+            text += (
+                f"\nLimits: X[{b['xmin']:.3f},{b['xmax']:.3f}] "
+                f"Y[{b['ymin']:.3f},{b['ymax']:.3f}] "
+                f"Z[{b['zmin']:.3f},{b['zmax']:.3f}]"
+            )
+        self.stage_pos.setText(text)
 
     # --------------------------- PREVIEW ---------------------------
 
@@ -444,8 +492,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_exposure(self):
         if not self.camera: return
         auto = self.autoexp_chk.isChecked()
-        us = int(self.exp_spin.value() * 1000.0)
-        self.camera.set_exposure_us(us, auto)
+        ms = self.exp_spin.value()
+        self.camera.set_exposure_ms(ms, auto)
 
     def _apply_gain(self):
         if not self.camera: return
@@ -483,13 +531,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- STAGE OPS ---------------------------
 
-    def _home(self):
+    def _home_all(self):
         if not self.stage_worker:
             log("Home ignored: stage not connected")
             QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
             return
-        log("Home: G28")
-        self.stage_worker.enqueue(self.stage.home_xyz)
+        log("Home: Z then X/Y")
+        self.stage_worker.enqueue(self.stage.home_all)
+
+    def _home_axis(self, axis: str):
+        if not self.stage_worker:
+            log("Home ignored: stage not connected")
+            QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
+            return
+        if axis == 'x':
+            fn = self.stage.home_x
+        elif axis == 'y':
+            fn = self.stage.home_y
+        else:
+            fn = self.stage.home_z
+        log(f"Home axis: {axis.upper()}")
+        self.stage_worker.enqueue(fn)
 
     def _jog(self, dx=0, dy=0, dz=0):
         if not self.stage_worker:
