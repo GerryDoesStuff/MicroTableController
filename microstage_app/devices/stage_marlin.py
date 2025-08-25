@@ -214,16 +214,24 @@ class StageMarlin:
         # machine coordinates remain.
         before_count = re.split(r"count", resp, flags=re.IGNORECASE)[0]
         x = y = z = None
-        for token in before_count.split():
-            if token.startswith("X:"):
-                try: x = float(token[2:])
-                except ValueError: pass
-            elif token.startswith("Y:"):
-                try: y = float(token[2:])
-                except ValueError: pass
-            elif token.startswith("Z:"):
-                try: z = float(token[2:])
-                except ValueError: pass
+        m = re.search(r"X:\s*([-+]?\d*\.?\d+)", before_count)
+        if m:
+            try:
+                x = float(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r"Y:\s*([-+]?\d*\.?\d+)", before_count)
+        if m:
+            try:
+                y = float(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r"Z:\s*([-+]?\d*\.?\d+)", before_count)
+        if m:
+            try:
+                z = float(m.group(1))
+            except ValueError:
+                pass
         return (x, y, z)
 
     def wait_for_moves(self, timeout_s=5.0):
