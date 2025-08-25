@@ -619,7 +619,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 current = int(self.camera.get_resolution_index())
         except Exception:
             current = 0
-        for idx, w, h in self.camera.list_resolutions():
+        res = list(self.camera.list_resolutions())
+        try:
+            self.camera.resolutions = res
+        except Exception:
+            pass
+        for idx, w, h in res:
             self.res_combo.addItem(f"{w}×{h}", idx)
         pos = self.res_combo.findData(current)
         if pos >= 0:
