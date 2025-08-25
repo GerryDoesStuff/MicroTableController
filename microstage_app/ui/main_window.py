@@ -64,6 +64,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.camera = None
         self.stage_bounds = _load_stage_bounds()
         self._stage_bounds_fallback = self.stage_bounds.copy() if self.stage_bounds else None
+        self._last_pos = {"x": None, "y": None, "z": None}
 
         # persistent serial worker
         self.stage_thread = None
@@ -559,9 +560,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_stage_position(self, pos):
         if not pos:
             return
-        x, y, z = pos
-        if x is None or y is None or z is None:
-            return
+        # update cached coordinates; ``pos`` may omit axes via ``None``
+        try:
+            x, y, z = pos
+        except Exception:
+            x = y = z = None
+        if x is not None:
+            self._last_pos["x"] = x
+        if y is not None:
+            self._last_pos["y"] = y
+        if z is not None:
+            self._last_pos["z"] = z
         # merge hardware-reported bounds with fallback from config
         b = self.stage_bounds or {}
         fb = getattr(self, "_stage_bounds_fallback", None)
@@ -577,7 +586,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # always build a deterministic two-line label: first the coordinates,
         # then the limits. This ensures the limits line never precedes the
         # coordinates, even if the stage bounds are unavailable.
-        coords_line = f"Pos: X{x:.3f} Y{y:.3f} Z{z:.3f}"
+        def _fmt(v):
+            return f"{v:.3f}" if v is not None else "—"
+        coords_line = (
+            f"Pos: X{_fmt(self._last_pos['x'])} "
+            f"Y{_fmt(self._last_pos['y'])} "
+            f"Z{_fmt(self._last_pos['z'])}"
+        )
         if self.stage_bounds:
             b = self.stage_bounds
             limits_line = (
