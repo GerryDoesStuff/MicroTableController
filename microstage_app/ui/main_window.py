@@ -251,11 +251,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.raw_chk = QtWidgets.QCheckBox("RAW8 fast mono (triples bandwidth efficiency)")
         c.addWidget(self.raw_chk, row, 0, 1, 3); row += 1
 
+        self.bin_combo = QtWidgets.QComboBox()
         self.res_combo = QtWidgets.QComboBox()
         self.btn_roi_full = QtWidgets.QPushButton("ROI: Full")
         self.btn_roi_2048 = QtWidgets.QPushButton("ROI: 2048²")
         self.btn_roi_1024 = QtWidgets.QPushButton("ROI: 1024²")
         self.btn_roi_512  = QtWidgets.QPushButton("ROI: 512²")
+        c.addWidget(QtWidgets.QLabel("Binning:"), row, 0); c.addWidget(self.bin_combo, row, 1, 1, 2); row += 1
         c.addWidget(QtWidgets.QLabel("Resolution:"), row, 0); c.addWidget(self.res_combo, row, 1, 1, 2); row += 1
         c.addWidget(self.btn_roi_full, row, 0); c.addWidget(self.btn_roi_2048, row, 1); c.addWidget(self.btn_roi_1024, row, 2); row += 1
         c.addWidget(self.btn_roi_512, row, 0); row += 1
@@ -373,6 +375,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gamma_spin.valueChanged.connect(self.gamma_slider.setValue)
         self.gamma_spin.valueChanged.connect(self._apply_gamma)
         self.raw_chk.toggled.connect(self._apply_raw)
+        self.bin_combo.currentIndexChanged.connect(self._apply_binning)
         self.res_combo.currentIndexChanged.connect(self._apply_resolution)
         self.btn_roi_full.clicked.connect(lambda: self._apply_roi('full'))
         self.btn_roi_2048.clicked.connect(lambda: self._apply_roi(2048))
@@ -446,7 +449,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
-            # populate after stream start so all resolutions are available
+            # populate after stream start so all options are available
+            self._populate_binning()
             self._populate_resolutions()
             QtCore.QTimer.singleShot(0, self._populate_resolutions)
             self._sync_cam_controls()
@@ -470,6 +474,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fps_timer.stop()
         self.live_label.clear()
         self.res_combo.clear()
+        self.bin_combo.clear()
         self._update_cam_buttons()
 
     def _connect_stage_async(self):
@@ -619,6 +624,28 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- CAMERA APPLY ---------------------------
 
+    def _populate_binning(self):
+        if not self.camera or not hasattr(self.camera, "list_binning_factors"):
+            self.bin_combo.clear()
+            self.bin_combo.setEnabled(False)
+            return
+        self.bin_combo.blockSignals(True)
+        self.bin_combo.clear()
+        try:
+            factors = self.camera.list_binning_factors()
+            for f in factors:
+                self.bin_combo.addItem(f"{f}×", f)
+            cur = 1
+            if hasattr(self.camera, "get_binning"):
+                cur = int(self.camera.get_binning())
+            pos = self.bin_combo.findData(cur)
+            if pos >= 0:
+                self.bin_combo.setCurrentIndex(pos)
+        except Exception:
+            pass
+        self.bin_combo.setEnabled(self.bin_combo.count() > 1)
+        self.bin_combo.blockSignals(False)
+
     def _populate_resolutions(self):
         if not self.camera:
             return
@@ -734,6 +761,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_raw(self, on: bool):
         if not self.camera: return
         self.camera.set_raw_fast_mono(bool(on))
+
+    def _apply_binning(self, i: int):
+        if not self.camera: return
+        factor = self.bin_combo.currentData()
+        if factor is None:
+            return
+        try:
+            self.camera.set_binning(int(factor))
+        except Exception:
+            pass
+        self._populate_resolutions()
 
     def _apply_resolution(self, i: int):
         if not self.camera: return
