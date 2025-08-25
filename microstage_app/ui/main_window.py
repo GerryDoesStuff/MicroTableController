@@ -884,6 +884,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_thread, self._last_worker = t, w
         w.finished.connect(lambda res, err: log("Capture: done" if not err else f"Capture error: {err}"))
 
+    @QtCore.Slot(object, object)
+    def _on_autofocus_done(self, best, err):
+        if err:
+            log(f"Autofocus error: {err}")
+            QtWidgets.QMessageBox.critical(self, "Autofocus", str(err))
+        else:
+            log(f"Autofocus: best ΔZ={best:.4f} mm")
+            QtWidgets.QMessageBox.information(self, "Autofocus", f"Best Z offset (relative): {best:.4f} mm")
+
     def _run_autofocus(self):
         if not (self.stage and self.camera):
             log("Autofocus ignored: stage or camera not connected")
@@ -905,15 +914,7 @@ class MainWindow(QtWidgets.QMainWindow):
         t, w = run_async(do_af)
         self._last_thread, self._last_worker = t, w
 
-        def _done(best, err):
-            if err:
-                log(f"Autofocus error: {err}")
-                QtWidgets.QMessageBox.critical(self, "Autofocus", str(err))
-            else:
-                log(f"Autofocus: best ΔZ={best:.4f} mm")
-                QtWidgets.QMessageBox.information(self, "Autofocus", f"Best Z offset (relative): {best:.4f} mm")
-
-        w.finished.connect(_done)
+        w.finished.connect(self._on_autofocus_done)
 
     def _run_raster(self):
         if not (self.stage and self.camera):
