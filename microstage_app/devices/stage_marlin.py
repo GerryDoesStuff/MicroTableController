@@ -209,6 +209,9 @@ class StageMarlin:
 
     def get_position(self):
         resp = self.send("M114")
+        # Some Marlin builds use lowercase 'count' while others use 'Count';
+        # strip everything after this token case-insensitively so only the
+        # machine coordinates remain.
         before_count = re.split(r"count", resp, flags=re.IGNORECASE)[0]
         x = y = z = None
         m = re.search(r"X:\s*([-+]?\d*\.?\d+)", before_count)
