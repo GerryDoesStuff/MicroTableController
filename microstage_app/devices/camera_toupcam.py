@@ -350,20 +350,20 @@ class ToupcamCamera:
         except Exception:
             candidates = []
 
-        if not candidates:
-            # fall back to halving the sensor size
-            sw = self._sensor_w or self._w
-            sh = self._sensor_h or self._h
-            if sw and sh:
-                candidates.append((None, sw, sh))
-                for n in range(1, 5):
-                    w = sw // (2 ** n)
-                    h = sh // (2 ** n)
-                    if w <= 0 or h <= 0:
-                        break
-                    candidates.append((None, w, h))
+        # Always try halving the sensor size to discover additional modes
+        sw = self._sensor_w or self._w
+        sh = self._sensor_h or self._h
+        if sw and sh:
+            candidates.append((None, sw, sh))
+            for n in range(1, 5):
+                w = sw // (2 ** n)
+                h = sh // (2 ** n)
+                if w <= 0 or h <= 0:
+                    break
+                candidates.append((None, w, h))
 
         found = []
+        seen = set()
         for idx, w, h in candidates:
             try:
                 if idx is not None and hasattr(self._cam, "put_eSize"):
@@ -373,8 +373,9 @@ class ToupcamCamera:
                 else:
                     continue
                 rw, rh = self._cam.get_Size()
-                if rw == w and rh == h:
+                if rw == w and rh == h and (rw, rh) not in seen:
                     found.append((idx if idx is not None else len(found), rw, rh))
+                    seen.add((rw, rh))
             except Exception:
                 continue
 
@@ -406,10 +407,29 @@ class ToupcamCamera:
                 w, h = self._cam.get_Resolution(i)
                 out.append((i, w, h))
         except Exception:
-            out = []
-        if not out:
-            return self._probe_resolutions()
-        return out
+            pass
+
+        seen = set()
+        uniq = []
+        for idx, w, h in out:
+            if (w, h) not in seen:
+                seen.add((w, h))
+                uniq.append((idx, w, h))
+
+        if len(uniq) < 4:
+            try:
+                probes = self._probe_resolutions()
+                for idx, w, h in probes:
+                    if (w, h) not in seen:
+                        seen.add((w, h))
+                        uniq.append((idx, w, h))
+                if not uniq:
+                    return probes
+            except Exception:
+                if not uniq:
+                    return self._probe_resolutions()
+
+        return uniq
 
     def get_resolution_index(self) -> int:
         """Return current resolution index if available."""
