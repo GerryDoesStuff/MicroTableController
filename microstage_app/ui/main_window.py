@@ -422,7 +422,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _dispatch_stage_result(self, cb, res):
         if cb:
-            cb(res)
+            QtCore.QTimer.singleShot(0, lambda r=res: cb(r))
 
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
