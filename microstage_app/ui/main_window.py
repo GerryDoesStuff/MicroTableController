@@ -90,9 +90,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fps_timer = QtCore.QTimer(self)
         self.fps_timer.setInterval(500)             # update FPS label
         self.fps_timer.timeout.connect(self._update_fps)
-        self.pos_timer = QtCore.QTimer(self)
-        self.pos_timer.setInterval(250)
-        self.pos_timer.timeout.connect(self._poll_stage_position)
 
         # jog hold / repeat
         self._jog_hold_timer = QtCore.QTimer(self)
@@ -416,7 +413,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_worker.result.connect(self._dispatch_stage_result)
         self.stage_thread.started.connect(self.stage_worker.loop)
         self.stage_thread.start()
-        self.pos_timer.start()
 
     def _dispatch_stage_result(self, cb, res):
         if cb:
@@ -523,7 +519,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_status.setText("Stage: —")
         self.stage_pos.setText("Pos: —")
         self.stage_bounds = None
-        self.pos_timer.stop()
         self._update_stage_buttons()
 
     def _update_stage_buttons(self):
@@ -535,11 +530,6 @@ class MainWindow(QtWidgets.QMainWindow):
         connected = self.camera is not None
         self.btn_cam_connect.setEnabled(not connected)
         self.btn_cam_disconnect.setEnabled(connected)
-
-    def _poll_stage_position(self):
-        if not self.stage_worker:
-            return
-        self.stage_worker.enqueue(self.stage.get_position, callback=self._on_stage_position)
 
     def _on_stage_position(self, pos):
         if not pos:
@@ -705,6 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         log("Home: Z then X/Y")
         self.stage_worker.enqueue(self.stage.home_all)
+        self.stage_worker.enqueue(self.stage.wait_for_moves)
         self.stage_worker.enqueue(
             self.stage.get_position, callback=self._on_stage_position
         )
@@ -722,6 +713,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fn = self.stage.home_z
         log(f"Home axis: {axis.upper()}")
         self.stage_worker.enqueue(fn)
+        self.stage_worker.enqueue(self.stage.wait_for_moves)
         self.stage_worker.enqueue(
             self.stage.get_position, callback=self._on_stage_position
         )
@@ -742,6 +734,7 @@ class MainWindow(QtWidgets.QMainWindow):
             wait_ok,
             callback=callback,
         )
+        self.stage_worker.enqueue(self.stage.wait_for_moves)
         self.stage_worker.enqueue(
             self.stage.get_position, callback=self._on_stage_position
         )
