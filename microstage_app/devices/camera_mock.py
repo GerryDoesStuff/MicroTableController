@@ -7,6 +7,9 @@ class MockCamera:
         self._latest = None
         self._t = 0.0
         self._resolution_idx = 0
+        self._exposure_ms = 10.0
+        self._auto = False
+        self._gain = 100
 
     def name(self): return "MockCamera"
     def start_stream(self): self._running = True
@@ -44,3 +47,18 @@ class MockCamera:
 
     def get_resolution_index(self):
         return int(self._resolution_idx)
+
+    # Mock exposure/gain -------------------------------------------------------
+
+    def set_exposure_ms(self, ms, auto=False):
+        self._exposure_ms = float(ms)
+        self._auto = bool(auto)
+
+    def get_exposure_ms(self):
+        return float(self._exposure_ms)
+
+    def set_gain(self, gain):
+        self._gain = int(gain)
+
+    def get_gain(self):
+        return int(self._gain)
