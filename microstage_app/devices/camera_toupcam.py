@@ -319,6 +319,19 @@ class ToupcamCamera:
             out.append((0, self._w, self._h))
         return out
 
+    def get_resolution_index(self) -> int:
+        """Return current resolution index if available."""
+        try:
+            return int(self._cam.get_eSize())
+        except Exception:
+            try:
+                for idx, w, h in self.list_resolutions():
+                    if w == self._w and h == self._h:
+                        return int(idx)
+            except Exception:
+                pass
+            return 0
+
     def set_resolution_index(self, idx: int):
         try:
             self._cam.put_eSize(int(idx))

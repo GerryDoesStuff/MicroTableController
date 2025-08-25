@@ -35,3 +35,6 @@ class MockCamera:
 
     def set_resolution_index(self, idx):
         self._resolution_idx = int(idx)
+
+    def get_resolution_index(self):
+        return int(self._resolution_idx)
