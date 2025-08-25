@@ -117,6 +117,7 @@ class MainWindow(QtWidgets.QMainWindow):
         leftw = QtWidgets.QWidget()
         left = QtWidgets.QVBoxLayout(leftw)
         self.stage_status = QtWidgets.QLabel("Stage: —")
+        self.stage_status.setTextFormat(QtCore.Qt.PlainText)
         self.stage_pos = QtWidgets.QLabel("Pos: —")
         self.btn_stage_connect = QtWidgets.QPushButton("Connect Stage")
         self.btn_stage_disconnect = QtWidgets.QPushButton("Disconnect Stage")
@@ -490,7 +491,7 @@ class MainWindow(QtWidgets.QMainWindow):
             uuid = info.get("uuid")
             text = f"Stage: {name}"
             if uuid:
-                text += f" ({uuid})"
+                text += f"\n{uuid}"
             self.stage_status.setText(text)
             try:
                 self.stage_bounds = self.stage.get_bounds()
