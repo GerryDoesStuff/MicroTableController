@@ -156,7 +156,17 @@ class ToupcamCamera:
 
         # ensure highest bandwidth mode if supported
         try:
-            maxspeed = self._cam.get_MaxSpeed()
+            if hasattr(self._cam, "get_MaxSpeed"):
+                maxspeed = self._cam.get_MaxSpeed()
+            elif hasattr(self._cam, "MaxSpeed"):
+                maxspeed = self._cam.MaxSpeed()
+            else:
+                maxspeed = None
+
+            if maxspeed is None:
+                log("Camera: speed query not supported")
+                return
+
             cur = self._cam.get_Speed() if hasattr(self._cam, "get_Speed") else None
             log(f"Camera: speed levels 0-{maxspeed}, current {cur}")
             if cur is None or cur < maxspeed:

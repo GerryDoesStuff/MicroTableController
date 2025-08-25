@@ -1325,6 +1325,10 @@ class Toupcam:
         """get the maximum speed, 'Frame Speed Level'"""
         return self.__lib.Toupcam_get_MaxSpeed(self.__h)
 
+    def get_MaxSpeed(self):
+        """compatibility alias for MaxSpeed"""
+        return self.MaxSpeed()
+
     def MaxBitDepth(self):
         """get the max bitdepth of this camera, such as 8, 10, 12, 14, 16"""
         return self.__lib.Toupcam_get_MaxBitDepth(self.__h)
