@@ -215,22 +215,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setRange(-255, 255)
         self.brightness_spin = QtWidgets.QSpinBox(); self.brightness_spin.setRange(-255, 255); self.brightness_spin.setValue(0)
+        self.brightness_slider.setValue(self.brightness_spin.value())
         c.addWidget(QtWidgets.QLabel("Brightness:"), row, 0); c.addWidget(self.brightness_slider, row, 1); c.addWidget(self.brightness_spin, row, 2); row += 1
 
         self.contrast_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.contrast_slider.setRange(-255, 255)
         self.contrast_spin = QtWidgets.QSpinBox(); self.contrast_spin.setRange(-255, 255); self.contrast_spin.setValue(0)
+        self.contrast_slider.setValue(self.contrast_spin.value())
         c.addWidget(QtWidgets.QLabel("Contrast:"), row, 0); c.addWidget(self.contrast_slider, row, 1); c.addWidget(self.contrast_spin, row, 2); row += 1
 
         self.saturation_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.saturation_slider.setRange(0, 255)
         self.saturation_spin = QtWidgets.QSpinBox(); self.saturation_spin.setRange(0, 255); self.saturation_spin.setValue(128)
+        self.saturation_slider.setValue(self.saturation_spin.value())
         c.addWidget(QtWidgets.QLabel("Saturation:"), row, 0); c.addWidget(self.saturation_slider, row, 1); c.addWidget(self.saturation_spin, row, 2); row += 1
 
         self.hue_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.hue_slider.setRange(-180, 180)
         self.hue_spin = QtWidgets.QSpinBox(); self.hue_spin.setRange(-180, 180); self.hue_spin.setValue(0)
+        self.hue_slider.setValue(self.hue_spin.value())
         c.addWidget(QtWidgets.QLabel("Hue:"), row, 0); c.addWidget(self.hue_slider, row, 1); c.addWidget(self.hue_spin, row, 2); row += 1
 
         self.gamma_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.gamma_slider.setRange(20, 180)
         self.gamma_spin = QtWidgets.QSpinBox(); self.gamma_spin.setRange(20, 180); self.gamma_spin.setValue(100)
+        self.gamma_slider.setValue(self.gamma_spin.value())
         c.addWidget(QtWidgets.QLabel("Gamma:"), row, 0); c.addWidget(self.gamma_slider, row, 1); c.addWidget(self.gamma_spin, row, 2); row += 1
 
         self.raw_chk = QtWidgets.QCheckBox("RAW8 fast mono (triples bandwidth efficiency)")
@@ -600,27 +605,37 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             if hasattr(self.camera, "get_brightness"):
-                self.brightness_spin.setValue(int(self.camera.get_brightness()))
+                val = int(self.camera.get_brightness())
+                self.brightness_spin.setValue(val)
+                self.brightness_slider.setValue(val)
         except Exception:
             pass
         try:
             if hasattr(self.camera, "get_contrast"):
-                self.contrast_spin.setValue(int(self.camera.get_contrast()))
+                val = int(self.camera.get_contrast())
+                self.contrast_spin.setValue(val)
+                self.contrast_slider.setValue(val)
         except Exception:
             pass
         try:
             if hasattr(self.camera, "get_saturation"):
-                self.saturation_spin.setValue(int(self.camera.get_saturation()))
+                val = int(self.camera.get_saturation())
+                self.saturation_spin.setValue(val)
+                self.saturation_slider.setValue(val)
         except Exception:
             pass
         try:
             if hasattr(self.camera, "get_hue"):
-                self.hue_spin.setValue(int(self.camera.get_hue()))
+                val = int(self.camera.get_hue())
+                self.hue_spin.setValue(val)
+                self.hue_slider.setValue(val)
         except Exception:
             pass
         try:
             if hasattr(self.camera, "get_gamma"):
-                self.gamma_spin.setValue(int(self.camera.get_gamma()))
+                val = int(self.camera.get_gamma())
+                self.gamma_spin.setValue(val)
+                self.gamma_slider.setValue(val)
         except Exception:
             pass
 
