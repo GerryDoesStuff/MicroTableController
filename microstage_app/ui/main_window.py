@@ -579,11 +579,24 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.camera:
             return
         frame = self.camera.get_latest_frame()
-        if frame is None:
-            return
-        qimg = numpy_to_qimage(frame)
-        self.live_label.setPixmap(QtGui.QPixmap.fromImage(qimg).scaled(
-            self.live_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        if frame is not None:
+            qimg = numpy_to_qimage(frame)
+            self.live_label.setPixmap(QtGui.QPixmap.fromImage(qimg).scaled(
+                self.live_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+
+        if self.autoexp_chk.isChecked():
+            try:
+                self.exp_spin.blockSignals(True)
+                self.gain_spin.blockSignals(True)
+                ms = float(self.camera.get_exposure_ms())
+                gain = int(self.camera.get_gain())
+                self.exp_spin.setValue(ms)
+                self.gain_spin.setValue(gain)
+            except Exception:
+                pass
+            finally:
+                self.exp_spin.blockSignals(False)
+                self.gain_spin.blockSignals(False)
 
     def _update_fps(self):
         if self.camera:
@@ -656,6 +669,21 @@ class MainWindow(QtWidgets.QMainWindow):
         auto = self.autoexp_chk.isChecked()
         ms = self.exp_spin.value()
         self.camera.set_exposure_ms(ms, auto)
+        self.exp_spin.setEnabled(not auto)
+        self.gain_spin.setEnabled(not auto)
+        if auto:
+            try:
+                self.exp_spin.blockSignals(True)
+                self.gain_spin.blockSignals(True)
+                ms = float(self.camera.get_exposure_ms())
+                gain = int(self.camera.get_gain())
+                self.exp_spin.setValue(ms)
+                self.gain_spin.setValue(gain)
+            except Exception:
+                pass
+            finally:
+                self.exp_spin.blockSignals(False)
+                self.gain_spin.blockSignals(False)
 
     def _apply_gain(self):
         if not self.camera: return

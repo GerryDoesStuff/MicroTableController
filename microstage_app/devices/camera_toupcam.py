@@ -457,6 +457,20 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: set_gain failed: {e}")
 
+    def get_exposure_ms(self) -> float:
+        try:
+            return float(self._cam.get_ExpoTime()) / 1000.0
+        except Exception as e:
+            log(f"Camera: get_exposure_ms failed: {e}")
+            return 0.0
+
+    def get_gain(self) -> int:
+        try:
+            return int(self._cam.get_ExpoAGain())
+        except Exception as e:
+            log(f"Camera: get_gain failed: {e}")
+            return 0
+
     # ---- image controls ----
 
     def get_brightness(self) -> int:
