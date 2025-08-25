@@ -612,7 +612,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.camera:
             return
         self.res_combo.blockSignals(True)
+        res = list(self.camera.list_resolutions())
         self.res_combo.clear()
+        for idx, w, h in res:
+            self.res_combo.addItem(f"{w}×{h}", idx)
         current = 0
         try:
             if hasattr(self.camera, "get_resolution_index"):
