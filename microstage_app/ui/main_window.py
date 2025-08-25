@@ -428,8 +428,8 @@ class MainWindow(QtWidgets.QMainWindow):
             cam = create_camera()
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
-            self.camera.start_stream()
             self._populate_resolutions()
+            self.camera.start_stream()
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()

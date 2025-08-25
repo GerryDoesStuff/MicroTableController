@@ -232,19 +232,7 @@ class ToupcamCamera:
                 log(f"Camera: PullImage error: {e}")
 
         self._on_event = _on_event
-        try:
-            self._cam.StartPullModeWithCallback(self._on_event, self)
-        except TypeError:
-            self._cam.StartPullModeWithCallback(self._on_event)
-        log("Camera: pull mode started")
-
-        # Sensible defaults
-        try:
-            self._cam.put_AutoExpoEnable(0)
-        except Exception:
-            pass
-
-        self._is_streaming = True
+        # Stream startup is deferred to start_stream()
 
     # ---------------- public API used by UI ----------------
 
@@ -254,7 +242,6 @@ class ToupcamCamera:
     def start_stream(self):
         if self._cam is None:
             self._open()
-            return
 
         if self._is_streaming:
             return
