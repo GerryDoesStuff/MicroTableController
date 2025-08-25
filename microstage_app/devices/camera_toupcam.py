@@ -57,6 +57,9 @@ class ToupcamCamera:
         self._sensor_w = 0
         self._sensor_h = 0
 
+        # cache for probed resolution list
+        self._res_cache = None
+
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
         self._first_logged = False
@@ -306,6 +309,84 @@ class ToupcamCamera:
         self._display_every = max(1, int(n))
         log(f"Camera: display every {self._display_every} frame(s)")
 
+    def _probe_resolutions(self):
+        """Attempt to discover valid resolutions when enumeration is unavailable."""
+        if self._res_cache is not None:
+            return self._res_cache
+
+        # stop streaming temporarily as some cameras require this for size changes
+        was_streaming = False
+        try:
+            if self._is_streaming:
+                self._cam.Stop()
+                was_streaming = True
+        except Exception:
+            was_streaming = False
+
+        # remember current settings
+        cur_idx = None
+        cur_size = (self._w, self._h)
+        try:
+            cur_idx = int(self._cam.get_eSize())
+        except Exception:
+            cur_idx = None
+
+        candidates = []
+        try:
+            n = self._cam.get_ResolutionNumber()
+            for i in range(n):
+                w, h = self._cam.get_Resolution(i)
+                candidates.append((i, w, h))
+        except Exception:
+            candidates = []
+
+        if not candidates:
+            # fall back to halving the sensor size
+            sw = self._sensor_w or self._w
+            sh = self._sensor_h or self._h
+            if sw and sh:
+                candidates.append((None, sw, sh))
+                for n in range(1, 5):
+                    w = sw // (2 ** n)
+                    h = sh // (2 ** n)
+                    if w <= 0 or h <= 0:
+                        break
+                    candidates.append((None, w, h))
+
+        found = []
+        for idx, w, h in candidates:
+            try:
+                if idx is not None and hasattr(self._cam, "put_eSize"):
+                    self._cam.put_eSize(idx)
+                elif hasattr(self._cam, "put_Size"):
+                    self._cam.put_Size(w, h)
+                else:
+                    continue
+                rw, rh = self._cam.get_Size()
+                if rw == w and rh == h:
+                    found.append((idx if idx is not None else len(found), rw, rh))
+            except Exception:
+                continue
+
+        # restore previous resolution
+        try:
+            if cur_idx is not None and hasattr(self._cam, "put_eSize"):
+                self._cam.put_eSize(cur_idx)
+            elif hasattr(self._cam, "put_Size"):
+                self._cam.put_Size(*cur_size)
+        except Exception:
+            pass
+        self._update_dimensions()
+
+        if was_streaming:
+            try:
+                self.start_stream()
+            except Exception:
+                pass
+
+        self._res_cache = found if found else [(0, cur_size[0], cur_size[1])]
+        return self._res_cache
+
     def list_resolutions(self):
         """Return [(index, w, h), ...] for video sizes, if supported."""
         out = []
@@ -315,8 +396,9 @@ class ToupcamCamera:
                 w, h = self._cam.get_Resolution(i)
                 out.append((i, w, h))
         except Exception:
-            # fallback: just report current
-            out.append((0, self._w, self._h))
+            out = []
+        if not out:
+            return self._probe_resolutions()
         return out
 
     def get_resolution_index(self) -> int:
