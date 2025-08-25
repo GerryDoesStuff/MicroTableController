@@ -417,18 +417,17 @@ class ToupcamCamera:
                 seen.add((w, h))
                 uniq.append((idx, w, h))
 
-        if len(uniq) < 4:
-            try:
-                probes = self._probe_resolutions()
-                for idx, w, h in probes:
-                    if (w, h) not in seen:
-                        seen.add((w, h))
-                        uniq.append((idx, w, h))
-                if not uniq:
-                    return probes
-            except Exception:
-                if not uniq:
-                    return self._probe_resolutions()
+        try:
+            probes = self._probe_resolutions()
+            for idx, w, h in probes:
+                if (w, h) not in seen:
+                    seen.add((w, h))
+                    uniq.append((idx, w, h))
+            if not uniq:
+                return probes
+        except Exception:
+            if not uniq:
+                return self._probe_resolutions()
 
         return uniq
 
