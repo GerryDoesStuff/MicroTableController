@@ -44,6 +44,42 @@ def test_identifiers_match(monkeypatch):
     assert find_marlin_port() == "COMX"
 
 
+def test_identifiers_match_with_spaces(monkeypatch):
+    from microstage_app.devices import stage_marlin
+
+    class Port:
+        device = "COMS"
+        vid = 0x1A86
+        pid = 0x7523
+
+    class DummySerial:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+        def reset_input_buffer(self):
+            pass
+
+        def write(self, data):
+            pass
+
+        def read(self, n):
+            return (
+                b"FIRMWARE_NAME:Marlin MACHINE_TYPE: MicroStageController UUID: a3a4637a-68c4-4340-9fda-847b4fe0d3fc\nok\n"
+            )
+
+    monkeypatch.setattr(stage_marlin.list_ports, "comports", lambda: [Port()])
+    monkeypatch.setattr(stage_marlin.serial, "Serial", DummySerial)
+    monkeypatch.setattr(stage_marlin.time, "sleep", lambda x: None)
+
+    assert find_marlin_port() == "COMS"
+
+
 def test_machine_name_mismatch(monkeypatch):
     from microstage_app.devices import stage_marlin
 
