@@ -329,6 +329,7 @@ class ToupcamCamera:
         try:
             if self._is_streaming:
                 self._cam.Stop()
+                self._is_streaming = False
                 was_streaming = True
         except Exception:
             was_streaming = False
