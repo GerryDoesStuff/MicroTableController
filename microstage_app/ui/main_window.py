@@ -161,20 +161,17 @@ class MainWindow(QtWidgets.QMainWindow):
         # ---- Jog tab
         jog = QtWidgets.QWidget()
         j = QtWidgets.QGridLayout(jog)
-        self.step_spin = QtWidgets.QDoubleSpinBox()
-        self.step_spin.setDecimals(3)
-        self.step_spin.setRange(0.001, 1000.0)  # allow big moves
-        self.step_spin.setValue(0.100)
-        self.feed_spin = QtWidgets.QDoubleSpinBox()
         limits = _load_feed_limits()
-        max_feed = (min(limits) / 60.0) if limits else 1.0
-        self.feed_spin.setRange(0.01, max_feed)
-        self.feed_spin.setValue(20.0 / 60.0)
-        self.feed_limits = QtWidgets.QLabel()
-        if limits:
-            self.feed_limits.setText(
-                f"Limits: X {limits[0]:.0f} / Y {limits[1]:.0f} / Z {limits[2]:.0f} mm/min"
-            )
+        # per-axis step and feed controls
+        self.stepx_spin = QtWidgets.QDoubleSpinBox(); self.stepx_spin.setDecimals(3); self.stepx_spin.setRange(0.001, 1000.0); self.stepx_spin.setValue(0.100)
+        self.stepy_spin = QtWidgets.QDoubleSpinBox(); self.stepy_spin.setDecimals(3); self.stepy_spin.setRange(0.001, 1000.0); self.stepy_spin.setValue(0.100)
+        self.stepz_spin = QtWidgets.QDoubleSpinBox(); self.stepz_spin.setDecimals(3); self.stepz_spin.setRange(0.001, 1000.0); self.stepz_spin.setValue(0.100)
+        self.feedx_spin = QtWidgets.QDoubleSpinBox(); self.feedx_spin.setRange(0.01, limits[0] if limits else 1000.0); self.feedx_spin.setValue(20.0)
+        self.feedy_spin = QtWidgets.QDoubleSpinBox(); self.feedy_spin.setRange(0.01, limits[1] if limits else 1000.0); self.feedy_spin.setValue(20.0)
+        self.feedz_spin = QtWidgets.QDoubleSpinBox(); self.feedz_spin.setRange(0.01, limits[2] if limits else 1000.0); self.feedz_spin.setValue(20.0)
+        self.feed_limit_x = QtWidgets.QLabel(f"\u2264 {limits[0]:.0f} mm/min" if limits else "")
+        self.feed_limit_y = QtWidgets.QLabel(f"\u2264 {limits[1]:.0f} mm/min" if limits else "")
+        self.feed_limit_z = QtWidgets.QLabel(f"\u2264 {limits[2]:.0f} mm/min" if limits else "")
         self.btn_home_all = QtWidgets.QPushButton("Home All")
         self.btn_home_x = QtWidgets.QPushButton("Home X")
         self.btn_home_y = QtWidgets.QPushButton("Home Y")
@@ -185,21 +182,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_yp = QtWidgets.QPushButton("Y+")
         self.btn_zm = QtWidgets.QPushButton("Z-")
         self.btn_zp = QtWidgets.QPushButton("Z+")
-        j.addWidget(QtWidgets.QLabel("Step (mm):"), 0, 0)
-        j.addWidget(self.step_spin, 0, 1)
-        j.addWidget(QtWidgets.QLabel("Feed (mm/s):"), 1, 0)
-        j.addWidget(self.feed_spin, 1, 1)
-        j.addWidget(self.feed_limits, 2, 0, 1, 2)
-        j.addWidget(self.btn_home_all, 3, 0, 1, 2)
-        j.addWidget(self.btn_home_x, 4, 0)
-        j.addWidget(self.btn_home_y, 4, 1)
-        j.addWidget(self.btn_home_z, 5, 0, 1, 2)
-        j.addWidget(self.btn_xm, 6, 0)
-        j.addWidget(self.btn_xp, 6, 1)
-        j.addWidget(self.btn_ym, 7, 0)
-        j.addWidget(self.btn_yp, 7, 1)
-        j.addWidget(self.btn_zm, 8, 0)
-        j.addWidget(self.btn_zp, 8, 1)
+        # layout rows per axis
+        j.addWidget(QtWidgets.QLabel("X Step (mm)"), 0, 0)
+        j.addWidget(self.stepx_spin, 0, 1)
+        j.addWidget(QtWidgets.QLabel("X Feed (mm/min)"), 0, 2)
+        j.addWidget(self.feedx_spin, 0, 3)
+        j.addWidget(self.feed_limit_x, 0, 4)
+        j.addWidget(QtWidgets.QLabel("Y Step (mm)"), 1, 0)
+        j.addWidget(self.stepy_spin, 1, 1)
+        j.addWidget(QtWidgets.QLabel("Y Feed (mm/min)"), 1, 2)
+        j.addWidget(self.feedy_spin, 1, 3)
+        j.addWidget(self.feed_limit_y, 1, 4)
+        j.addWidget(QtWidgets.QLabel("Z Step (mm)"), 2, 0)
+        j.addWidget(self.stepz_spin, 2, 1)
+        j.addWidget(QtWidgets.QLabel("Z Feed (mm/min)"), 2, 2)
+        j.addWidget(self.feedz_spin, 2, 3)
+        j.addWidget(self.feed_limit_z, 2, 4)
+        # remaining controls
+        j.addWidget(self.btn_home_all, 3, 0, 1, 5)
+        j.addWidget(self.btn_home_x, 4, 0, 1, 2)
+        j.addWidget(self.btn_home_y, 4, 2, 1, 2)
+        j.addWidget(self.btn_home_z, 5, 0, 1, 5)
+        j.addWidget(self.btn_xm, 6, 0, 1, 2)
+        j.addWidget(self.btn_xp, 6, 2, 1, 2)
+        j.addWidget(self.btn_ym, 7, 0, 1, 2)
+        j.addWidget(self.btn_yp, 7, 2, 1, 2)
+        j.addWidget(self.btn_zm, 8, 0, 1, 2)
+        j.addWidget(self.btn_zp, 8, 2, 1, 2)
         rightw.addTab(jog, "Jog")
 
         # ---- Camera tab (performance controls)
@@ -334,12 +343,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
         self.btn_home_y.clicked.connect(lambda: self._home_axis('y'))
         self.btn_home_z.clicked.connect(lambda: self._home_axis('z'))
-        self._setup_jog_button(self.btn_xm, sx=-1)
-        self._setup_jog_button(self.btn_xp, sx=1)
-        self._setup_jog_button(self.btn_ym, sy=-1)
-        self._setup_jog_button(self.btn_yp, sy=1)
-        self._setup_jog_button(self.btn_zm, sz=-1)
-        self._setup_jog_button(self.btn_zp, sz=1)
+        self._setup_jog_button(self.btn_xm, self.stepx_spin, self.feedx_spin, sx=-1)
+        self._setup_jog_button(self.btn_xp, self.stepx_spin, self.feedx_spin, sx=1)
+        self._setup_jog_button(self.btn_ym, self.stepy_spin, self.feedy_spin, sy=-1)
+        self._setup_jog_button(self.btn_yp, self.stepy_spin, self.feedy_spin, sy=1)
+        self._setup_jog_button(self.btn_zm, self.stepz_spin, self.feedz_spin, sz=-1)
+        self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
@@ -375,11 +384,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
 
-    def _setup_jog_button(self, btn, sx=0, sy=0, sz=0):
+    def _setup_jog_button(self, btn, step_spin, feed_spin, sx=0, sy=0, sz=0):
         def _pressed():
-            step = self.step_spin.value()
-            self._jog(step * sx, step * sy, step * sz, wait_ok=True)
-            self._jog_dir = (sx, sy, sz)
+            step = step_spin.value()
+            feed = feed_spin.value()
+            self._jog(step * sx, step * sy, step * sz, feed, wait_ok=True)
+            self._jog_dir = (sx, sy, sz, step_spin, feed_spin)
             self._jog_hold_timer.start(1000)
 
         def _released():
@@ -396,9 +406,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _repeat_jog(self, _res=None):
         if not self._jog_dir:
             return
-        sx, sy, sz = self._jog_dir
-        step = self.step_spin.value()
-        self._jog(step * sx, step * sy, step * sz, wait_ok=True, callback=self._repeat_jog)
+        sx, sy, sz, step_spin, feed_spin = self._jog_dir
+        step = step_spin.value()
+        feed = feed_spin.value()
+        self._jog(step * sx, step * sy, step * sz, feed, wait_ok=True, callback=self._repeat_jog)
 
     @QtCore.Slot(str)
     def _append_log(self, line: str):
@@ -779,12 +790,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stage.get_position, callback=self._on_stage_position
         )
 
-    def _jog(self, dx=0, dy=0, dz=0, *, wait_ok=True, callback=None):
+    def _jog(self, dx=0, dy=0, dz=0, feed=0, *, wait_ok=True, callback=None):
         if not self.stage_worker:
             log("Jog ignored: stage not connected")
             QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
             return
-        f = max(1.0, float(self.feed_spin.value()) * 60.0)  # mm/s -> mm/min
+        f = max(1.0, float(feed))
         log(f"Jog: dx={dx} dy={dy} dz={dz} F={f}")
         self.stage_worker.enqueue(
             self.stage.move_relative,
