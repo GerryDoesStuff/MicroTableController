@@ -1,4 +1,5 @@
 import time
+import re
 import serial
 from serial.tools import list_ports
 from ..utils.log import log
@@ -154,14 +155,28 @@ class StageMarlin:
 
     def get_info(self):
         resp = self.send("M115")
+        machine_type = None
         name = None
         uuid = None
-        for token in resp.replace("\n", " ").split():
-            if token.startswith("MACHINE_TYPE:") or token.startswith("MACHINE_NAME:"):
-                name = token.split(":", 1)[1]
-            elif token.startswith("UUID:") or token.startswith("MACHINE_UUID:"):
-                uuid = token.split(":", 1)[1]
-        return {"name": name, "uuid": uuid, "raw": resp}
+        # tokens may contain spaces after ':' so parse with regex/semicolon split
+        parts = re.findall(
+            r"(MACHINE_TYPE|MACHINE_NAME|UUID|MACHINE_UUID)\s*:\s*([^\s;]+)",
+            resp,
+            flags=re.IGNORECASE,
+        )
+        for key, value in parts:
+            key = key.upper()
+            value = value.strip()
+            if key == "MACHINE_TYPE":
+                machine_type = value
+            elif key == "MACHINE_NAME":
+                name = value
+            elif key in ("UUID", "MACHINE_UUID"):
+                uuid = value
+        info = {"machine_type": machine_type, "uuid": uuid, "raw": resp}
+        if name is not None:
+            info["name"] = name
+        return info
 
     def get_bounds(self):
         resp = self.send("M211")

@@ -483,7 +483,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.stage = stage
             info = self.stage.get_info()
-            name = info.get("name") or "connected"
+            name = info.get("machine_type") or info.get("name") or "connected"
             uuid = info.get("uuid")
             text = f"Stage: {name}"
             if uuid:
