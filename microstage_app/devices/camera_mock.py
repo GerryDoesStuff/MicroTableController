@@ -6,6 +6,7 @@ class MockCamera:
         self._running = False
         self._latest = None
         self._t = 0.0
+        self._resolution_idx = 0
 
     def name(self): return "MockCamera"
     def start_stream(self): self._running = True
@@ -22,3 +23,15 @@ class MockCamera:
 
     def snap(self):
         return self.get_latest_frame()
+
+    # Mock resolution handling -------------------------------------------------
+
+    def list_resolutions(self):
+        """Return a small list of fake resolution tuples."""
+        return [
+            (0, 640, 480),
+            (1, 320, 240),
+        ]
+
+    def set_resolution_index(self, idx):
+        self._resolution_idx = int(idx)
