@@ -99,11 +99,12 @@ class StageMarlin:
             pass
 
     def _send_log(self, cmd):
-        line = (cmd.strip() + "\n").encode()
-        log(f"TX >> {cmd}")
-        self.ser.write(line)
+        line = cmd.strip()
+        log(f"TX >> {line}")
+        self._write(line)
 
     def _write(self, cmd):
+        self.ser.reset_input_buffer()
         self.ser.write((cmd.strip() + '\n').encode())
 
     def _read_until_ok(self):
