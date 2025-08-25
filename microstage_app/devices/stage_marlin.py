@@ -193,8 +193,9 @@ class StageMarlin:
 
     def get_position(self):
         resp = self.send("M114")
+        before_count = resp.split("Count", 1)[0]
         x = y = z = None
-        for token in resp.replace("Count", "").split():
+        for token in before_count.split():
             if token.startswith("X:"):
                 try: x = float(token[2:])
                 except ValueError: pass
