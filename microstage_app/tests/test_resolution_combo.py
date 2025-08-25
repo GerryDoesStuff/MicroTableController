@@ -21,7 +21,7 @@ def test_res_combo_lists_and_updates(monkeypatch, qt_app):
                 (1, 1280, 720),
                 (2, 640, 480),
             ]
-            self.current_idx = 0
+            self.current_idx = 1
 
         def name(self):
             return "FakeCam"
@@ -35,6 +35,9 @@ def test_res_combo_lists_and_updates(monkeypatch, qt_app):
         def set_resolution_index(self, idx):
             self.current_idx = idx
 
+        def get_resolution_index(self):
+            return self.current_idx
+
     fake = FakeCamera()
     monkeypatch.setattr(mw, "create_camera", lambda: fake)
     monkeypatch.setattr(mw.MainWindow, "_auto_connect_async", lambda self: None)
@@ -44,6 +47,7 @@ def test_res_combo_lists_and_updates(monkeypatch, qt_app):
 
     items = [win.res_combo.itemText(i) for i in range(win.res_combo.count())]
     assert items == [f"{w}×{h}" for _, w, h in fake.resolutions]
+    assert win.res_combo.currentIndex() == fake.current_idx
 
     win.res_combo.setCurrentIndex(2)
     win._apply_resolution(2)
