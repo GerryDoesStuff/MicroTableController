@@ -57,8 +57,13 @@ class ToupcamCamera:
         self._sensor_w = 0
         self._sensor_h = 0
 
-        # cache for probed resolution list
-        self._res_cache = None
+        # caches for resolution handling
+        self._base_res = None   # unbinned base resolution list
+        self._probe_cache = None
+
+        # binning support
+        self._bin_factors = [1]
+        self._binning = 1
 
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
@@ -79,6 +84,7 @@ class ToupcamCamera:
         self._is_streaming = False
 
         self._open()
+        self._query_binning_options()
 
     # ---------------- internal ----------------
 
@@ -173,6 +179,27 @@ class ToupcamCamera:
                 self.set_speed_level(maxspeed)
         except Exception as e:
             log(f"Camera: speed query failed: {e}")
+
+    def _query_binning_options(self):
+        """Populate supported digital binning factors if available."""
+        self._bin_factors = [1]
+        try:
+            if hasattr(self._cam, "get_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BINNING"):
+                val = self._cam.get_Option(self._tp.TOUPCAM_OPTION_BINNING)
+                # High bits may encode supported factors; try both interpretations
+                mask = val >> 8
+                if mask:
+                    for n in range(2, 9):
+                        if mask & (1 << n):
+                            self._bin_factors.append(n)
+                else:
+                    for n in range(2, 9):
+                        if val & (1 << n):
+                            self._bin_factors.append(n)
+                self._binning = int(val & 0x3F) if (val & 0x3F) else 1
+        except Exception:
+            self._bin_factors = [1]
+            self._binning = 1
 
     def _open(self):
         log(f"Camera: opening {self._name}")
@@ -321,8 +348,8 @@ class ToupcamCamera:
 
     def _probe_resolutions(self):
         """Attempt to discover valid resolutions when enumeration is unavailable."""
-        if self._res_cache is not None:
-            return self._res_cache
+        if self._probe_cache is not None:
+            return self._probe_cache
 
         # stop streaming temporarily as some cameras require this for size changes
         was_streaming = False
@@ -396,11 +423,14 @@ class ToupcamCamera:
             except Exception:
                 pass
 
-        self._res_cache = found if found else [(0, cur_size[0], cur_size[1])]
-        return self._res_cache
+        self._probe_cache = found if found else [(0, cur_size[0], cur_size[1])]
+        return self._probe_cache
 
-    def list_resolutions(self):
-        """Return [(index, w, h), ...] for video sizes, if supported."""
+    def _base_resolutions(self):
+        """Return unbinned resolution list [(index, w, h), ...]."""
+        if self._base_res is not None:
+            return self._base_res
+
         out = []
         try:
             n = self._cam.get_ResolutionNumber()
@@ -424,12 +454,51 @@ class ToupcamCamera:
                     seen.add((w, h))
                     uniq.append((idx, w, h))
             if not uniq:
-                return probes
+                self._base_res = probes
+                return self._base_res
         except Exception:
             if not uniq:
-                return self._probe_resolutions()
+                self._base_res = self._probe_resolutions()
+                return self._base_res
 
-        return uniq
+        self._base_res = uniq
+        return self._base_res
+
+    def list_resolutions(self, binning: int | None = None):
+        """Return [(index, w, h), ...] adjusted for binning."""
+        base = list(self._base_resolutions())
+        try:
+            b = int(binning) if binning is not None else int(self.get_binning())
+        except Exception:
+            b = 1
+        if b <= 1:
+            return base
+        return [(idx, w // b, h // b) for idx, w, h in base]
+
+    def list_binning_factors(self):
+        """Return a list of supported binning factors."""
+        return list(self._bin_factors)
+
+    def get_binning(self) -> int:
+        """Return current binning factor (>=1)."""
+        try:
+            if hasattr(self._cam, "get_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BINNING"):
+                val = self._cam.get_Option(self._tp.TOUPCAM_OPTION_BINNING)
+                self._binning = int(val & 0x3F) if (val & 0x3F) else 1
+        except Exception:
+            pass
+        return int(self._binning)
+
+    def set_binning(self, n: int):
+        n = max(1, int(n))
+        try:
+            if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BINNING"):
+                val = 1 if n <= 1 else (0x80 | n)
+                self._cam.put_Option(self._tp.TOUPCAM_OPTION_BINNING, val)
+                self._binning = n
+                self._update_dimensions()
+        except Exception as e:
+            log(f"Camera: set_binning failed: {e}")
 
     def get_resolution_index(self) -> int:
         """Return current resolution index if available."""
