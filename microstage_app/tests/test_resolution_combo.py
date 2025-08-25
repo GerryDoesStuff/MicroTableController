@@ -151,3 +151,54 @@ def test_toupcam_probe_resolutions(monkeypatch, qt_app):
     win.preview_timer.stop()
     win.fps_timer.stop()
     win.close()
+
+
+def test_toupcam_dedup_and_halved(monkeypatch, qt_app):
+    class FakeCam:
+        def __init__(self):
+            self.allowed = [(2464, 2464), (1232, 1232), (616, 616)]
+            self.size = self.allowed[0]
+            self.idx = 0
+
+        def get_ResolutionNumber(self):
+            return 2
+
+        def get_Resolution(self, _):
+            return (2464, 2464)
+
+        def get_eSize(self):
+            return self.idx
+
+        def put_eSize(self, idx):
+            if idx != 0:
+                raise RuntimeError("bad idx")
+            self.idx = idx
+            self.size = (2464, 2464)
+
+        def get_Size(self):
+            return self.size
+
+        def put_Size(self, w, h):
+            if (w, h) not in self.allowed:
+                raise RuntimeError("unsupported")
+            self.size = (w, h)
+
+    class FakeTp:
+        class Toupcam:
+            @staticmethod
+            def Open(_):
+                return FakeCam()
+
+    monkeypatch.setattr(camera_toupcam.ToupcamCamera, "_force_rgb_or_raw", lambda self: None)
+    monkeypatch.setattr(camera_toupcam.ToupcamCamera, "_init_usb_and_speed", lambda self: None)
+
+    cam = camera_toupcam.ToupcamCamera(FakeTp, 0, "Fake")
+    cam.start_stream = lambda: None
+    cam.stop_stream = lambda: None
+
+    res = cam.list_resolutions()
+    assert res == [
+        (0, 2464, 2464),
+        (1, 1232, 1232),
+        (2, 616, 616),
+    ]
