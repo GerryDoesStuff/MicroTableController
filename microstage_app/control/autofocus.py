@@ -24,7 +24,7 @@ class AutoFocus:
         self.stage = stage
         self.camera = camera
 
-    def coarse_to_fine(self, metric: FocusMetric, z_range_mm=0.5, coarse_step_mm=0.05, fine_step_mm=0.01):
+    def coarse_to_fine(self, metric: FocusMetric, z_range_mm=0.5, coarse_step_mm=0.01, fine_step_mm=0.002):
         samples = []
         steps = int(max(1, round(z_range_mm / coarse_step_mm)))
         zs = [(-steps + i) * coarse_step_mm for i in range(2*steps + 1)]
