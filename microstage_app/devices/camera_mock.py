@@ -13,10 +13,16 @@ class MockCamera:
     def stop_stream(self): self._running = False
 
     def get_latest_frame(self):
-        h, w = 480, 640
+        """Generate a grayscale gradient image at the selected resolution."""
+        try:
+            _, w, h = self.list_resolutions()[self._resolution_idx]
+        except Exception:
+            # Fall back to the first resolution if index is invalid
+            _, w, h = self.list_resolutions()[0]
+
         x = np.linspace(0, 1, w, dtype=np.float32)
         y = np.linspace(0, 1, h, dtype=np.float32)[:, None]
-        img = (x + y + 0.2*np.sin(10*(x+y+self._t))) % 1.0
+        img = (x + y + 0.2 * np.sin(10 * (x + y + self._t))) % 1.0
         self._t += 0.05
         rgb = np.dstack([img, img, img])
         return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
@@ -35,3 +41,6 @@ class MockCamera:
 
     def set_resolution_index(self, idx):
         self._resolution_idx = int(idx)
+
+    def get_resolution_index(self):
+        return int(self._resolution_idx)

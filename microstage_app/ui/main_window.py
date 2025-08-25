@@ -599,8 +599,17 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.res_combo.blockSignals(True)
         self.res_combo.clear()
+        current = 0
+        try:
+            if hasattr(self.camera, "get_resolution_index"):
+                current = int(self.camera.get_resolution_index())
+        except Exception:
+            current = 0
         for idx, w, h in self.camera.list_resolutions():
             self.res_combo.addItem(f"{w}×{h}", idx)
+        pos = self.res_combo.findData(current)
+        if pos >= 0:
+            self.res_combo.setCurrentIndex(pos)
         self.res_combo.blockSignals(False)
 
     def _sync_cam_controls(self):
