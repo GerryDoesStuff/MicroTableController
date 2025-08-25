@@ -433,8 +433,10 @@ class MainWindow(QtWidgets.QMainWindow):
             cam = create_camera()
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
-            self._populate_resolutions()
             self.camera.start_stream()
+            # populate after stream start so all resolutions are available
+            self._populate_resolutions()
+            QtCore.QTimer.singleShot(0, self._populate_resolutions)
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
@@ -455,6 +457,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preview_timer.stop()
         self.fps_timer.stop()
         self.live_label.clear()
+        self.res_combo.clear()
         self._update_cam_buttons()
 
     def _connect_stage_async(self):
