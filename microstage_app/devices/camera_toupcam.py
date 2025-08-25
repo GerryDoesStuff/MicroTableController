@@ -415,7 +415,15 @@ class ToupcamCamera:
             return 0
 
     def set_resolution_index(self, idx: int):
+        was_streaming = self._is_streaming
         try:
+            if self._is_streaming:
+                try:
+                    self._cam.Stop()
+                except Exception:
+                    pass
+                self._is_streaming = False
+
             self._cam.put_eSize(int(idx))
             # Resolution change resets the full sensor size
             try:
@@ -426,6 +434,12 @@ class ToupcamCamera:
             log(f"Camera: resolution index={idx} -> {self._w}x{self._h}")
         except Exception as e:
             log(f"Camera: set_resolution_index failed: {e}")
+
+        if was_streaming and not self._is_streaming:
+            try:
+                self.start_stream()
+            except Exception:
+                pass
 
     def set_center_roi(self, w: int, h: int):
         """Center a ROI via put_Roi if supported; otherwise try put_Size."""
