@@ -4,7 +4,14 @@ DEFAULTS = {
     'stage': {'feed_mm_s': 20.0 / 60.0, 'settle_ms': 30},
     'camera': {'exposure_ms': 10.0, 'gain': 1.0, 'binning': 1},
     'scan_presets': {
-        'raster': {'pitch_x_mm': 1.0, 'pitch_y_mm': 1.0, 'rows': 5, 'cols': 5}
+        'raster': {
+            'x1_mm': 0.0,
+            'y1_mm': 0.0,
+            'x2_mm': 4.0,
+            'y2_mm': 4.0,
+            'rows': 5,
+            'cols': 5,
+        }
     },
     # persistent capture settings
     'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'bmp'},

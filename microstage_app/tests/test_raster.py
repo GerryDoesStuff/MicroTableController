@@ -26,7 +26,7 @@ def test_raster_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, pitch_x_mm=1.0, pitch_y_mm=1.0, serpentine=True)
+    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True)
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
