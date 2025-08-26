@@ -14,11 +14,25 @@ class RasterConfig:
     feed_y_mm_min: float = 20.0
 
 class RasterRunner:
-    def __init__(self, stage, camera, writer, cfg: RasterConfig):
+    def __init__(
+        self,
+        stage,
+        camera,
+        writer,
+        cfg: RasterConfig,
+        directory=None,
+        base_name="tile",
+        auto_number=False,
+        fmt="tif",
+    ):
         self.stage = stage
         self.camera = camera
         self.writer = writer
         self.cfg = cfg
+        self.directory = directory
+        self.base_name = base_name
+        self.auto_number = auto_number
+        self.fmt = fmt
         self.pitch_x_mm = (
             (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
         )
@@ -57,5 +71,12 @@ class RasterRunner:
                 img = self.camera.snap()
                 if img is not None:
                     save_c = c if forward else (self.cfg.cols - 1 - c)
-                    self.writer.save_tile(img, r, save_c)
+                    fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
+                    self.writer.save_single(
+                        img,
+                        directory=self.directory,
+                        filename=fname,
+                        auto_number=self.auto_number,
+                        fmt=self.fmt,
+                    )
 
