@@ -36,6 +36,24 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 - Profiles & presets: YAML, per-device and per-scan; import/export.
 - Robustness: hot-plug (to be expanded), watchdogs (to be expanded), structured logs.
 - Scripting: run custom recipes from `microstage_app/scripts/` with a safe API.
+- Validated capture directory/filename fields with optional auto-numbering to prevent overwrites.
+
+## Capture directory & file naming
+
+The capture panel lets you choose an output folder and base filename. The fields
+are validated: the directory must be writable (it will be created if missing) and
+the name cannot contain characters such as `\\ / : * ? \" < > |`. The directory,
+base name, and auto-number option are all remembered between runs.
+
+Enabling **Auto-number (_n)** appends an incrementing suffix when a file with the
+same name already exists, preventing accidental overwrites.
+
+Example usage:
+
+1. Set directory to `C:/data/run1` and base name `sample`.
+2. Check **Auto-number (_n)**.
+3. Click **Capture** repeatedly to produce `sample.tif`,
+   `sample_1.tif`, `sample_2.tif`, …
 
 ## Packaging
 ```bash

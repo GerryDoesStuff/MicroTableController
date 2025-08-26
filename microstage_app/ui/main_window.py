@@ -242,6 +242,11 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr3 = QtWidgets.QHBoxLayout()
         ctr3.addWidget(QtWidgets.QLabel("Dir:"))
         self.capture_dir_edit = QtWidgets.QLineEdit(self.capture_dir)
+        self.capture_dir_edit.setPlaceholderText("Folder for captures")
+        self.capture_dir_edit.setToolTip(
+            "Destination folder for captured images. Created if missing and "
+            "remembered between sessions."
+        )
         ctr3.addWidget(self.capture_dir_edit, 1)
         self.btn_browse_dir = QtWidgets.QPushButton("Browse...")
         ctr3.addWidget(self.btn_browse_dir)
@@ -250,9 +255,18 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr4 = QtWidgets.QHBoxLayout()
         ctr4.addWidget(QtWidgets.QLabel("Base name:"))
         self.capture_name_edit = QtWidgets.QLineEdit(self.capture_name)
+        self.capture_name_edit.setPlaceholderText("Base filename")
+        self.capture_name_edit.setToolTip(
+            "Base filename without extension. Must not be empty or contain "
+            "\\ / : * ? \" < > |. Saved between sessions."
+        )
         ctr4.addWidget(self.capture_name_edit)
         self.autonumber_chk = QtWidgets.QCheckBox("Auto-number (_n)")
         self.autonumber_chk.setChecked(self.auto_number)
+        self.autonumber_chk.setToolTip(
+            "If enabled, append an incrementing _n suffix when a file with "
+            "the same name exists to avoid overwriting. Setting persists."
+        )
         ctr4.addWidget(self.autonumber_chk)
         ctr4.addStretch(1)
         center.addLayout(ctr4)
