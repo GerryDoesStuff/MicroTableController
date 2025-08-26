@@ -30,4 +30,10 @@ def test_raster_serpentine(monkeypatch):
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
-    assert stage.moves == [(0.0,1.0,0.0),(-2.0,0.0,0.0),(-2.0,0.0,0.0)]
+    assert stage.moves == [
+        (1.0,0.0,0.0),
+        (1.0,0.0,0.0),
+        (0.0,1.0,0.0),
+        (-1.0,0.0,0.0),
+        (-1.0,0.0,0.0),
+    ]
