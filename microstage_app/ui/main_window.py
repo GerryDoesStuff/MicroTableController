@@ -78,6 +78,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_thread = None
         self._last_worker = None
 
+        # autofocus state
+        self._autofocusing = False
+        self._af_thread = None
+        self._af_worker = None
+
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
 
@@ -886,6 +891,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object, object)
     def _on_autofocus_done(self, best, err):
+        self.btn_autofocus.setEnabled(True)
+        self._autofocusing = False
+        self._af_thread = None
+        self._af_worker = None
         if err:
             log(f"Autofocus error: {err}")
             QtWidgets.QMessageBox.critical(self, "Autofocus", str(err))
@@ -894,11 +903,16 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Autofocus", f"Best Z offset (relative): {best:.4f} mm")
 
     def _run_autofocus(self):
+        if self._autofocusing:
+            log("Autofocus ignored: already running")
+            return
         if not (self.stage and self.camera):
             log("Autofocus ignored: stage or camera not connected")
             return
 
         metric = FocusMetric(self.metric_combo.currentText())
+        self._autofocusing = True
+        self.btn_autofocus.setEnabled(False)
 
         def do_af():
             af = AutoFocus(self.stage, self.camera)
@@ -912,7 +926,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         log(f"Autofocus: metric={metric.value}")
         t, w = run_async(do_af)
-        self._last_thread, self._last_worker = t, w
+        self._af_thread, self._af_worker = t, w
 
         w.finished.connect(self._on_autofocus_done)
 
