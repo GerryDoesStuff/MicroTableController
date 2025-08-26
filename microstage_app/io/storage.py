@@ -25,8 +25,8 @@ class ImageWriter:
             If ``True``, append ``_n`` to ``filename`` where ``n`` increments
             to avoid overwriting existing files.
         fmt : str
-            Image format/extension. ``bmp`` (default) along with ``tif``,
-            ``png`` and ``jpg`` are supported.
+            Image format/extension. ``bmp`` (default). Supported formats are
+            ``bmp``, ``tif``, ``png`` and ``jpg``.
         """
 
         directory = directory or self.run_dir
@@ -60,7 +60,7 @@ class ImageWriter:
         elif ext == "bmp":
             self._save_bmp(path, img_rgb)
         else:
-            self._save_tiff(path, img_rgb)
+            self._save_bmp(path, img_rgb)
 
     def save_tile(self, img_rgb, row, col):
         path = os.path.join(self.run_dir, f'tile_r{row:04d}_c{col:04d}.tif')

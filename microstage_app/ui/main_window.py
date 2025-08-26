@@ -287,7 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr4.addWidget(self.autonumber_chk)
         ctr4.addWidget(QtWidgets.QLabel("Format:"))
         self.format_combo = QtWidgets.QComboBox()
-        self.format_combo.addItems(["BMF", "TIF", "PNG", "JPG"])
+        self.format_combo.addItems(["BMP", "TIF", "PNG", "JPG"])
         self.format_combo.setCurrentText(self.capture_format.upper())
         self.format_combo.setToolTip("Image file format for captures")
         ctr4.addWidget(self.format_combo)
