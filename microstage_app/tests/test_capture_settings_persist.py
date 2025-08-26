@@ -34,6 +34,9 @@ def test_capture_settings_persist(monkeypatch, tmp_path, qt_app):
     win1.capture_dir_edit.setText(dir1)
     win1.capture_name_edit.setText("foo")
     win1.autonumber_chk.setChecked(True)
+    assert win1.capture_format == "bmp"
+    assert win1.format_combo.currentText() == "BMP"
+    win1.format_combo.setCurrentText("PNG")
     qt_app.processEvents()
     win1.preview_timer.stop(); win1.fps_timer.stop(); win1.close()
 
@@ -45,4 +48,6 @@ def test_capture_settings_persist(monkeypatch, tmp_path, qt_app):
     assert win2.capture_name_edit.text() == "foo"
     assert win2.auto_number is True
     assert win2.autonumber_chk.isChecked()
+    assert win2.capture_format == "png"
+    assert win2.format_combo.currentText() == "PNG"
     win2.preview_timer.stop(); win2.fps_timer.stop(); win2.close()

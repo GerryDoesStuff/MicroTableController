@@ -95,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture")
         self.auto_number = self.profiles.get('capture.auto_number', False)
-        self.capture_format = self.profiles.get('capture.format', 'bmf')
+        self.capture_format = self.profiles.get('capture.format', 'bmp')
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -287,7 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr4.addWidget(self.autonumber_chk)
         ctr4.addWidget(QtWidgets.QLabel("Format:"))
         self.format_combo = QtWidgets.QComboBox()
-        self.format_combo.addItems(["BMF", "TIF", "PNG", "JPG"])
+        self.format_combo.addItems(["BMP", "TIF", "PNG", "JPG"])
         self.format_combo.setCurrentText(self.capture_format.upper())
         self.format_combo.setToolTip("Image file format for captures")
         ctr4.addWidget(self.format_combo)
