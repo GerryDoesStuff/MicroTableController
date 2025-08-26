@@ -10,7 +10,7 @@ class ImageWriter:
         self.run_dir = os.path.join(self.base_dir, ts)
         os.makedirs(self.run_dir, exist_ok=True)
 
-    def save_single(self, img_rgb, directory=None, filename="capture", auto_number=False, fmt="bmf"):
+    def save_single(self, img_rgb, directory=None, filename="capture", auto_number=False, fmt="bmp"):
         """Save a single image.
 
         Parameters
@@ -25,22 +25,21 @@ class ImageWriter:
             If ``True``, append ``_n`` to ``filename`` where ``n`` increments
             to avoid overwriting existing files.
         fmt : str
-            Image format/extension. ``bmf`` (default) behaves like TIFF but
-            uses the ``.bmf`` extension. Other supported formats are ``tif``,
-            ``png`` and ``jpg``.
+            Image format/extension. ``bmp`` (default). Supported formats are
+            ``bmp``, ``tif``, ``png`` and ``jpg``.
         """
 
         directory = directory or self.run_dir
         os.makedirs(directory, exist_ok=True)
         fmt = fmt.lower()
         ext = {
-            "bmf": "bmf",
+            "bmp": "bmp",
             "tif": "tif",
             "tiff": "tif",
             "png": "png",
             "jpg": "jpg",
             "jpeg": "jpg",
-        }.get(fmt, "bmf")
+        }.get(fmt, "bmp")
 
         if auto_number:
             n = 1
@@ -52,14 +51,14 @@ class ImageWriter:
         else:
             path = os.path.join(directory, f"{filename}.{ext}")
 
-        if ext in ("tif", "bmf"):
+        if ext == "tif":
             self._save_tiff(path, img_rgb)
         elif ext == "png":
             self._save_png(path, img_rgb)
         elif ext == "jpg":
             self._save_jpg(path, img_rgb)
         else:
-            self._save_tiff(path, img_rgb)
+            self._save_bmp(path, img_rgb)
 
     def save_tile(self, img_rgb, row, col):
         path = os.path.join(self.run_dir, f'tile_r{row:04d}_c{col:04d}.tif')
@@ -73,3 +72,6 @@ class ImageWriter:
 
     def _save_jpg(self, path, img_rgb):
         Image.fromarray(img_rgb).save(path, format="JPEG")
+
+    def _save_bmp(self, path, img_rgb):
+        Image.fromarray(img_rgb).save(path, format="BMP")
