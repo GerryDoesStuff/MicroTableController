@@ -37,8 +37,7 @@ def test_filename_generation_with_auto_numbering(tmp_path):
     out_dir = tmp_path / "auto"
     writer.save_single(img, directory=str(out_dir), filename="foo", auto_number=True)
     writer.save_single(img, directory=str(out_dir), filename="foo", auto_number=True)
-    writer.save_single(img, directory=str(out_dir), filename="foo", auto_number=True)
-    assert (out_dir / "foo.bmf").exists()
+    assert not (out_dir / "foo.bmf").exists()
     assert (out_dir / "foo_1.bmf").exists()
     assert (out_dir / "foo_2.bmf").exists()
 
