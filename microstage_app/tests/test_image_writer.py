@@ -7,7 +7,7 @@ def test_save_single_custom_dir_and_name(tmp_path):
     img = np.zeros((2, 2, 3), dtype=np.uint8)
     out_dir = tmp_path / "custom"
     writer.save_single(img, directory=str(out_dir), filename="foo")
-    assert (out_dir / "foo.bmf").exists()
+    assert (out_dir / "foo.bmp").exists()
 
 
 def test_save_single_autonumber(tmp_path):
@@ -16,9 +16,9 @@ def test_save_single_autonumber(tmp_path):
     out_dir = tmp_path / "auto"
     writer.save_single(img, directory=str(out_dir), filename="foo", auto_number=True)
     writer.save_single(img, directory=str(out_dir), filename="foo", auto_number=True)
-    assert not (out_dir / "foo.bmf").exists()
-    assert (out_dir / "foo_1.bmf").exists()
-    assert (out_dir / "foo_2.bmf").exists()
+    assert not (out_dir / "foo.bmp").exists()
+    assert (out_dir / "foo_1.bmp").exists()
+    assert (out_dir / "foo_2.bmp").exists()
 
 
 def test_save_png(tmp_path):

@@ -95,7 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture")
         self.auto_number = self.profiles.get('capture.auto_number', False)
-        self.capture_format = self.profiles.get('capture.format', 'bmf')
+        self.capture_format = self.profiles.get('capture.format', 'bmp')
 
         # timers
         self.preview_timer = QtCore.QTimer(self)

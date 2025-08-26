@@ -7,7 +7,7 @@ DEFAULTS = {
         'raster': {'pitch_x_mm': 1.0, 'pitch_y_mm': 1.0, 'rows': 5, 'cols': 5}
     },
     # persistent capture settings
-    'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'bmf'},
+    'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'bmp'},
 }
 
 class Profiles:
