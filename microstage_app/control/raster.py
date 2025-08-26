@@ -8,6 +8,8 @@ class RasterConfig:
     pitch_x_mm: float = 1.0
     pitch_y_mm: float = 1.0
     serpentine: bool = True
+    feed_x_mm_min: float = 20.0
+    feed_y_mm_min: float = 20.0
 
 class RasterRunner:
     def __init__(self, stage, camera, writer, cfg: RasterConfig):
@@ -28,7 +30,8 @@ class RasterRunner:
                     dx = self.cfg.pitch_x_mm if forward else -self.cfg.pitch_x_mm
                     self.stage.move_relative(dx=dx)
             if r < self.cfg.rows - 1:
-                self.stage.move_relative(dy=self.cfg.pitch_y_mm)
-                if not self.cfg.serpentine and self.cfg.cols > 1:
-                    dx = -self.cfg.pitch_x_mm * (self.cfg.cols - 1)
-                    self.stage.move_relative(dx=dx)
+                self.stage.move_relative(dy=self.cfg.pitch_y_mm, feed_mm_per_min=self.cfg.feed_y_mm_min)
+            if self.cfg.cols > 1:
+                dx = self.cfg.pitch_x_mm * (self.cfg.cols - 1)
+                # Return to start of next row if needed
+                self.stage.move_relative(dx=-dx, feed_mm_per_min=self.cfg.feed_x_mm_min)

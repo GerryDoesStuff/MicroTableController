@@ -3,7 +3,7 @@ from microstage_app.control.raster import RasterRunner, RasterConfig
 class StageMock:
     def __init__(self):
         self.moves = []
-    def move_relative(self, dx=0.0, dy=0.0, dz=0.0):
+    def move_relative(self, dx=0.0, dy=0.0, dz=0.0, feed_mm_per_min=0.0):
         self.moves.append((dx, dy, dz))
     def wait_for_moves(self):
         pass
