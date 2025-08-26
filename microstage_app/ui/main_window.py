@@ -1048,6 +1048,12 @@ class MainWindow(QtWidgets.QMainWindow):
             log("Autofocus ignored: stage or camera not connected")
             return
 
+        coarse = float(self.af_coarse.value())
+        fine = float(self.af_fine.value())
+        if coarse <= 0 or fine <= 0:
+            QtWidgets.QMessageBox.warning(self, "Autofocus", "Coarse and fine steps must be > 0")
+            return
+
         metric = FocusMetric(self.metric_combo.currentText())
         self._autofocusing = True
         self.btn_autofocus.setEnabled(False)
