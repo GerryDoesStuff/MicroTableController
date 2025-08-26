@@ -1246,8 +1246,44 @@ class MainWindow(QtWidgets.QMainWindow):
             capture=self.chk_raster_capture.isChecked(),
         )
 
+        directory = self.capture_dir
+        name = self.capture_name
+        auto_num = self.auto_number
+        fmt = self.capture_format
+
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as e:
+            log(f"Raster aborted: cannot create directory {directory}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self, "Raster", f"Unable to create directory:\n{directory}\n{e}"
+            )
+            return
+
+        if not name:
+            log("Raster aborted: filename empty")
+            QtWidgets.QMessageBox.critical(self, "Raster", "Filename cannot be empty.")
+            return
+        if re.search(r"[\\/:*?\"<>|]", name):
+            log("Raster aborted: illegal characters in filename")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Raster",
+                "Filename contains illegal characters (\\ / : * ? \" < > |).",
+            )
+            return
+
         def do_raster():
-            runner = RasterRunner(self.stage, self.camera, self.image_writer, cfg)
+            runner = RasterRunner(
+                self.stage,
+                self.camera,
+                self.image_writer,
+                cfg,
+                directory=directory,
+                base_name=name,
+                auto_number=auto_num,
+                fmt=fmt,
+            )
             runner.run()
             return True
 

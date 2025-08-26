@@ -19,18 +19,25 @@ class CameraMock:
 class WriterMock:
     def __init__(self):
         self.saved = []
-    def save_tile(self, img, r, c):
-        self.saved.append((img, r, c))
+    def save_single(self, img, directory=None, filename="capture", auto_number=False, fmt="bmp"):
+        self.saved.append((img, directory, filename, auto_number, fmt))
 
 
 def test_raster_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True, capture=True)
-    runner = RasterRunner(stage, cam, writer, cfg)
+    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True)
+    runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
     runner.run()
-    assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
+    assert writer.saved == [
+        (1, "out", "foo_r0000_c0000", False, "bmp"),
+        (2, "out", "foo_r0000_c0001", False, "bmp"),
+        (3, "out", "foo_r0000_c0002", False, "bmp"),
+        (4, "out", "foo_r0001_c0000", False, "bmp"),
+        (5, "out", "foo_r0001_c0001", False, "bmp"),
+        (6, "out", "foo_r0001_c0002", False, "bmp"),
+    ]
     assert stage.moves == [
         (1.0,0.0,0.0),
         (1.0,0.0,0.0),
@@ -44,10 +51,17 @@ def test_raster_no_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=False, capture=True)
-    runner = RasterRunner(stage, cam, writer, cfg)
+    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=False)
+    runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
     runner.run()
-    assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
+    assert writer.saved == [
+        (1, "out", "foo_r0000_c0000", False, "bmp"),
+        (2, "out", "foo_r0000_c0001", False, "bmp"),
+        (3, "out", "foo_r0000_c0002", False, "bmp"),
+        (4, "out", "foo_r0001_c0000", False, "bmp"),
+        (5, "out", "foo_r0001_c0001", False, "bmp"),
+        (6, "out", "foo_r0001_c0002", False, "bmp"),
+    ]
     assert stage.moves == [
         (1.0,0.0,0.0),
         (1.0,0.0,0.0),
