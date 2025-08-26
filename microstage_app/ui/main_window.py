@@ -14,6 +14,7 @@ from ..utils.serial_worker import SerialWorker
 from ..utils.workers import run_async
 
 from pathlib import Path
+import os
 import re
 import time
 
@@ -85,6 +86,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
+        self.capture_dir = self.image_writer.run_dir
+        self.capture_name = "capture"
+        self.auto_number = False
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -231,6 +235,23 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr2.addStretch(1)
         ctr2.addWidget(self.fps_label)
         center.addLayout(ctr2)
+
+        ctr3 = QtWidgets.QHBoxLayout()
+        ctr3.addWidget(QtWidgets.QLabel("Dir:"))
+        self.capture_dir_edit = QtWidgets.QLineEdit(self.capture_dir)
+        ctr3.addWidget(self.capture_dir_edit, 1)
+        self.btn_browse_dir = QtWidgets.QPushButton("Browse...")
+        ctr3.addWidget(self.btn_browse_dir)
+        center.addLayout(ctr3)
+
+        ctr4 = QtWidgets.QHBoxLayout()
+        ctr4.addWidget(QtWidgets.QLabel("Base name:"))
+        self.capture_name_edit = QtWidgets.QLineEdit(self.capture_name)
+        ctr4.addWidget(self.capture_name_edit)
+        self.autonumber_chk = QtWidgets.QCheckBox("Auto-number (_n)")
+        ctr4.addWidget(self.autonumber_chk)
+        ctr4.addStretch(1)
+        center.addLayout(ctr4)
 
         # Right: tabs
         rightw = QtWidgets.QTabWidget()
@@ -379,6 +400,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_autofocus.clicked.connect(self._run_autofocus)
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
+        self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
+        self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
+        self.autonumber_chk.toggled.connect(self._on_autonumber_toggled)
+        self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
         # camera controls
         self.exp_spin.valueChanged.connect(self._apply_exposure)
@@ -411,6 +436,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
+
+    def _on_capture_dir_changed(self, text: str):
+        self.capture_dir = text
+
+    def _on_capture_name_changed(self, text: str):
+        self.capture_name = text
+
+    def _on_autonumber_toggled(self, checked: bool):
+        self.auto_number = checked
+
+    def _browse_capture_dir(self):
+        d = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Capture Directory", self.capture_dir
+        )
+        if d:
+            self.capture_dir_edit.setText(d)
 
     def _setup_jog_button(self, btn, step_spin, feed_spin, sx=0, sy=0, sz=0):
         def _pressed():
@@ -909,12 +950,19 @@ class MainWindow(QtWidgets.QMainWindow):
             log("Capture ignored: stage or camera not connected")
             return
 
+        directory = self.capture_dir
+        name = self.capture_name
+        auto_num = self.auto_number
+
         def do_capture():
             self.stage.wait_for_moves()
             time.sleep(0.03)
             img = self.camera.snap()
             if img is not None:
-                self.image_writer.save_single(img)
+                os.makedirs(directory, exist_ok=True)
+                self.image_writer.save_single(
+                    img, directory=directory, filename=name, auto_number=auto_num
+                )
             return True
 
         log("Capture: starting")
