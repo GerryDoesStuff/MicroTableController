@@ -197,6 +197,23 @@ class MainWindow(QtWidgets.QMainWindow):
         j.addWidget(self.feed_limit_z, 2, 3)
         j.addWidget(self.btn_zm, 2, 4)
         j.addWidget(self.btn_zp, 2, 5)
+        # absolute move controls
+        self.absx_spin = QtWidgets.QDoubleSpinBox(); self.absx_spin.setDecimals(3)
+        self.absy_spin = QtWidgets.QDoubleSpinBox(); self.absy_spin.setDecimals(3)
+        self.absz_spin = QtWidgets.QDoubleSpinBox(); self.absz_spin.setDecimals(3)
+        if self.stage_bounds:
+            self.absx_spin.setRange(self.stage_bounds["xmin"], self.stage_bounds["xmax"])
+            self.absy_spin.setRange(self.stage_bounds["ymin"], self.stage_bounds["ymax"])
+            self.absz_spin.setRange(self.stage_bounds["zmin"], self.stage_bounds["zmax"])
+        else:
+            for sb in (self.absx_spin, self.absy_spin, self.absz_spin):
+                sb.setRange(-1000.0, 1000.0)
+        self.btn_move_to_coords = QtWidgets.QPushButton("Move to coordinates")
+        j.addWidget(QtWidgets.QLabel("Abs"), 3, 0)
+        j.addWidget(self.absx_spin, 3, 1)
+        j.addWidget(self.absy_spin, 3, 2)
+        j.addWidget(self.absz_spin, 3, 3)
+        j.addWidget(self.btn_move_to_coords, 3, 4, 1, 2)
         left.addWidget(jog_box)
 
         left.addStretch(1)
@@ -359,6 +376,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_yp, self.stepy_spin, self.feedy_spin, sy=1)
         self._setup_jog_button(self.btn_zm, self.stepz_spin, self.feedz_spin, sz=-1)
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
+        self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
@@ -421,6 +439,20 @@ class MainWindow(QtWidgets.QMainWindow):
         step = step_spin.value()
         feed = feed_spin.value()
         self._jog(step * sx, step * sy, step * sz, feed, wait_ok=True, callback=self._repeat_jog)
+
+    def _move_to_coords(self):
+        if not self.stage_worker:
+            log("Move ignored: stage not connected")
+            QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
+            return
+        x = self.absx_spin.value()
+        y = self.absy_spin.value()
+        z = self.absz_spin.value()
+        feed = max(self.feedx_spin.value(), self.feedy_spin.value(), self.feedz_spin.value())
+        log(f"Move to: x={x} y={y} z={z} F={feed}")
+        self.stage_worker.enqueue(self.stage.move_absolute, x, y, z, feed, True)
+        self.stage_worker.enqueue(self.stage.wait_for_moves)
+        self.stage_worker.enqueue(self.stage.get_position, callback=self._on_stage_position)
 
     @QtCore.Slot(str)
     def _append_log(self, line: str):
