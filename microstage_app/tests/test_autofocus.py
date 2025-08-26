@@ -1,5 +1,6 @@
 import microstage_app.control.autofocus as af
 from microstage_app.control.autofocus import AutoFocus, FocusMetric
+import pytest
 
 class StageMock:
     def __init__(self):
@@ -23,3 +24,13 @@ def test_autofocus_converges(monkeypatch):
     autofocus = AutoFocus(stage, cam)
     best = autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, z_range_mm=0.2, coarse_step_mm=0.1, fine_step_mm=0.05)
     assert abs(best) < 1e-6
+
+
+def test_autofocus_zero_step_raises():
+    stage = StageMock()
+    cam = CameraMock()
+    autofocus = AutoFocus(stage, cam)
+    with pytest.raises(ValueError):
+        autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, coarse_step_mm=0.0)
+    with pytest.raises(ValueError):
+        autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, fine_step_mm=0.0)
