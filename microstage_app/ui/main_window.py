@@ -460,6 +460,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rast_y2_spin = QtWidgets.QDoubleSpinBox(); self.rast_y2_spin.setDecimals(3); self.rast_y2_spin.setRange(-1000.0, 1000.0); self.rast_y2_spin.setValue(4.0)
         self.btn_raster_p1 = QtWidgets.QPushButton("Raster Point 1")
         self.btn_raster_p2 = QtWidgets.QPushButton("Raster Point 2")
+        self.chk_raster_capture = QtWidgets.QCheckBox("Capture images")
+        self.chk_raster_capture.setChecked(True)
+        self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
         r.addWidget(QtWidgets.QLabel("Rows:"), 0, 0); r.addWidget(self.rows_spin, 0, 1)
         r.addWidget(QtWidgets.QLabel("Cols:"), 1, 0); r.addWidget(self.cols_spin, 1, 1)
@@ -469,7 +472,9 @@ class MainWindow(QtWidgets.QMainWindow):
         r.addWidget(QtWidgets.QLabel("X2 (mm):"), 5, 0); r.addWidget(self.rast_x2_spin, 5, 1)
         r.addWidget(QtWidgets.QLabel("Y2 (mm):"), 6, 0); r.addWidget(self.rast_y2_spin, 6, 1)
         r.addWidget(self.btn_raster_p2, 7, 0, 1, 2)
-        r.addWidget(self.btn_run_raster, 8, 0, 1, 2)
+        r.addWidget(self.chk_raster_capture, 8, 0, 1, 2)
+        r.addWidget(self.chk_raster_af, 9, 0, 1, 2)
+        r.addWidget(self.btn_run_raster, 10, 0, 1, 2)
         rightw.addTab(rast, "Raster")
 
         # ---- Scripts tab (restored)
@@ -1237,6 +1242,8 @@ class MainWindow(QtWidgets.QMainWindow):
             y2_mm=self.rast_y2_spin.value(),
             feed_x_mm_min=self.feedx_spin.value(),
             feed_y_mm_min=self.feedy_spin.value(),
+            autofocus=self.chk_raster_af.isChecked(),
+            capture=self.chk_raster_capture.isChecked(),
         )
 
         def do_raster():

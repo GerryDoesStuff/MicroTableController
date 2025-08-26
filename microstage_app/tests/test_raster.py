@@ -1,3 +1,4 @@
+import microstage_app.control.raster as raster
 from microstage_app.control.raster import RasterRunner, RasterConfig
 
 class StageMock:
@@ -26,7 +27,7 @@ def test_raster_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True)
+    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True, capture=True)
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
@@ -43,7 +44,7 @@ def test_raster_no_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=False)
+    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=False, capture=True)
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert writer.saved == [(1,0,0),(2,0,1),(3,0,2),(4,1,0),(5,1,1),(6,1,2)]
@@ -54,3 +55,33 @@ def test_raster_no_serpentine(monkeypatch):
         (1.0,0.0,0.0),
         (1.0,0.0,0.0),
     ]
+
+
+def test_raster_capture_disabled():
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=2, capture=False)
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+    assert writer.saved == []
+
+
+def test_raster_autofocus(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=2, cols=2, autofocus=True, capture=False)
+    called = []
+
+    class DummyAF:
+        def __init__(self, stage, camera):
+            pass
+        def coarse_to_fine(self, metric=None, **kwargs):
+            called.append(metric)
+            return 0.0
+
+    monkeypatch.setattr(raster, "AutoFocus", DummyAF)
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+    assert len(called) == cfg.rows * cfg.cols
