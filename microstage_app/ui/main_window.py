@@ -86,12 +86,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
-        self.capture_dir = self.image_writer.run_dir
-        self.capture_name = "capture"
-        self.auto_number = False
 
         # profiles
         self.profiles = Profiles.load_or_create()
+
+        # capture settings
+        dir_profile = self.profiles.get('capture.dir')
+        self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
+        self.capture_name = self.profiles.get('capture.name', "capture")
+        self.auto_number = self.profiles.get('capture.auto_number', False)
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -249,6 +252,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_name_edit = QtWidgets.QLineEdit(self.capture_name)
         ctr4.addWidget(self.capture_name_edit)
         self.autonumber_chk = QtWidgets.QCheckBox("Auto-number (_n)")
+        self.autonumber_chk.setChecked(self.auto_number)
         ctr4.addWidget(self.autonumber_chk)
         ctr4.addStretch(1)
         center.addLayout(ctr4)
@@ -439,12 +443,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_capture_dir_changed(self, text: str):
         self.capture_dir = text
+        self.profiles.set('capture.dir', text)
+        self.profiles.save()
 
     def _on_capture_name_changed(self, text: str):
         self.capture_name = text
+        self.profiles.set('capture.name', text)
+        self.profiles.save()
 
     def _on_autonumber_toggled(self, checked: bool):
         self.auto_number = checked
+        self.profiles.set('capture.auto_number', checked)
+        self.profiles.save()
 
     def _browse_capture_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
