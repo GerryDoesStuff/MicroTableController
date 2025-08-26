@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 import time
 
+try:
+    from .autofocus import AutoFocus, FocusMetric
+except Exception:  # pragma: no cover - autofocus deps may be missing
+    AutoFocus = None
+    class FocusMetric:
+        LAPLACIAN = None
+
 @dataclass
 class RasterConfig:
     rows: int = 5
@@ -12,6 +19,8 @@ class RasterConfig:
     serpentine: bool = True
     feed_x_mm_min: float = 20.0
     feed_y_mm_min: float = 20.0
+    autofocus: bool = False
+    capture: bool = True
 
 class RasterRunner:
     def __init__(
@@ -68,8 +77,13 @@ class RasterRunner:
 
                 self.stage.wait_for_moves()
                 time.sleep(0.03)
-                img = self.camera.snap()
-                if img is not None:
+
+                if self.cfg.autofocus and AutoFocus:
+                    af = AutoFocus(self.stage, self.camera)
+                    af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+
+                img = self.camera.snap() if self.cfg.capture else None
+                if img is not None and self.cfg.capture:
                     save_c = c if forward else (self.cfg.cols - 1 - c)
                     fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
                     self.writer.save_single(
