@@ -27,22 +27,35 @@ class RasterRunner:
         )
 
     def run(self):
+        """Execute raster scan and capture images for each tile.
+
+        A matrix of target coordinates is generated from the diagonal
+        points and the requested row/column counts.  The stage is then
+        stepped through these coordinates in a serpentine pattern (if
+        enabled) ensuring that every tile is visited exactly once.
+        """
+
+        # Build matrix of absolute target coordinates
+        xs = [self.cfg.x1_mm + self.pitch_x_mm * c for c in range(self.cfg.cols)]
+        ys = [self.cfg.y1_mm + self.pitch_y_mm * r for r in range(self.cfg.rows)]
+        coord_matrix = [[(x, y) for x in xs] for y in ys]
+
+        current_x, current_y = coord_matrix[0][0]
         for r in range(self.cfg.rows):
             forward = (r % 2 == 0) or (not self.cfg.serpentine)
-            cols = range(self.cfg.cols) if forward else range(self.cfg.cols-1, -1, -1)
-            last_c = self.cfg.cols - 1 if forward else 0
+            cols = range(self.cfg.cols) if forward else range(self.cfg.cols - 1, -1, -1)
             for c in cols:
+                target_x, target_y = coord_matrix[r][c]
+                dx = target_x - current_x
+                dy = target_y - current_y
+                if dx or dy:
+                    self.stage.move_relative(dx=dx, dy=dy)
+                    current_x, current_y = target_x, target_y
+
                 self.stage.wait_for_moves()
                 time.sleep(0.03)
                 img = self.camera.snap()
                 if img is not None:
-                    self.writer.save_tile(img, r, c if forward else (self.cfg.cols-1 - c))
-                if c != last_c:
-                    dx = self.pitch_x_mm if forward else -self.pitch_x_mm
-                    self.stage.move_relative(dx=dx)
-            if r < self.cfg.rows - 1:
-                self.stage.move_relative(dy=self.pitch_y_mm, feed_mm_per_min=self.cfg.feed_y_mm_min)
-            if self.cfg.cols > 1 and not self.cfg.serpentine:
-                dx = self.pitch_x_mm * (self.cfg.cols - 1)
-                # Return to start of next row if needed
-                self.stage.move_relative(dx=-dx, feed_mm_per_min=self.cfg.feed_x_mm_min)
+                    save_c = c if forward else (self.cfg.cols - 1 - c)
+                    self.writer.save_tile(img, r, save_c)
+
