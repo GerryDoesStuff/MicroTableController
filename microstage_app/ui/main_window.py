@@ -1,5 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
+import numpy as np
+
 from ..devices.stage_marlin import StageMarlin, find_marlin_port
 from ..devices.camera_toupcam import create_camera
 
@@ -7,6 +9,7 @@ from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
 from ..control.profiles import Profiles
 from ..io.storage import ImageWriter
+from ..analysis.measure import measure_distance, measure_area
 
 from ..utils.img import numpy_to_qimage
 from ..utils.log import LOG, log
@@ -54,6 +57,85 @@ def _load_feed_limits():
         return None
 
 
+class MeasureView(QtWidgets.QGraphicsView):
+    distance_measured = QtCore.Signal(tuple, tuple)
+    area_measured = QtCore.Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setScene(QtWidgets.QGraphicsScene(self))
+        self._pixmap = QtWidgets.QGraphicsPixmapItem()
+        self.scene().addItem(self._pixmap)
+        self._mode = None
+        self._points = []
+        self._item = None
+
+    def set_image(self, qimg: QtGui.QImage):
+        self._pixmap.setPixmap(QtGui.QPixmap.fromImage(qimg))
+        self.setSceneRect(self._pixmap.boundingRect())
+        self.fitInView(self._pixmap, QtCore.Qt.KeepAspectRatio)
+
+    def clear_image(self):
+        self._pixmap.setPixmap(QtGui.QPixmap())
+        self._clear_temp()
+
+    def start_distance(self):
+        self._clear_temp()
+        self._mode = "distance"
+
+    def start_area(self):
+        self._clear_temp()
+        self._mode = "area"
+
+    def _clear_temp(self):
+        self._points = []
+        if self._item:
+            self.scene().removeItem(self._item)
+            self._item = None
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if not self._mode:
+            return super().mousePressEvent(event)
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        pt = self.mapToScene(pos)
+        coord = (pt.x(), pt.y())
+        if self._mode == "distance":
+            self._points.append(coord)
+            if len(self._points) == 2:
+                line = QtCore.QLineF(QtCore.QPointF(*self._points[0]), QtCore.QPointF(*self._points[1]))
+                self._item = self.scene().addLine(line, QtGui.QPen(QtCore.Qt.red, 2))
+                self.distance_measured.emit(self._points[0], self._points[1])
+                self._mode = None
+                self._points = []
+        elif self._mode == "area":
+            self._points.append(coord)
+            if self._item:
+                self.scene().removeItem(self._item)
+            poly = QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in self._points])
+            self._item = self.scene().addPolygon(poly, QtGui.QPen(QtCore.Qt.green, 2))
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._mode == "area" and len(self._points) >= 3:
+            poly = QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in self._points])
+            w = int(self._pixmap.pixmap().width())
+            h = int(self._pixmap.pixmap().height())
+            img = QtGui.QImage(w, h, QtGui.QImage.Format_Grayscale8)
+            img.fill(0)
+            painter = QtGui.QPainter(img)
+            painter.setBrush(QtCore.Qt.white)
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.drawPolygon(poly)
+            painter.end()
+            ptr = img.bits()
+            ptr.setsize(w * h)
+            mask = np.frombuffer(ptr, np.uint8).reshape((h, w))
+            self.area_measured.emit(mask)
+            self._mode = None
+            self._points = []
+        super().mouseDoubleClickEvent(event)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -89,6 +171,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # profiles
         self.profiles = Profiles.load_or_create()
+        self.pixel_size = self.profiles.get('measurement.pixel_size', 1.0)
 
         # capture settings
         dir_profile = self.profiles.get('capture.dir')
@@ -126,6 +209,16 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_ui(self):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
+
+        self.toolbar = self.addToolBar("Main")
+        self.measure_button = QtWidgets.QToolButton()
+        self.measure_button.setText("Measure")
+        _mnu = QtWidgets.QMenu(self.measure_button)
+        self.act_measure_distance = _mnu.addAction("Distance")
+        self.act_measure_area = _mnu.addAction("Area")
+        self.measure_button.setMenu(_mnu)
+        self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.toolbar.addWidget(self.measure_button)
 
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
@@ -244,12 +337,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Center: live preview + capture + FPS
         centerw = QtWidgets.QWidget()
         center = QtWidgets.QVBoxLayout(centerw)
-        self.live_label = QtWidgets.QLabel()
-        self.live_label.setMinimumSize(900, 650)
-        self.live_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.measure_view = MeasureView()
+        self.measure_view.setMinimumSize(900, 650)
         self.fps_label = QtWidgets.QLabel("FPS: —")
         self.btn_capture = QtWidgets.QPushButton("Capture")
-        center.addWidget(self.live_label, 1)
+        center.addWidget(self.measure_view, 1)
         ctr2 = QtWidgets.QHBoxLayout()
         ctr2.addWidget(self.btn_capture)
         ctr2.addStretch(1)
@@ -432,6 +524,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
+        self.act_measure_distance.triggered.connect(self._start_measure_distance)
+        self.act_measure_area.triggered.connect(self._start_measure_area)
+        self.measure_view.distance_measured.connect(self._on_distance_measured)
+        self.measure_view.area_measured.connect(self._on_area_measured)
+
         # camera controls
         self.exp_spin.valueChanged.connect(self._apply_exposure)
         self.autoexp_chk.toggled.connect(self._apply_exposure)
@@ -590,7 +687,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cam_status.setText("Camera: —")
         self.preview_timer.stop()
         self.fps_timer.stop()
-        self.live_label.clear()
+        self.measure_view.clear_image()
         self.res_combo.clear()
         self.bin_combo.clear()
         self._update_cam_buttons()
@@ -730,8 +827,7 @@ class MainWindow(QtWidgets.QMainWindow):
         frame = self.camera.get_latest_frame()
         if frame is not None:
             qimg = numpy_to_qimage(frame)
-            self.live_label.setPixmap(QtGui.QPixmap.fromImage(qimg).scaled(
-                self.live_label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            self.measure_view.set_image(qimg)
 
         if self.autoexp_chk.isChecked():
             try:
@@ -1132,6 +1228,35 @@ class MainWindow(QtWidgets.QMainWindow):
         t, w = run_async(do_script)
         self._last_thread, self._last_worker = t, w
         w.finished.connect(lambda res, err: log("Script: done" if not err else f"Script error: {err}"))
+
+    # --------------------------- MEASUREMENT ---------------------------
+
+    def _ensure_pixel_size(self) -> bool:
+        val, ok = QtWidgets.QInputDialog.getDouble(
+            self, "Calibration", "µm per pixel:", self.pixel_size, 0.000001, 1e9, 6
+        )
+        if ok:
+            self.pixel_size = val
+            self.profiles.set('measurement.pixel_size', self.pixel_size)
+            self.profiles.save()
+            return True
+        return False
+
+    def _start_measure_distance(self):
+        if self._ensure_pixel_size():
+            self.measure_view.start_distance()
+
+    def _start_measure_area(self):
+        if self._ensure_pixel_size():
+            self.measure_view.start_area()
+
+    def _on_distance_measured(self, p1, p2):
+        dist = measure_distance(p1, p2, self.pixel_size)
+        QtWidgets.QMessageBox.information(self, "Distance", f"{dist:.3f} µm")
+
+    def _on_area_measured(self, mask):
+        area = measure_area(mask, self.pixel_size)
+        QtWidgets.QMessageBox.information(self, "Area", f"{area:.3f} µm²")
 
     # --------------------------- PROFILES ---------------------------
 
