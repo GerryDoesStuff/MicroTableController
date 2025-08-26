@@ -133,7 +133,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         left.addWidget(self.stage_status)
-        left.addWidget(self.stage_pos)
         left.addWidget(self.btn_stage_connect)
         left.addWidget(self.btn_stage_disconnect)
         left.addSpacing(8)
@@ -215,8 +214,8 @@ class MainWindow(QtWidgets.QMainWindow):
         j.addWidget(self.absz_spin, 3, 3)
         j.addWidget(self.btn_move_to_coords, 3, 4, 1, 2)
         left.addWidget(jog_box)
-
         left.addStretch(1)
+        left.addWidget(self.stage_pos)
 
         # Center: live preview + capture + FPS
         centerw = QtWidgets.QWidget()
