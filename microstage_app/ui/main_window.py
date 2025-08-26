@@ -954,12 +954,45 @@ class MainWindow(QtWidgets.QMainWindow):
         name = self.capture_name
         auto_num = self.auto_number
 
+        # validate directory
+        if not directory:
+            log("Capture aborted: directory not specified")
+            QtWidgets.QMessageBox.critical(
+                self, "Capture", "Capture directory is not set."
+            )
+            return
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as e:
+            log(f"Capture aborted: cannot create directory {directory}: {e}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Capture",
+                f"Unable to create directory:\n{directory}\n{e}",
+            )
+            return
+
+        # validate filename
+        if not name:
+            log("Capture aborted: filename empty")
+            QtWidgets.QMessageBox.critical(
+                self, "Capture", "Filename cannot be empty."
+            )
+            return
+        if re.search(r"[\\/:*?\"<>|]", name):
+            log("Capture aborted: illegal characters in filename")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Capture",
+                "Filename contains illegal characters (\\ / : * ? \" < > |).",
+            )
+            return
+
         def do_capture():
             self.stage.wait_for_moves()
             time.sleep(0.03)
             img = self.camera.snap()
             if img is not None:
-                os.makedirs(directory, exist_ok=True)
                 self.image_writer.save_single(
                     img, directory=directory, filename=name, auto_number=auto_num
                 )
