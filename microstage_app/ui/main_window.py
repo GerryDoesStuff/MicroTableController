@@ -1201,6 +1201,8 @@ class MainWindow(QtWidgets.QMainWindow):
             cols=self.cols_spin.value(),
             pitch_x_mm=self.pitchx_spin.value(),
             pitch_y_mm=self.pitchy_spin.value(),
+            feed_x_mm_min=self.feedx_spin.value(),
+            feed_y_mm_min=self.feedy_spin.value(),
         )
 
         def do_raster():
