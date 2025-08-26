@@ -454,14 +454,22 @@ class MainWindow(QtWidgets.QMainWindow):
         r = QtWidgets.QGridLayout(rast)
         self.rows_spin = QtWidgets.QSpinBox(); self.rows_spin.setRange(1, 1000); self.rows_spin.setValue(5)
         self.cols_spin = QtWidgets.QSpinBox(); self.cols_spin.setRange(1, 1000); self.cols_spin.setValue(5)
-        self.pitchx_spin = QtWidgets.QDoubleSpinBox(); self.pitchx_spin.setRange(0.001, 50.0); self.pitchx_spin.setValue(1.0)
-        self.pitchy_spin = QtWidgets.QDoubleSpinBox(); self.pitchy_spin.setRange(0.001, 50.0); self.pitchy_spin.setValue(1.0)
+        self.rast_x1_spin = QtWidgets.QDoubleSpinBox(); self.rast_x1_spin.setDecimals(3); self.rast_x1_spin.setRange(-1000.0, 1000.0); self.rast_x1_spin.setValue(0.0)
+        self.rast_y1_spin = QtWidgets.QDoubleSpinBox(); self.rast_y1_spin.setDecimals(3); self.rast_y1_spin.setRange(-1000.0, 1000.0); self.rast_y1_spin.setValue(0.0)
+        self.rast_x2_spin = QtWidgets.QDoubleSpinBox(); self.rast_x2_spin.setDecimals(3); self.rast_x2_spin.setRange(-1000.0, 1000.0); self.rast_x2_spin.setValue(4.0)
+        self.rast_y2_spin = QtWidgets.QDoubleSpinBox(); self.rast_y2_spin.setDecimals(3); self.rast_y2_spin.setRange(-1000.0, 1000.0); self.rast_y2_spin.setValue(4.0)
+        self.btn_raster_p1 = QtWidgets.QPushButton("Raster Point 1")
+        self.btn_raster_p2 = QtWidgets.QPushButton("Raster Point 2")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
         r.addWidget(QtWidgets.QLabel("Rows:"), 0, 0); r.addWidget(self.rows_spin, 0, 1)
         r.addWidget(QtWidgets.QLabel("Cols:"), 1, 0); r.addWidget(self.cols_spin, 1, 1)
-        r.addWidget(QtWidgets.QLabel("Pitch X (mm):"), 2, 0); r.addWidget(self.pitchx_spin, 2, 1)
-        r.addWidget(QtWidgets.QLabel("Pitch Y (mm):"), 3, 0); r.addWidget(self.pitchy_spin, 3, 1)
-        r.addWidget(self.btn_run_raster, 4, 0, 1, 2)
+        r.addWidget(QtWidgets.QLabel("X1 (mm):"), 2, 0); r.addWidget(self.rast_x1_spin, 2, 1)
+        r.addWidget(QtWidgets.QLabel("Y1 (mm):"), 3, 0); r.addWidget(self.rast_y1_spin, 3, 1)
+        r.addWidget(self.btn_raster_p1, 4, 0, 1, 2)
+        r.addWidget(QtWidgets.QLabel("X2 (mm):"), 5, 0); r.addWidget(self.rast_x2_spin, 5, 1)
+        r.addWidget(QtWidgets.QLabel("Y2 (mm):"), 6, 0); r.addWidget(self.rast_y2_spin, 6, 1)
+        r.addWidget(self.btn_raster_p2, 7, 0, 1, 2)
+        r.addWidget(self.btn_run_raster, 8, 0, 1, 2)
         rightw.addTab(rast, "Raster")
 
         # ---- Scripts tab (restored)
@@ -516,6 +524,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
+        self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
+        self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
@@ -1192,6 +1202,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self._af_thread.finished.connect(self._cleanup_autofocus_thread)
         w.finished.connect(self._on_autofocus_done)
 
+    def _set_raster_point(self, idx: int):
+        if not self.stage_worker:
+            log("Raster point ignored: stage not connected")
+            QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
+            return
+
+        def cb(pos):
+            if not pos:
+                return
+            try:
+                x, y, _ = pos
+            except Exception:
+                return
+            if idx == 1:
+                self.rast_x1_spin.setValue(x)
+                self.rast_y1_spin.setValue(y)
+            else:
+                self.rast_x2_spin.setValue(x)
+                self.rast_y2_spin.setValue(y)
+
+        self.stage_worker.enqueue(self.stage.get_position, callback=cb)
+
     def _run_raster(self):
         if not (self.stage and self.camera):
             log("Raster ignored: stage or camera not connected")
@@ -1199,8 +1231,10 @@ class MainWindow(QtWidgets.QMainWindow):
         cfg = RasterConfig(
             rows=self.rows_spin.value(),
             cols=self.cols_spin.value(),
-            pitch_x_mm=self.pitchx_spin.value(),
-            pitch_y_mm=self.pitchy_spin.value(),
+            x1_mm=self.rast_x1_spin.value(),
+            y1_mm=self.rast_y1_spin.value(),
+            x2_mm=self.rast_x2_spin.value(),
+            y2_mm=self.rast_y2_spin.value(),
             feed_x_mm_min=self.feedx_spin.value(),
             feed_y_mm_min=self.feedy_spin.value(),
         )
