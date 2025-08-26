@@ -1066,6 +1066,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 z_range_mm=float(self.af_range.value()),
                 coarse_step_mm=float(self.af_coarse.value()),
                 fine_step_mm=float(self.af_fine.value()),
+                feed_mm_per_min=self.feedz_spin.value(),
             )
             return best_z
 
