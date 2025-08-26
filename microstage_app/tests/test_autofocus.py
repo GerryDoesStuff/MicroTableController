@@ -8,7 +8,7 @@ class StageMock:
         self.moves = []
     def move_relative(self, dz=0.0, feed_mm_per_min=0.0):
         self.z += dz
-        self.moves.append(dz)
+        self.moves.append((dz, feed_mm_per_min))
     def wait_for_moves(self):
         pass
 
@@ -22,7 +22,9 @@ def test_autofocus_converges(monkeypatch):
     cam = CameraMock()
     monkeypatch.setattr(af, 'metric_value', lambda img, metric: -abs(stage.z))
     autofocus = AutoFocus(stage, cam)
-    best = autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, z_range_mm=0.2, coarse_step_mm=0.1, fine_step_mm=0.05)
+    best = autofocus.coarse_to_fine(
+        FocusMetric.LAPLACIAN, z_range_mm=0.2, coarse_step_mm=0.1, fine_step_mm=0.05
+    )
     assert abs(best) < 1e-6
 
 
@@ -73,3 +75,21 @@ def test_fine_pass_window_and_step(monkeypatch):
 
     assert result == pytest.approx(coarse_best)
     assert stage.z == pytest.approx(coarse_best)
+
+
+def test_feed_rate_passed_to_stage(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    def fake_metric(img, metric):
+        return -abs(stage.z)
+
+    monkeypatch.setattr(af, 'metric_value', fake_metric)
+    af_inst = AutoFocus(stage, cam)
+    af_inst.coarse_to_fine(
+        FocusMetric.LAPLACIAN,
+        z_range_mm=0.1,
+        coarse_step_mm=0.05,
+        fine_step_mm=0.02,
+        feed_mm_per_min=55,
+    )
+    assert all(feed == 55 for _, feed in stage.moves)
