@@ -42,15 +42,15 @@ class ImageWriter:
             "jpeg": "jpg",
         }.get(fmt, "bmf")
 
-        base = os.path.join(directory, f"{filename}.{ext}")
-        path = base
-        if auto_number and os.path.exists(path):
+        if auto_number:
             n = 1
             while True:
                 path = os.path.join(directory, f"{filename}_{n}.{ext}")
                 if not os.path.exists(path):
                     break
                 n += 1
+        else:
+            path = os.path.join(directory, f"{filename}.{ext}")
 
         if ext in ("tif", "bmf"):
             self._save_tiff(path, img_rgb)
