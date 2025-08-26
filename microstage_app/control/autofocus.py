@@ -1,4 +1,5 @@
 from enum import Enum
+import math
 import numpy as np
 import cv2
 import time
@@ -42,24 +43,35 @@ class AutoFocus:
             samples.append((dz, metric_value(img, metric)))
         if not samples: return 0.0
         best_dz, _ = max(samples, key=lambda t: t[1])
-        # Go to best
+        # Go to coarse best position
         self.stage.move_relative(dz=(best_dz - cumulative), feed_mm_per_min=240)
         self.stage.wait_for_moves()
-        # Fine search
-        current = best_dz
-        step = fine_step_mm
-        improved = True
-        last_val = metric_value(self.camera.snap(), metric)
-        while improved and step >= fine_step_mm/4:
-            improved = False
-            for sgn in (+1, -1):
-                self.stage.move_relative(dz=sgn*step, feed_mm_per_min=180)
-                self.stage.wait_for_moves(); time.sleep(0.02)
-                val = metric_value(self.camera.snap(), metric)
-                if val > last_val:
-                    current += sgn*step
-                    last_val = val
-                    improved = True
-                    break
-            step *= 0.5
-        return current
+
+        # Fine sweep around coarse best
+        fine_range = 0.1 * z_range_mm
+        fine_steps = int(max(1, math.floor(fine_range / fine_step_mm)))
+        offsets = [(-fine_steps + i) * fine_step_mm for i in range(2 * fine_steps + 1)]
+        fine_samples = []
+        cumulative = 0.0
+        for offset in offsets:
+            move = offset - cumulative
+            self.stage.move_relative(dz=move, feed_mm_per_min=180)
+            self.stage.wait_for_moves()
+            time.sleep(0.02)
+            img = self.camera.snap()
+            if img is None:
+                continue
+            fine_samples.append((best_dz + offset, metric_value(img, metric)))
+            cumulative = offset
+
+        if not fine_samples:
+            # Return to coarse best if no fine samples were collected
+            self.stage.move_relative(dz=-cumulative, feed_mm_per_min=240)
+            self.stage.wait_for_moves()
+            return best_dz
+
+        best_fine_dz, _ = max(fine_samples, key=lambda t: t[1])
+        # Move to the best fine position
+        self.stage.move_relative(dz=(best_fine_dz - (best_dz + cumulative)), feed_mm_per_min=240)
+        self.stage.wait_for_moves()
+        return best_fine_dz

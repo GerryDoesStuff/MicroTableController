@@ -34,3 +34,42 @@ def test_autofocus_zero_step_raises():
         autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, coarse_step_mm=0.0)
     with pytest.raises(ValueError):
         autofocus.coarse_to_fine(FocusMetric.LAPLACIAN, fine_step_mm=0.0)
+
+
+def test_fine_pass_window_and_step(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    positions = []
+
+    def fake_metric(img, metric):
+        positions.append(stage.z)
+        return -abs(stage.z)
+
+    monkeypatch.setattr(af, 'metric_value', fake_metric)
+    autofocus = AutoFocus(stage, cam)
+
+    z_range = 0.4
+    coarse_step = 0.1
+    fine_step = 0.02
+    result = autofocus.coarse_to_fine(
+        FocusMetric.LAPLACIAN,
+        z_range_mm=z_range,
+        coarse_step_mm=coarse_step,
+        fine_step_mm=fine_step,
+    )
+
+    steps = int(max(1, round(z_range / coarse_step)))
+    coarse_samples = 2 * steps + 1
+    coarse_positions = positions[:coarse_samples]
+    fine_positions = positions[coarse_samples:]
+
+    fine_range = 0.1 * z_range
+    coarse_best = max(coarse_positions, key=lambda z: -abs(z))
+
+    assert fine_positions[0] == pytest.approx(coarse_best - fine_range)
+    assert fine_positions[-1] == pytest.approx(coarse_best + fine_range)
+    for a, b in zip(fine_positions, fine_positions[1:]):
+        assert (b - a) == pytest.approx(fine_step)
+
+    assert result == pytest.approx(coarse_best)
+    assert stage.z == pytest.approx(coarse_best)
