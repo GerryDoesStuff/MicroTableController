@@ -95,6 +95,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture")
         self.auto_number = self.profiles.get('capture.auto_number', False)
+        self.capture_format = self.profiles.get('capture.format', 'bmf')
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -284,6 +285,12 @@ class MainWindow(QtWidgets.QMainWindow):
             "the same name exists to avoid overwriting. Setting persists."
         )
         ctr4.addWidget(self.autonumber_chk)
+        ctr4.addWidget(QtWidgets.QLabel("Format:"))
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItems(["BMF", "TIF", "PNG", "JPG"])
+        self.format_combo.setCurrentText(self.capture_format.upper())
+        self.format_combo.setToolTip("Image file format for captures")
+        ctr4.addWidget(self.format_combo)
         ctr4.addStretch(1)
         center.addLayout(ctr4)
 
@@ -422,6 +429,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
         self.autonumber_chk.toggled.connect(self._on_autonumber_toggled)
+        self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
         # camera controls
@@ -469,6 +477,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_autonumber_toggled(self, checked: bool):
         self.auto_number = checked
         self.profiles.set('capture.auto_number', checked)
+        self.profiles.save()
+
+    def _on_format_changed(self, text: str):
+        self.capture_format = text.lower()
+        self.profiles.set('capture.format', self.capture_format)
         self.profiles.save()
 
     def _browse_capture_dir(self):
@@ -1019,7 +1032,11 @@ class MainWindow(QtWidgets.QMainWindow):
             img = self.camera.snap()
             if img is not None:
                 self.image_writer.save_single(
-                    img, directory=directory, filename=name, auto_number=auto_num
+                    img,
+                    directory=directory,
+                    filename=name,
+                    auto_number=auto_num,
+                    fmt=self.capture_format,
                 )
             return True
 

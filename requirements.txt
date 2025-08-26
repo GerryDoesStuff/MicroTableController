@@ -8,3 +8,4 @@ pyyaml>=6.0
 loguru>=0.7
 scipy>=1.11
 ome-types>=0.5
+Pillow>=11.0

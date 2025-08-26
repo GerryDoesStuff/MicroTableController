@@ -1,5 +1,6 @@
 import os, datetime
 import tifffile
+from PIL import Image
 
 class ImageWriter:
     def __init__(self, base_dir='runs'):
@@ -9,7 +10,7 @@ class ImageWriter:
         self.run_dir = os.path.join(self.base_dir, ts)
         os.makedirs(self.run_dir, exist_ok=True)
 
-    def save_single(self, img_rgb, directory=None, filename="capture", auto_number=False):
+    def save_single(self, img_rgb, directory=None, filename="capture", auto_number=False, fmt="bmf"):
         """Save a single image.
 
         Parameters
@@ -23,20 +24,42 @@ class ImageWriter:
         auto_number : bool
             If ``True``, append ``_n`` to ``filename`` where ``n`` increments
             to avoid overwriting existing files.
+        fmt : str
+            Image format/extension. ``bmf`` (default) behaves like TIFF but
+            uses the ``.bmf`` extension. Other supported formats are ``tif``,
+            ``png`` and ``jpg``.
         """
 
         directory = directory or self.run_dir
         os.makedirs(directory, exist_ok=True)
-        base = os.path.join(directory, f"{filename}.tif")
+        fmt = fmt.lower()
+        ext = {
+            "bmf": "bmf",
+            "tif": "tif",
+            "tiff": "tif",
+            "png": "png",
+            "jpg": "jpg",
+            "jpeg": "jpg",
+        }.get(fmt, "bmf")
+
+        base = os.path.join(directory, f"{filename}.{ext}")
         path = base
         if auto_number and os.path.exists(path):
             n = 1
             while True:
-                path = os.path.join(directory, f"{filename}_{n}.tif")
+                path = os.path.join(directory, f"{filename}_{n}.{ext}")
                 if not os.path.exists(path):
                     break
                 n += 1
-        self._save_tiff(path, img_rgb)
+
+        if ext in ("tif", "bmf"):
+            self._save_tiff(path, img_rgb)
+        elif ext == "png":
+            self._save_png(path, img_rgb)
+        elif ext == "jpg":
+            self._save_jpg(path, img_rgb)
+        else:
+            self._save_tiff(path, img_rgb)
 
     def save_tile(self, img_rgb, row, col):
         path = os.path.join(self.run_dir, f'tile_r{row:04d}_c{col:04d}.tif')
@@ -44,3 +67,9 @@ class ImageWriter:
 
     def _save_tiff(self, path, img_rgb):
         tifffile.imwrite(path, img_rgb, photometric='rgb')
+
+    def _save_png(self, path, img_rgb):
+        Image.fromarray(img_rgb).save(path, format="PNG")
+
+    def _save_jpg(self, path, img_rgb):
+        Image.fromarray(img_rgb).save(path, format="JPEG")
