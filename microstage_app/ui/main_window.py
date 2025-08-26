@@ -221,6 +221,22 @@ class MainWindow(QtWidgets.QMainWindow):
         j.addWidget(self.absz_spin, 3, 3)
         j.addWidget(self.btn_move_to_coords, 3, 4, 1, 2)
         left.addWidget(jog_box)
+
+        # Autofocus controls moved from right-hand tab to left column
+        af_box = QtWidgets.QGroupBox("Autofocus")
+        a = QtWidgets.QGridLayout(af_box)
+        self.metric_combo = QtWidgets.QComboBox(); self.metric_combo.addItems([m.value for m in FocusMetric])
+        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setValue(0.5)
+        self.af_coarse = QtWidgets.QDoubleSpinBox(); self.af_coarse.setDecimals(3); self.af_coarse.setRange(0.001, 1.0); self.af_coarse.setValue(0.01)
+        self.af_fine = QtWidgets.QDoubleSpinBox(); self.af_fine.setDecimals(3); self.af_fine.setRange(0.0005, 0.2); self.af_fine.setValue(0.002)
+        self.btn_autofocus = QtWidgets.QPushButton("Run Autofocus")
+        a.addWidget(QtWidgets.QLabel("Metric:"), 0, 0); a.addWidget(self.metric_combo, 0, 1)
+        a.addWidget(QtWidgets.QLabel("Range (mm):"), 1, 0); a.addWidget(self.af_range, 1, 1)
+        a.addWidget(QtWidgets.QLabel("Coarse step (mm):"), 2, 0); a.addWidget(self.af_coarse, 2, 1)
+        a.addWidget(QtWidgets.QLabel("Fine step (mm):"), 3, 0); a.addWidget(self.af_fine, 3, 1)
+        a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
+        left.addWidget(af_box)
+
         left.addStretch(1)
         left.addWidget(self.stage_pos)
 
@@ -333,21 +349,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         c.setRowStretch(row, 1)
         rightw.addTab(camtab, "Camera")
-
-        # ---- Autofocus tab
-        af = QtWidgets.QWidget()
-        a = QtWidgets.QGridLayout(af)
-        self.metric_combo = QtWidgets.QComboBox(); self.metric_combo.addItems([m.value for m in FocusMetric])
-        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setValue(0.5)
-        self.af_coarse = QtWidgets.QDoubleSpinBox(); self.af_coarse.setDecimals(3); self.af_coarse.setRange(0.001, 1.0); self.af_coarse.setValue(0.01)
-        self.af_fine = QtWidgets.QDoubleSpinBox(); self.af_fine.setDecimals(3); self.af_fine.setRange(0.0005, 0.2); self.af_fine.setValue(0.002)
-        self.btn_autofocus = QtWidgets.QPushButton("Run Autofocus")
-        a.addWidget(QtWidgets.QLabel("Metric:"), 0, 0); a.addWidget(self.metric_combo, 0, 1)
-        a.addWidget(QtWidgets.QLabel("Range (mm):"), 1, 0); a.addWidget(self.af_range, 1, 1)
-        a.addWidget(QtWidgets.QLabel("Coarse step (mm):"), 2, 0); a.addWidget(self.af_coarse, 2, 1)
-        a.addWidget(QtWidgets.QLabel("Fine step (mm):"), 3, 0); a.addWidget(self.af_fine, 3, 1)
-        a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
-        rightw.addTab(af, "Autofocus")
 
         # ---- Raster tab
         rast = QtWidgets.QWidget()

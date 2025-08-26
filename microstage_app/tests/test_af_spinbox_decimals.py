@@ -18,6 +18,14 @@ def test_af_spinboxes_three_decimals(monkeypatch, qt_app):
 
     win = mw.MainWindow()
 
+    # Ensure autofocus controls live in a group box and not a tab
+    tabs = win.findChildren(QtWidgets.QTabWidget)
+    assert all(
+        tab.tabText(i) != "Autofocus" for tab in tabs for i in range(tab.count())
+    )
+    af_boxes = [b for b in win.findChildren(QtWidgets.QGroupBox) if b.title() == "Autofocus"]
+    assert af_boxes, "Autofocus group box not found"
+
     for box in (win.af_coarse, win.af_fine):
         assert box.decimals() == 3
 
