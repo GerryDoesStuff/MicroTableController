@@ -57,6 +57,8 @@ class ImageWriter:
             self._save_png(path, img_rgb)
         elif ext == "jpg":
             self._save_jpg(path, img_rgb)
+        elif ext == "bmp":
+            self._save_bmp(path, img_rgb)
         else:
             self._save_bmp(path, img_rgb)
 
