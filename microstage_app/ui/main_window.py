@@ -1049,14 +1049,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_autofocus_done(self, best, err):
         self.btn_autofocus.setEnabled(True)
         self._autofocusing = False
-        self._af_thread = None
-        self._af_worker = None
         if err:
             log(f"Autofocus error: {err}")
             QtWidgets.QMessageBox.critical(self, "Autofocus", str(err))
         else:
             log(f"Autofocus: best ΔZ={best:.4f} mm")
             QtWidgets.QMessageBox.information(self, "Autofocus", f"Best Z offset (relative): {best:.4f} mm")
+
+    @QtCore.Slot()
+    def _cleanup_autofocus_thread(self):
+        self._af_thread = None
+        self._af_worker = None
 
     def _run_autofocus(self):
         if self._autofocusing:
@@ -1090,7 +1093,7 @@ class MainWindow(QtWidgets.QMainWindow):
         log(f"Autofocus: metric={metric.value}")
         t, w = run_async(do_af)
         self._af_thread, self._af_worker = t, w
-
+        self._af_thread.finished.connect(self._cleanup_autofocus_thread)
         w.finished.connect(self._on_autofocus_done)
 
     def _run_raster(self):
