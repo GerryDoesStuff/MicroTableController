@@ -2,7 +2,7 @@
 
 A Windows-first Python/Qt application that controls a **Marlin-based microscope stage** (MEGA2560+RAMPS)
 and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **autofocus**, **focus plane correction (multi-area)**,
-**raster & timelapse acquisition**, **profiles/presets**, **robust device handling**, and **scripting hooks**.
+**area scan & timelapse acquisition**, **profiles/presets**, **robust device handling**, and **scripting hooks**.
 
 ## Quick start (Windows 10/11, 64‑bit)
 
@@ -30,7 +30,7 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 - Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID) and ToupCam via SDK enumerate.
 - Live preview + jog controls (XY/Z), home, go-to.
 - Capture primitives: move → settle → snap.
-- Modes: Timelapse, Raster (serpentine), Combined.
+- Modes: Area (serpentine), Timelapse, Combined.
 - Autofocus: Laplacian & Tenengrad metrics, coarse→fine search.
 - Focus planes: planar/quadratic fits; **multiple areas** with priority.
 - Profiles & presets: YAML, per-device and per-scan; import/export.
@@ -67,7 +67,7 @@ Saved fields include:
 
 - **Stage**: feed rate (`feed_mm_s`) and settle delay (`settle_ms`).
 - **Camera**: exposure time (`exposure_ms`), gain, and binning.
-- **Scan presets**: default raster region (`x1_mm`, `y1_mm`, `x2_mm`,
+- **Scan presets**: default area region (`x1_mm`, `y1_mm`, `x2_mm`,
   `y2_mm`, `rows`, `cols`).
 - **Capture**: last used directory, base filename, auto-number toggle, and
   file format.

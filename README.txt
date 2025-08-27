@@ -1,6 +1,6 @@
 MicroStage App
 
-Windows desktop app (Python + PySide6) for controlling a motorized microscope stage (Arduino MEGA2560 + RAMPS running Marlin) and a RisingCam/ToupTek industrial camera from one UI. It supports live preview, jogging/home, capture, autofocus (with plane subtraction), raster mapping, time-lapse, profiles, scripting, and robust diagnostics.
+Windows desktop app (Python + PySide6) for controlling a motorized microscope stage (Arduino MEGA2560 + RAMPS running Marlin) and a RisingCam/ToupTek industrial camera from one UI. It supports live preview, jogging/home, capture, autofocus (with plane subtraction), area mapping, time-lapse, profiles, scripting, and robust diagnostics.
 
 Stage speaks Marlin G-code over USB serial; camera uses the ToupTek Toupcam SDK (Python wrapper + toupcam.dll). Feedrates are mm/min (Marlin convention).
 
@@ -10,8 +10,8 @@ FEATURES
 - Live camera preview (pull-mode; RGB24 or RAW8 mono), FPS readout.
 - Stage control: jog X/Y/Z with user step (0.001–1000 mm) & feed (mm/s -> converted to mm/min), Home (G28), and sync (M400) before capture.
 - Capture: wait for motion to finish (M400), settle briefly, snapshot, and save.
-- Autofocus & Z tools: coarse->fine sweep with selectable metric; plane subtraction (global and per-area) for multi-sample runs.
-- Raster mapping: grid (rows x cols, X/Y pitch), optional combined mapping + time-lapse.
+- Area tab: autofocus (coarse->fine sweep with selectable metric and plane subtraction
+  for multi-sample runs), grid mapping (rows x cols, X/Y pitch), and optional time-lapse.
 - Profiles & presets: persist and quickly recall settings.
 - Scripting hooks: run small workflows (e.g., Z-stack example) right from the UI.
 - Diagnostics: CLI tool to enumerate Toupcam devices and probe Marlin ports.
@@ -33,7 +33,7 @@ microstage_app/
     camera_toupcam.py    - Toupcam backend (StartPullModeWithCallback, PullImageV2)
     camera_mock.py       - Mock camera for development without hardware
   ui/
-    main_window.py       - PySide6 UI: Jog | Camera | Autofocus | Raster | Scripts tabs
+    main_window.py       - PySide6 UI: Jog | Camera | Area | Scripts tabs
   control/
     autofocus.py         - coarse->fine autofocus + plane subtraction tools (global/per-area)
     raster.py            - grid mapping runner (+ optional time-lapse)
@@ -97,13 +97,11 @@ Camera:
 Capture:
 - M400 wait -> short settle -> snapshot latest frame -> save to the current run folder.
 
-Autofocus:
-- Coarse->fine Z sweep using selected metric, with plane subtraction tools (global or per-area planes)
-  to handle multiple samples in one run.
-
-Raster / Mapping (+ Time-lapse):
-- Configure rows, cols, pitch X/Y; the runner visits each tile, captures, and can repeat on a schedule
-  (combined mapping + time-lapse).
+Area:
+- Autofocus: coarse->fine Z sweep using selected metric, with plane subtraction tools
+  (global or per-area planes) to handle multiple samples in one run.
+- Mapping & time-lapse: configure rows, cols, pitch X/Y; the runner visits each tile,
+  captures, and can repeat on a schedule.
 
 Scripts:
 - Z-stack example provided; add more scripts that receive (stage, camera, image_writer).
@@ -146,7 +144,7 @@ DEVELOPMENT NOTES
 --------------------------------------------------------------------------
 NEAR-TERM ROADMAP
 --------------------------------------------------------------------------
-- Time-lapse job UI and combined raster+time-lapse scheduling.
+- Time-lapse job UI and combined area+time-lapse scheduling.
 - Multi-area plane subtraction UX (define ROIs, cache planes per sample).
 - Additional autofocus metrics + hill-climb refinement.
 - Profiles import/export, per-mode overrides.
