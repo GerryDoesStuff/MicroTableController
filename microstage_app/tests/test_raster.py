@@ -1,5 +1,6 @@
 import microstage_app.control.raster as raster
 from microstage_app.control.raster import RasterRunner, RasterConfig
+import pytest
 
 class StageMock:
     def __init__(self, x=0.0, y=0.0, z=0.0):
@@ -124,3 +125,52 @@ def test_raster_initial_move():
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert stage.moves_abs == [(0.0, 0.0, 0.0)]
+
+
+@pytest.mark.parametrize(
+    "autofocus,capture,expected",
+    [
+        (True, True, ["autofocus", ("sleep", 1), "snap", "save", ("sleep", 1)]),
+        (True, False, ["autofocus", ("sleep", 1)]),
+        (False, True, ["snap", "save", ("sleep", 1)]),
+    ],
+)
+def test_raster_operation_order(monkeypatch, autofocus, capture, expected):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1, autofocus=autofocus, capture=capture)
+    events = []
+
+    class DummyAF:
+        def __init__(self, stage, camera):
+            pass
+
+        def coarse_to_fine(self, metric=None, **kwargs):
+            events.append("autofocus")
+
+    monkeypatch.setattr(raster, "AutoFocus", DummyAF)
+
+    def fake_snap():
+        events.append("snap")
+        return object()
+
+    monkeypatch.setattr(cam, "snap", fake_snap)
+
+    def fake_save(*args, **kwargs):
+        events.append("save")
+
+    monkeypatch.setattr(writer, "save_single", fake_save)
+
+    def fake_sleep(delay):
+        events.append(("sleep", delay))
+
+    monkeypatch.setattr(raster.time, "sleep", fake_sleep)
+
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+
+    if events and events[0] == ("sleep", 0.03):
+        events = events[1:]
+
+    assert events == expected

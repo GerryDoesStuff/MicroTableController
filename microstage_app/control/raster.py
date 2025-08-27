@@ -102,19 +102,25 @@ class RasterRunner:
                     self.position_cb(pos)
                 time.sleep(0.03)
 
-                if self.cfg.autofocus and AutoFocus:
+                do_af = bool(self.cfg.autofocus and AutoFocus)
+                do_capture = bool(self.cfg.capture)
+
+                if do_af:
                     af = AutoFocus(self.stage, self.camera)
                     af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+                    time.sleep(1)
 
-                img = self.camera.snap() if self.cfg.capture else None
-                if img is not None and self.cfg.capture:
-                    save_c = c if forward else (self.cfg.cols - 1 - c)
-                    fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
-                    self.writer.save_single(
-                        img,
-                        directory=self.directory,
-                        filename=fname,
-                        auto_number=self.auto_number,
-                        fmt=self.fmt,
-                    )
+                if do_capture:
+                    img = self.camera.snap()
+                    if img is not None:
+                        save_c = c if forward else (self.cfg.cols - 1 - c)
+                        fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
+                        self.writer.save_single(
+                            img,
+                            directory=self.directory,
+                            filename=fname,
+                            auto_number=self.auto_number,
+                            fmt=self.fmt,
+                        )
+                    time.sleep(1)
 
