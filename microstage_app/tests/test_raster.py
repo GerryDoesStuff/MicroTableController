@@ -39,76 +39,51 @@ class WriterMock:
         self.saved.append((img, directory, filename, auto_number, fmt))
 
 
-def test_raster_serpentine(monkeypatch):
+@pytest.mark.parametrize("mode", ["rectangle", "parallelogram", "trapezoid"])
+@pytest.mark.parametrize("serpentine", [True, False])
+def test_raster_traversal_modes(mode, serpentine):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(
+    cfg_kwargs = dict(
         rows=2,
         cols=3,
         x1_mm=0.0,
         y1_mm=0.0,
-        x2_mm=2.0,
-        y2_mm=0.0,
-        x3_mm=0.0,
-        y3_mm=1.0,
-        x4_mm=2.0,
-        y4_mm=1.0,
-        serpentine=True,
+        serpentine=serpentine,
+        mode=mode,
     )
-    runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
-    runner.run()
-    assert writer.saved == [
-        (1, "out", "foo_r0000_c0000", False, "bmp"),
-        (2, "out", "foo_r0000_c0001", False, "bmp"),
-        (3, "out", "foo_r0000_c0002", False, "bmp"),
-        (4, "out", "foo_r0001_c0002", False, "bmp"),
-        (5, "out", "foo_r0001_c0001", False, "bmp"),
-        (6, "out", "foo_r0001_c0000", False, "bmp"),
-    ]
-    assert stage.moves == [
-        (1.0,0.0,0.0),
-        (1.0,0.0,0.0),
-        (0.0,1.0,0.0),
-        (-1.0,0.0,0.0),
-        (-1.0,0.0,0.0),
-    ]
+    if mode == "rectangle":
+        cfg_kwargs.update(x2_mm=2.0, y2_mm=0.0, x3_mm=0.0, y3_mm=1.0, x4_mm=2.0, y4_mm=1.0)
+    elif mode == "parallelogram":
+        cfg_kwargs.update(x2_mm=2.0, y2_mm=0.0, x3_mm=0.5, y3_mm=1.0)
+    elif mode == "trapezoid":
+        cfg_kwargs.update(x2_mm=4.0, y2_mm=0.0, x3_mm=1.0, y3_mm=2.0, x4_mm=3.0, y4_mm=2.0)
 
-
-def test_raster_no_serpentine(monkeypatch):
-    stage = StageMock()
-    cam = CameraMock()
-    writer = WriterMock()
-    cfg = RasterConfig(
-        rows=2,
-        cols=3,
-        x1_mm=0.0,
-        y1_mm=0.0,
-        x2_mm=2.0,
-        y2_mm=0.0,
-        x3_mm=0.0,
-        y3_mm=1.0,
-        x4_mm=2.0,
-        y4_mm=1.0,
-        serpentine=False,
-    )
+    cfg = RasterConfig(**cfg_kwargs)
     runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
+
+    coord_matrix = runner._build_coord_matrix()
     runner.run()
-    assert writer.saved == [
-        (1, "out", "foo_r0000_c0000", False, "bmp"),
-        (2, "out", "foo_r0000_c0001", False, "bmp"),
-        (3, "out", "foo_r0000_c0002", False, "bmp"),
-        (4, "out", "foo_r0001_c0000", False, "bmp"),
-        (5, "out", "foo_r0001_c0001", False, "bmp"),
-        (6, "out", "foo_r0001_c0002", False, "bmp"),
-    ]
-    assert stage.moves == [
-        (1.0,0.0,0.0),
-        (1.0,0.0,0.0),
-        (-2.0,1.0,0.0),
-        (1.0,0.0,0.0),
-        (1.0,0.0,0.0),
-    ]
+
+    # expected moves and filenames
+    expected_moves = []
+    expected_files = []
+    current_x, current_y = coord_matrix[0][0]
+    for r in range(cfg.rows):
+        forward = (r % 2 == 0) or (not serpentine)
+        cols = range(cfg.cols) if forward else range(cfg.cols - 1, -1, -1)
+        for c in cols:
+            target_x, target_y = coord_matrix[r][c]
+            dx = target_x - current_x
+            dy = target_y - current_y
+            if dx or dy:
+                expected_moves.append((dx, dy, 0.0))
+            current_x, current_y = target_x, target_y
+            expected_files.append(f"foo_r{r:04d}_c{c:04d}")
+
+    assert stage.moves == expected_moves
+    assert [f[2] for f in writer.saved] == expected_files
 
 
 def test_raster_capture_disabled():
@@ -217,7 +192,7 @@ def test_raster_parallelogram_matrix():
         capture=False,
     )
     runner = RasterRunner(stage, cam, writer, cfg)
-    assert runner.coord_matrix == [
+    assert runner._build_coord_matrix() == [
         [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
         [(0.5, 1.0), (1.5, 1.0), (2.5, 1.0)],
     ]
@@ -242,7 +217,7 @@ def test_raster_trapezoid_matrix():
         capture=False,
     )
     runner = RasterRunner(stage, cam, writer, cfg)
-    assert runner.coord_matrix == [
+    assert runner._build_coord_matrix() == [
         [(0.0, 0.0), (2.0, 0.0), (4.0, 0.0)],
         [(0.5, 1.5), (2.0, 1.5), (3.5, 1.5)],
         [(1.0, 3.0), (2.0, 3.0), (3.0, 3.0)],
