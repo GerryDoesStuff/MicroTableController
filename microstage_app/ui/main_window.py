@@ -171,14 +171,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # profiles
         self.profiles = Profiles.load_or_create()
-        self.pixel_size = self.profiles.get('measurement.pixel_size', 1.0)
+        self.pixel_size = self.profiles.get('measurement.pixel_size', 1.0,
+                                            expected_type=(int, float),
+                                            min_value=0.0)
 
         # capture settings
-        dir_profile = self.profiles.get('capture.dir')
+        dir_profile = self.profiles.get('capture.dir', self.image_writer.run_dir,
+                                        expected_type=str)
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
-        self.capture_name = self.profiles.get('capture.name', "capture")
-        self.auto_number = self.profiles.get('capture.auto_number', False)
-        self.capture_format = self.profiles.get('capture.format', 'bmp')
+        self.capture_name = self.profiles.get('capture.name', "capture", expected_type=str)
+        self.auto_number = self.profiles.get('capture.auto_number', False, expected_type=bool)
+        fmt = self.profiles.get('capture.format', 'bmp', expected_type=str)
+        if fmt.lower() not in {"bmp", "tif", "png", "jpg"}:
+            log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'bmp'")
+            fmt = 'bmp'
+        self.capture_format = fmt
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -199,16 +206,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # load persisted values; extend _persistent_widgets() to add more fields
         for w, path in self._persistent_widgets():
-            val = self.profiles.get(path)
-            if val is not None:
-                if isinstance(w, QtWidgets.QAbstractSpinBox):
-                    w.setValue(val)
-                elif isinstance(w, QtWidgets.QCheckBox):
-                    w.setChecked(bool(val))
-                elif isinstance(w, QtWidgets.QComboBox):
-                    w.setCurrentText(str(val))
-                elif isinstance(w, QtWidgets.QLineEdit):
-                    w.setText(str(val))
+            if isinstance(w, QtWidgets.QAbstractSpinBox):
+                val = self.profiles.get(path, w.value(), expected_type=(int, float),
+                                        min_value=w.minimum(), max_value=w.maximum())
+                w.setValue(val)
+            elif isinstance(w, QtWidgets.QCheckBox):
+                val = self.profiles.get(path, w.isChecked(), expected_type=bool)
+                w.setChecked(val)
+            elif isinstance(w, QtWidgets.QComboBox):
+                default = w.currentText()
+                val = self.profiles.get(path, default, expected_type=str)
+                if val in [w.itemText(i) for i in range(w.count())]:
+                    w.setCurrentText(val)
+                else:
+                    log(f"WARNING: profile '{path}' option {val!r} not valid; using default {default!r}")
+            elif isinstance(w, QtWidgets.QLineEdit):
+                val = self.profiles.get(path, w.text(), expected_type=str)
+                w.setText(val)
 
         self._connect_signals()
         self._init_persistent_fields()
