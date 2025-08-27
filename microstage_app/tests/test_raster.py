@@ -50,9 +50,9 @@ def test_raster_serpentine(monkeypatch):
         (1, "out", "foo_r0000_c0000", False, "bmp"),
         (2, "out", "foo_r0000_c0001", False, "bmp"),
         (3, "out", "foo_r0000_c0002", False, "bmp"),
-        (4, "out", "foo_r0001_c0000", False, "bmp"),
+        (4, "out", "foo_r0001_c0002", False, "bmp"),
         (5, "out", "foo_r0001_c0001", False, "bmp"),
-        (6, "out", "foo_r0001_c0002", False, "bmp"),
+        (6, "out", "foo_r0001_c0000", False, "bmp"),
     ]
     assert stage.moves == [
         (1.0,0.0,0.0),

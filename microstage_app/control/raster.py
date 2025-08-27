@@ -113,7 +113,7 @@ class RasterRunner:
                 if do_capture:
                     img = self.camera.snap()
                     if img is not None:
-                        save_c = c if forward else (self.cfg.cols - 1 - c)
+                        save_c = c
                         fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
                         self.writer.save_single(
                             img,
