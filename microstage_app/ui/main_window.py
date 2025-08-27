@@ -337,13 +337,22 @@ class MainWindow(QtWidgets.QMainWindow):
         # profiles
         self.profiles = Profiles.load_or_create()
         lenses_cfg = self.profiles.get('measurement.lenses', {}, expected_type=dict)
-        self.lenses: dict[str, Lens] = {name: Lens(name, um_per_px) for name, um_per_px in lenses_cfg.items()}
+        self.lenses: dict[str, Lens] = {}
+        for name, cfg in lenses_cfg.items():
+            if isinstance(cfg, dict):
+                cal = {k: float(v) for k, v in cfg.items()}
+                um = next(iter(cal.values())) if cal else 1.0
+                lens = Lens(name, um, cal)
+            else:
+                # legacy flat value
+                lens = Lens(name, float(cfg))
+            self.lenses[name] = lens
         cur_name = self.profiles.get('measurement.current_lens', '10x', expected_type=str)
         self.current_lens = self.lenses.get(cur_name)
         if not self.current_lens:
             # fall back to a known lens or create a default
             self.current_lens = self.lenses.get('10x') or Lens(cur_name, 1.0)
-        self.lenses[self.current_lens.name] = self.current_lens
+            self.lenses[self.current_lens.name] = self.current_lens
 
         # capture settings
         dir_profile = self.profiles.get('capture.dir', self.image_writer.run_dir,
@@ -941,7 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_lens = lens
         self.profiles.set('measurement.current_lens', name)
         self.profiles.save()
-        self._refresh_lens_combo()
+        self._update_lens_for_resolution()
 
     def _browse_capture_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
@@ -1453,11 +1462,48 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         self._populate_resolutions()
 
+    # ------------------------ CALIBRATION HANDLING ------------------------
+
+    def _current_res_key(self) -> str | None:
+        """Return current resolution as ``"{w}x{h}"`` or ``None``."""
+        if not self.camera:
+            return None
+        try:
+            idx = int(self.camera.get_resolution_index())
+            res_list = getattr(self.camera, "resolutions", [])
+            for ridx, w, h in res_list:
+                if ridx == idx:
+                    return f"{w}x{h}"
+        except Exception:
+            return None
+        return None
+
+    def _update_lens_for_resolution(self):
+        """Update current lens calibration for active resolution."""
+        res_key = self._current_res_key()
+        if not res_key:
+            return
+        lens = self.current_lens
+        if res_key in lens.calibrations:
+            lens.um_per_px = lens.calibrations[res_key]
+        elif lens.calibrations:
+            # scale from first known calibration
+            k, v = next(iter(lens.calibrations.items()))
+            try:
+                w0, _ = map(int, k.split("x"))
+                w, _ = map(int, res_key.split("x"))
+                lens.um_per_px = v * (w0 / w)
+            except Exception:
+                lens.um_per_px = v
+        lens.calibrations[res_key] = lens.um_per_px
+        self._refresh_lens_combo()
+
     def _apply_resolution(self, i: int):
         if not self.camera: return
         idx = self.res_combo.currentData()
         if idx is None: return
         self.camera.set_resolution_index(int(idx))
+        self._update_lens_for_resolution()
 
     def _apply_roi(self, mode):
         if not self.camera: return
@@ -1947,7 +1993,11 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if ok:
             self.current_lens.um_per_px = val
-            self.profiles.set(f"measurement.lenses.{self.current_lens.name}", val)
+            res_key = self._current_res_key() or "default"
+            self.current_lens.calibrations[res_key] = val
+            self.profiles.set(
+                f"measurement.lenses.{self.current_lens.name}.{res_key}", val
+            )
             self.profiles.save()
             self._refresh_lens_combo()
             return True
@@ -1973,7 +2023,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if ok and pixels > 0:
             um_per_px = microns / pixels
             self.current_lens.um_per_px = um_per_px
-            self.profiles.set(f"measurement.lenses.{self.current_lens.name}", um_per_px)
+            res_key = self._current_res_key() or "default"
+            self.current_lens.calibrations[res_key] = um_per_px
+            self.profiles.set(
+                f"measurement.lenses.{self.current_lens.name}.{res_key}", um_per_px
+            )
             self.profiles.save()
             self._refresh_lens_combo()
 
