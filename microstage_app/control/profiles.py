@@ -1,4 +1,5 @@
 import yaml, os
+from ..utils.log import log
 
 DEFAULTS = {
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
@@ -34,12 +35,44 @@ class Profiles:
             data = yaml.safe_load(f) or {}
         p = Profiles(); p.data = data; return p
     def list_profile_names(self): return ['default']
-    def get(self, path: str, default=None):
+    def get(self, path: str, default=None, *, expected_type=None, min_value=None, max_value=None):
+        """Retrieve a value from the profile with basic validation.
+
+        Parameters
+        ----------
+        path: str
+            Dot separated path within the profile data.
+        default: any
+            Value to return if the path doesn't exist or validation fails.
+            The type of ``default`` is also used as the expected type when
+            ``expected_type`` is not provided.
+        expected_type: type or tuple[type], optional
+            Expected python type(s) for the value.
+        min_value: float, optional
+            Minimum numeric value allowed (inclusive).
+        max_value: float, optional
+            Maximum numeric value allowed (inclusive).
+        """
         cur = self.data
         for key in path.split('.'):
-            if key in cur: cur = cur[key]
-            else: return default
-        return cur
+            if isinstance(cur, dict) and key in cur:
+                cur = cur[key]
+            else:
+                return default
+        val = cur
+        if expected_type is None and default is not None:
+            expected_type = type(default)
+        if expected_type is not None and not isinstance(val, expected_type):
+            log(f"WARNING: profile '{path}' has invalid type {type(val).__name__}, expected {expected_type}; using default {default!r}")
+            return default
+        if isinstance(val, (int, float)):
+            if min_value is not None and val < min_value:
+                log(f"WARNING: profile '{path}' value {val} below minimum {min_value}; using default {default!r}")
+                return default
+            if max_value is not None and val > max_value:
+                log(f"WARNING: profile '{path}' value {val} above maximum {max_value}; using default {default!r}")
+                return default
+        return val
 
     def set(self, path: str, value):
         cur = self.data
