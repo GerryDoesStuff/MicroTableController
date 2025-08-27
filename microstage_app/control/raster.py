@@ -16,7 +16,12 @@ class RasterConfig:
     x1_mm: float = 0.0
     y1_mm: float = 0.0
     x2_mm: float = 1.0
-    y2_mm: float = 1.0
+    y2_mm: float = 0.0
+    x3_mm: float = 0.0
+    y3_mm: float = 1.0
+    x4_mm: float = 1.0
+    y4_mm: float = 1.0
+    mode: str = "rectangle"  # rectangle, parallelogram, trapezoid
     serpentine: bool = True
     feed_x_mm_min: float = 50.0
     feed_y_mm_min: float = 50.0
@@ -45,26 +50,50 @@ class RasterRunner:
         self.auto_number = auto_number
         self.fmt = fmt
         self.position_cb = position_cb
-        self.pitch_x_mm = (
-            (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
-        )
-        self.pitch_y_mm = (
-            (cfg.y2_mm - cfg.y1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
-        )
+
+        # Pre-compute coordinate matrix depending on mode
+        self.coord_matrix = []
+        if cfg.mode in ("rectangle", "parallelogram"):
+            col_dx = (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
+            col_dy = (cfg.y2_mm - cfg.y1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
+            row_dx = (cfg.x3_mm - cfg.x1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            row_dy = (cfg.y3_mm - cfg.y1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            for r in range(cfg.rows):
+                row = []
+                base_x = cfg.x1_mm + row_dx * r
+                base_y = cfg.y1_mm + row_dy * r
+                for c in range(cfg.cols):
+                    x = base_x + col_dx * c
+                    y = base_y + col_dy * c
+                    row.append((x, y))
+                self.coord_matrix.append(row)
+        elif cfg.mode == "trapezoid":
+            for r in range(cfg.rows):
+                t_r = r / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+                start_x = cfg.x1_mm + (cfg.x3_mm - cfg.x1_mm) * t_r
+                start_y = cfg.y1_mm + (cfg.y3_mm - cfg.y1_mm) * t_r
+                end_x = cfg.x2_mm + (cfg.x4_mm - cfg.x2_mm) * t_r
+                end_y = cfg.y2_mm + (cfg.y4_mm - cfg.y2_mm) * t_r
+                row = []
+                for c in range(cfg.cols):
+                    t_c = c / (cfg.cols - 1) if cfg.cols > 1 else 0.0
+                    x = start_x + (end_x - start_x) * t_c
+                    y = start_y + (end_y - start_y) * t_c
+                    row.append((x, y))
+                self.coord_matrix.append(row)
+        else:  # pragma: no cover - validation
+            raise ValueError(f"Unknown raster mode: {cfg.mode}")
 
     def run(self):
         """Execute raster scan and capture images for each tile.
 
-        A matrix of target coordinates is generated from the diagonal
-        points and the requested row/column counts.  The stage is then
-        stepped through these coordinates in a serpentine pattern (if
-        enabled) ensuring that every tile is visited exactly once.
+        Target coordinates are pre-computed during initialization based on
+        the selected raster ``mode``.  The stage is then stepped through these
+        coordinates in a serpentine pattern (if enabled) ensuring that every
+        tile is visited exactly once.
         """
 
-        # Build matrix of absolute target coordinates
-        xs = [self.cfg.x1_mm + self.pitch_x_mm * c for c in range(self.cfg.cols)]
-        ys = [self.cfg.y1_mm + self.pitch_y_mm * r for r in range(self.cfg.rows)]
-        coord_matrix = [[(x, y) for x in xs] for y in ys]
+        coord_matrix = self.coord_matrix
 
         start_x, start_y = coord_matrix[0][0]
         try:
