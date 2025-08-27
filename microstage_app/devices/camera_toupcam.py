@@ -647,8 +647,9 @@ class ToupcamCamera:
 
     def set_gain(self, again: int):
         try:
-            self._cam.put_ExpoAGain(int(again))
-            log(f"Camera: gain {again}")
+            val = max(100, min(int(again), 400))
+            self._cam.put_ExpoAGain(val)
+            log(f"Camera: gain {val}")
         except Exception as e:
             log(f"Camera: set_gain failed: {e}")
 
@@ -659,12 +660,12 @@ class ToupcamCamera:
             log(f"Camera: get_exposure_ms failed: {e}")
             return 0.0
 
-    def get_gain(self) -> int:
+    def get_gain(self) -> float:
         try:
-            return int(self._cam.get_ExpoAGain())
+            return float(self._cam.get_ExpoAGain()) / 100.0
         except Exception as e:
             log(f"Camera: get_gain failed: {e}")
-            return 0
+            return 0.0
 
     # ---- image controls ----
 

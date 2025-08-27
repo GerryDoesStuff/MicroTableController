@@ -61,4 +61,4 @@ class MockCamera:
         self._gain = int(gain)
 
     def get_gain(self):
-        return int(self._gain)
+        return float(self._gain) / 100.0

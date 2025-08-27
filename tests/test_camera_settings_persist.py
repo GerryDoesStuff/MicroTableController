@@ -26,7 +26,7 @@ def test_camera_settings_persist(tmp_path):
     w = MainWindow()
     w.exp_spin.setValue(20.0)
     w.autoexp_chk.setChecked(True)
-    w.gain_spin.setValue(150)
+    w.gain_spin.setValue(1.5)
     w.brightness_spin.setValue(40)
     w.contrast_spin.setValue(-10)
     w.saturation_spin.setValue(200)
@@ -40,7 +40,7 @@ def test_camera_settings_persist(tmp_path):
     w2 = MainWindow()
     assert w2.exp_spin.value() == 20.0
     assert w2.autoexp_chk.isChecked() is True
-    assert w2.gain_spin.value() == 150
+    assert w2.gain_spin.value() == pytest.approx(1.5)
     assert w2.brightness_spin.value() == 40
     assert w2.contrast_spin.value() == -10
     assert w2.saturation_spin.value() == 200
