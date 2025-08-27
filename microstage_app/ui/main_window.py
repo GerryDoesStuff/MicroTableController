@@ -1321,6 +1321,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 base_name=name,
                 auto_number=auto_num,
                 fmt=fmt,
+                position_cb=lambda pos: self.stage_worker.enqueue(
+                    self.stage.get_position, callback=self._on_stage_position
+                ),
             )
             runner.run()
             return True
