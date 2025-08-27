@@ -222,6 +222,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     w.setText(str(val))
 
         self._connect_signals()
+        self._init_persistent_fields()
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
@@ -603,6 +604,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
+
+    def _init_persistent_fields(self):
+        def bind(spin, key):
+            spin.setValue(self.profiles.get(key, spin.value()))
+            spin.valueChanged.connect(lambda v, k=key: (self.profiles.set(k, float(v)), self.profiles.save()))
+        for axis in ('x', 'y', 'z'):
+            bind(getattr(self, f'step{axis}_spin'), f'jog.step.{axis}')
+            bind(getattr(self, f'feed{axis}_spin'), f'jog.feed.{axis}')
+            bind(getattr(self, f'abs{axis}_spin'), f'jog.abs.{axis}')
 
     def _on_capture_dir_changed(self, text: str):
         self.capture_dir = text
