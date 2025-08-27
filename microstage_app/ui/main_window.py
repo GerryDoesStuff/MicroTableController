@@ -188,6 +188,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._af_thread = None
         self._af_worker = None
 
+        # focus stack state
+        self._stack_thread = None
+        self._stack_worker = None
+        self._last_stack_dir = None
+
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
 
@@ -399,6 +404,16 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         left.addWidget(af_box)
 
+        stack_box = QtWidgets.QGroupBox("Focus Stack")
+        s = QtWidgets.QGridLayout(stack_box)
+        self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
+        self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(3); self.stack_step.setRange(0.001, 1.0); self.stack_step.setValue(0.01)
+        self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
+        s.addWidget(QtWidgets.QLabel("Range (mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
+        s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
+        s.addWidget(self.btn_focus_stack, 2, 0, 1, 2)
+        left.addWidget(stack_box)
+
         left.addStretch(1)
         left.addWidget(self.stage_pos)
 
@@ -600,6 +615,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
+        self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
         self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))
         self.btn_run_raster.clicked.connect(self._run_raster)
@@ -1373,6 +1389,59 @@ class MainWindow(QtWidgets.QMainWindow):
         self._af_thread, self._af_worker = t, w
         self._af_thread.finished.connect(self._cleanup_autofocus_thread)
         w.finished.connect(self._on_autofocus_done)
+
+    @QtCore.Slot()
+    def _cleanup_focus_stack_thread(self):
+        self._stack_thread = None
+        self._stack_worker = None
+
+    @QtCore.Slot(object, object)
+    def _on_focus_stack_done(self, best_idx, err):
+        self.btn_focus_stack.setEnabled(True)
+        if err:
+            log(f"Focus stack error: {err}")
+            QtWidgets.QMessageBox.critical(self, "Focus Stack", str(err))
+        else:
+            msg = "Focus stack complete"
+            if best_idx is not None:
+                msg += f"; best index {best_idx}"
+            if self._last_stack_dir:
+                msg += f"\nSaved to {self._last_stack_dir}"
+            log(msg)
+            QtWidgets.QMessageBox.information(self, "Focus Stack", msg)
+
+    def _run_focus_stack(self):
+        if not (self.stage and self.camera):
+            log("Focus stack ignored: stage or camera not connected")
+            return
+        step = float(self.stack_step.value())
+        if step <= 0:
+            QtWidgets.QMessageBox.warning(self, "Focus Stack", "Step must be > 0")
+            return
+        rng = float(self.stack_range.value())
+        feed = self.feedz_spin.value()
+        writer = ImageWriter(self.capture_dir)
+        stack_dir = writer.run_dir
+        self._last_stack_dir = stack_dir
+        self.btn_focus_stack.setEnabled(False)
+
+        def do_stack():
+            af = AutoFocus(self.stage, self.camera)
+            return af.focus_stack(
+                rng,
+                step,
+                writer,
+                directory=stack_dir,
+                metric=FocusMetric.LAPLACIAN,
+                feed_mm_per_min=feed,
+                fmt=self.capture_format,
+            )
+
+        log(f"Focus stack: range={rng} step={step} dir={stack_dir}")
+        t, w = run_async(do_stack)
+        self._stack_thread, self._stack_worker = t, w
+        self._stack_thread.finished.connect(self._cleanup_focus_stack_thread)
+        w.finished.connect(self._on_focus_stack_done)
 
     def _set_raster_point(self, idx: int):
         if not self.stage_worker:
