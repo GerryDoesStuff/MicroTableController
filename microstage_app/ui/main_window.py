@@ -196,6 +196,31 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # UI
         self._build_ui()
+
+        # map user-editable widgets to profile paths for persistence
+        self._profile_widgets = {
+            self.stepx_spin: "ui.jog.stepx",
+            self.stepy_spin: "ui.jog.stepy",
+            self.stepz_spin: "ui.jog.stepz",
+            self.feedx_spin: "ui.jog.feedx",
+            self.feedy_spin: "ui.jog.feedy",
+            self.feedz_spin: "ui.jog.feedz",
+            self.absx_spin: "ui.move.absx",
+            self.absy_spin: "ui.move.absy",
+            self.absz_spin: "ui.move.absz",
+        }
+        for w, path in self._profile_widgets.items():
+            val = self.profiles.get(path)
+            if val is not None:
+                if isinstance(w, QtWidgets.QAbstractSpinBox):
+                    w.setValue(val)
+                elif isinstance(w, QtWidgets.QCheckBox):
+                    w.setChecked(bool(val))
+                elif isinstance(w, QtWidgets.QComboBox):
+                    w.setCurrentText(str(val))
+                elif isinstance(w, QtWidgets.QLineEdit):
+                    w.setText(str(val))
+
         self._connect_signals()
 
         # mirror logs to the in-app log pane
@@ -1350,6 +1375,19 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------- CLOSE ---------------------------
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+        for w, path in getattr(self, "_profile_widgets", {}).items():
+            if isinstance(w, QtWidgets.QAbstractSpinBox):
+                val = w.value()
+            elif isinstance(w, QtWidgets.QCheckBox):
+                val = w.isChecked()
+            elif isinstance(w, QtWidgets.QComboBox):
+                val = w.currentText()
+            elif isinstance(w, QtWidgets.QLineEdit):
+                val = w.text()
+            else:
+                continue
+            self.profiles.set(path, val)
+        self.profiles.save()
         try:
             if self.stage_worker:
                 self.stage_worker.stop()
