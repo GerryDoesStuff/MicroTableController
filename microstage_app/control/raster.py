@@ -33,6 +33,7 @@ class RasterRunner:
         base_name="tile",
         auto_number=False,
         fmt="tif",
+        position_cb=None,
     ):
         self.stage = stage
         self.camera = camera
@@ -42,6 +43,7 @@ class RasterRunner:
         self.base_name = base_name
         self.auto_number = auto_number
         self.fmt = fmt
+        self.position_cb = position_cb
         self.pitch_x_mm = (
             (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
         )
@@ -76,6 +78,12 @@ class RasterRunner:
                     current_x, current_y = target_x, target_y
 
                 self.stage.wait_for_moves()
+                if self.position_cb:
+                    try:
+                        pos = self.stage.get_position()
+                    except Exception:
+                        pos = None
+                    self.position_cb(pos)
                 time.sleep(0.03)
 
                 if self.cfg.autofocus and AutoFocus:
