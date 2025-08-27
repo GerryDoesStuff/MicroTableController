@@ -2,10 +2,25 @@ import microstage_app.control.raster as raster
 from microstage_app.control.raster import RasterRunner, RasterConfig
 
 class StageMock:
-    def __init__(self):
+    def __init__(self, x=0.0, y=0.0, z=0.0):
         self.moves = []
+        self.moves_abs = []
+        self.pos = [x, y, z]
+    def get_position(self):
+        return self.pos[0], self.pos[1]
+    def move_absolute(self, x=None, y=None, z=None, feed_mm_per_min=0.0):
+        if x is not None:
+            self.pos[0] = x
+        if y is not None:
+            self.pos[1] = y
+        if z is not None:
+            self.pos[2] = z
+        self.moves_abs.append((self.pos[0], self.pos[1], self.pos[2]))
     def move_relative(self, dx=0.0, dy=0.0, dz=0.0, feed_mm_per_min=0.0):
         self.moves.append((dx, dy, dz))
+        self.pos[0] += dx
+        self.pos[1] += dy
+        self.pos[2] += dz
     def wait_for_moves(self):
         pass
 
@@ -99,3 +114,13 @@ def test_raster_autofocus(monkeypatch):
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert len(called) == cfg.rows * cfg.cols
+
+
+def test_raster_initial_move():
+    stage = StageMock(x=1.0, y=1.0)
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1, x1_mm=0.0, y1_mm=0.0, capture=False)
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+    assert stage.moves_abs == [(0.0, 0.0, 0.0)]
