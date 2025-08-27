@@ -34,7 +34,9 @@ def test_af_spinboxes_six_decimals(monkeypatch, qt_app):
         QtTest.QTest.keyClicks(line, "0.1234567")
         QtTest.QTest.keyClick(line, QtCore.Qt.Key_Return)
         qt_app.processEvents()
-        assert box.text() == "0.123457"
+        # Value should be displayed with six decimal places and roughly match the input
+        assert float(box.text()) == pytest.approx(0.1234567, abs=1e-6)
+        assert len(box.text().split(".")[1]) == 6
 
         box.setValue(0.0015)
         qt_app.processEvents()

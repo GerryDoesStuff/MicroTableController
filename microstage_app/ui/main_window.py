@@ -1601,8 +1601,10 @@ class MainWindow(QtWidgets.QMainWindow):
             log(f"Autofocus error: {err}")
             QtWidgets.QMessageBox.critical(self, "Autofocus", str(err))
         else:
-            log(f"Autofocus: best ΔZ={best:.4f} mm")
-            QtWidgets.QMessageBox.information(self, "Autofocus", f"Best Z offset (relative): {best:.4f} mm")
+            log(f"Autofocus: best ΔZ={best:.6f} mm")
+            QtWidgets.QMessageBox.information(
+                self, "Autofocus", f"Best Z offset (relative): {best:.6f} mm"
+            )
 
     @QtCore.Slot()
     def _cleanup_autofocus_thread(self):
