@@ -15,6 +15,12 @@ DEFAULTS = {
     },
     # persistent capture settings
     'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'bmp'},
+    # jog UI persistence
+    'jog': {
+        'step': {'x': 0.1, 'y': 0.1, 'z': 0.1},
+        'feed': {'x': 50.0, 'y': 50.0, 'z': 50.0},
+        'abs': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+    },
 }
 
 class Profiles:
