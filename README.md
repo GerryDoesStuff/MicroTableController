@@ -59,7 +59,9 @@ Example usage:
 
 The application stores user preferences and scan presets in a YAML file named
 `profiles.yaml` located in the application's working directory (alongside
-`main.py` when running from source or the packaged executable).
+`main.py` when running from source or the packaged executable). The file also
+contains a `version` field so that older profiles can be migrated
+automatically when new settings are introduced.
 
 Saved fields include:
 

@@ -1,7 +1,8 @@
-import yaml, os
+import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
+    'version': 1,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {'exposure_ms': 10.0, 'gain': 1.0, 'binning': 1},
     'scan_presets': {
@@ -24,8 +25,11 @@ DEFAULTS = {
     },
 }
 
+
 class Profiles:
     PATH = os.path.abspath('profiles.yaml')
+    VERSION = DEFAULTS['version']
+
     @classmethod
     def load_or_create(cls):
         if not os.path.exists(cls.PATH):
@@ -33,7 +37,30 @@ class Profiles:
                 yaml.safe_dump(DEFAULTS, f)
         with open(cls.PATH, 'r') as f:
             data = yaml.safe_load(f) or {}
+        if cls.migrate(data):
+            with open(cls.PATH, 'w') as f:
+                yaml.safe_dump(data, f)
         p = Profiles(); p.data = data; return p
+
+    @classmethod
+    def migrate(cls, data: dict) -> bool:
+        """Upgrade profile data in-place. Returns True if modified."""
+        changed = False
+        version = data.get('version', 0)
+        if version < cls.VERSION:
+            def merge(defaults, target):
+                nonlocal changed
+                for key, val in defaults.items():
+                    if key not in target:
+                        target[key] = copy.deepcopy(val)
+                        changed = True
+                    elif isinstance(val, dict) and isinstance(target[key], dict):
+                        merge(val, target[key])
+
+            merge(DEFAULTS, data)
+            data['version'] = cls.VERSION
+            changed = True
+        return changed
     def list_profile_names(self): return ['default']
     def get(self, path: str, default=None, *, expected_type=None, min_value=None, max_value=None):
         """Retrieve a value from the profile with basic validation.
