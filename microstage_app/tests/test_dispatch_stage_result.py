@@ -23,7 +23,7 @@ def test_dispatch_updates_stage_pos(monkeypatch, qt_app):
         pos = (1.0, 2.0, 3.0)
         win._dispatch_stage_result(win._on_stage_position, pos)
         QtWidgets.QApplication.processEvents()
-        assert "X1.000" in win.stage_pos.text()
+        assert "X1.000000" in win.stage_pos.text()
     finally:
         win.preview_timer.stop()
         win.fps_timer.stop()
@@ -42,7 +42,7 @@ def test_dispatch_partial_pos(monkeypatch, qt_app):
         win._dispatch_stage_result(win._on_stage_position, (None, None, 4.0))
         QtWidgets.QApplication.processEvents()
         txt = win.stage_pos.text()
-        assert "X1.000" in txt and "Y2.000" in txt and "Z4.000" in txt
+        assert "X1.000000" in txt and "Y2.000000" in txt and "Z4.000000" in txt
     finally:
         win.preview_timer.stop()
         win.fps_timer.stop()
