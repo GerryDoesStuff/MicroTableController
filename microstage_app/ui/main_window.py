@@ -226,6 +226,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_status = QtWidgets.QLabel("Stage: —")
         self.stage_status.setTextFormat(QtCore.Qt.PlainText)
         self.stage_pos = QtWidgets.QLabel("Pos: —")
+        self.stage_pos.setTextInteractionFlags(
+            QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard
+        )
         self.btn_stage_connect = QtWidgets.QPushButton("Connect Stage")
         self.btn_stage_disconnect = QtWidgets.QPushButton("Disconnect Stage")
         self.cam_status = QtWidgets.QLabel("Camera: —")
