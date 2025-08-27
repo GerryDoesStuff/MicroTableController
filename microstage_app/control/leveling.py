@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Sequence, Tuple, List
+from typing import Iterable, Sequence, Tuple, List
 
 try:
     from .autofocus import AutoFocus, FocusMetric
@@ -81,6 +81,104 @@ def three_point_level(
         z = float(pos[2])
         samples.append((x, y, z))
 
+    model = SurfaceModel(kind=SurfaceKind(mode.value))
+    model.fit(samples)
+    return model
+
+
+def _grid_coords(
+    rect: Tuple[float, float, float, float], rows: int, cols: int
+) -> Iterable[Tuple[float, float]]:
+    """Generate XY coordinates for a regular grid within ``rect``.
+
+    Parameters
+    ----------
+    rect : Tuple[float, float, float, float]
+        ``(x1, y1, x2, y2)`` rectangle bounds in millimetres.
+    rows : int
+        Number of grid rows.
+    cols : int
+        Number of grid columns.
+    """
+
+    x1, y1, x2, y2 = rect
+    dx = (x2 - x1) / (cols - 1) if cols > 1 else 0.0
+    dy = (y2 - y1) / (rows - 1) if rows > 1 else 0.0
+    for r in range(rows):
+        y = y1 + r * dy
+        for c in range(cols):
+            x = x1 + c * dx
+            yield x, y
+
+
+def _probe_point(
+    stage,
+    camera,
+    x: float,
+    y: float,
+    autofocus: bool,
+) -> Tuple[float, float, float]:
+    """Move to ``(x, y)`` and record the current Z position."""
+
+    stage.move_absolute(x=x, y=y)
+    stage.wait_for_moves()
+
+    if autofocus:
+        if AutoFocus and camera is not None:  # pragma: no branch
+            try:
+                af = AutoFocus(stage, camera)
+                af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+                stage.wait_for_moves()
+            except Exception:
+                pass
+    else:
+        input("Focus at the current point and press Enter to continue...")
+
+    pos = stage.get_position()
+    if pos is None or len(pos) < 3:
+        raise RuntimeError("stage did not return a valid position")
+    return x, y, float(pos[2])
+
+
+def grid_level(
+    stage,
+    camera,
+    rect: Tuple[float, float, float, float],
+    rows: int,
+    cols: int,
+    mode: LevelingMode = LevelingMode.LINEAR,
+    autofocus: bool = True,
+) -> SurfaceModel:
+    """Fit a surface model by probing a grid of points.
+
+    Parameters
+    ----------
+    stage : Stage-like object
+        Provides ``move_absolute``, ``wait_for_moves`` and ``get_position``.
+    camera : camera-like object
+        Used with :class:`AutoFocus` when ``autofocus`` is True.
+    rect : Tuple[float, float, float, float]
+        Rectangle bounds ``(x1, y1, x2, y2)`` in millimetres.
+    rows : int
+        Number of grid rows.
+    cols : int
+        Number of grid columns.
+    mode : LevelingMode
+        Surface fitting model to use.
+    autofocus : bool, default True
+        If True use autofocus at each node, otherwise wait for user
+        confirmation after manual focusing.
+
+    Returns
+    -------
+    SurfaceModel
+        Fitted surface model for the probed grid points.
+    """
+
+    samples = [
+        _probe_point(stage, camera, x, y, autofocus)
+        for x, y in _grid_coords(rect, rows, cols)
+    ]
     model = SurfaceModel(kind=SurfaceKind(mode.value))
     model.fit(samples)
     return model
