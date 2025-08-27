@@ -9,7 +9,7 @@ from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
 from ..control.profiles import Profiles
 from ..io.storage import ImageWriter
-from ..analysis import Lens, measure_distance, measure_area
+from ..analysis import Lens
 
 from ..utils.img import numpy_to_qimage
 from ..utils.log import LOG, log
@@ -58,8 +58,6 @@ def _load_feed_limits():
 
 
 class MeasureView(QtWidgets.QGraphicsView):
-    distance_measured = QtCore.Signal(tuple, tuple)
-    area_measured = QtCore.Signal(object)
     calibration_measured = QtCore.Signal(float)
 
     def __init__(self, parent=None):
@@ -68,9 +66,20 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._pixmap = QtWidgets.QGraphicsPixmapItem()
         self.scene().addItem(self._pixmap)
         self._mode = None
+        self._reticle_enabled = False
+
+        # ruler state
+        self._anchor = None
+        self._anchor_item = None
+        self._live_line = None
+        self._live_ticks = []
+        self._live_text = None
+        self._lines = []
+        self._um_per_px = 1.0
+
+        # calibration state
         self._points = []
         self._item = None
-        self._reticle_enabled = False
 
     def set_reticle(self, enabled: bool):
         self._reticle_enabled = enabled
@@ -102,19 +111,39 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._pixmap.setPixmap(QtGui.QPixmap())
         self._clear_temp()
 
-    def start_distance(self):
-        self._clear_temp()
-        self._mode = "distance"
-
-    def start_area(self):
-        self._clear_temp()
-        self._mode = "area"
+    def start_ruler(self, um_per_px: float):
+        self.clear_overlays()
+        self._mode = "ruler"
+        self._um_per_px = um_per_px
 
     def start_calibration(self):
-        self._clear_temp()
+        self.clear_overlays()
         self._mode = "calibration"
 
+    def _add_square(self, coord):
+        size = 6
+        rect = QtCore.QRectF(coord[0] - size / 2, coord[1] - size / 2, size, size)
+        return self.scene().addRect(
+            rect, QtGui.QPen(QtCore.Qt.red), QtGui.QBrush(QtCore.Qt.red)
+        )
+
     def _clear_temp(self):
+        # ruler temp items
+        if self._anchor_item:
+            self.scene().removeItem(self._anchor_item)
+            self._anchor_item = None
+        if self._live_line:
+            self.scene().removeItem(self._live_line)
+            self._live_line = None
+        for t in self._live_ticks:
+            self.scene().removeItem(t)
+        self._live_ticks = []
+        if self._live_text:
+            self.scene().removeItem(self._live_text)
+            self._live_text = None
+        self._anchor = None
+
+        # calibration temp items
         self._points = []
         if self._item:
             self.scene().removeItem(self._item)
@@ -122,7 +151,61 @@ class MeasureView(QtWidgets.QGraphicsView):
 
     def clear_overlays(self):
         self._mode = None
+        for ln in self._lines:
+            self.scene().removeItem(ln["start"])
+            self.scene().removeItem(ln["end"])
+            self.scene().removeItem(ln["line"])
+            for t in ln["ticks"]:
+                self.scene().removeItem(t)
+            self.scene().removeItem(ln["text"])
+        self._lines = []
         self._clear_temp()
+
+    def _update_live_line(self, end):
+        if not self._live_line:
+            return
+        line = QtCore.QLineF(
+            QtCore.QPointF(*self._anchor), QtCore.QPointF(end[0], end[1])
+        )
+        self._live_line.setLine(line)
+
+        # remove old ticks
+        for t in self._live_ticks:
+            self.scene().removeItem(t)
+        self._live_ticks = []
+
+        length = line.length()
+        if length > 0:
+            unit_x = line.dx() / length
+            unit_y = line.dy() / length
+            norm_x = -unit_y
+            norm_y = unit_x
+            spacing = 50
+            for d in range(spacing, int(length), spacing):
+                px = self._anchor[0] + unit_x * d
+                py = self._anchor[1] + unit_y * d
+                tick = self.scene().addLine(
+                    px + norm_x * 5,
+                    py + norm_y * 5,
+                    px - norm_x * 5,
+                    py - norm_y * 5,
+                    QtGui.QPen(QtCore.Qt.red, 1),
+                )
+                self._live_ticks.append(tick)
+
+            pixels = length
+            microns = pixels * self._um_per_px
+            self._live_text.setText(f"{pixels:.1f} px / {microns:.1f} µm")
+            midx = self._anchor[0] + unit_x * length / 2
+            midy = self._anchor[1] + unit_y * length / 2
+            self._live_text.setPos(midx + norm_x * 10, midy + norm_y * 10)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._mode == "ruler" and self._anchor is not None:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            pt = self.mapToScene(pos)
+            self._update_live_line((pt.x(), pt.y()))
+        return super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if not self._mode:
@@ -130,24 +213,59 @@ class MeasureView(QtWidgets.QGraphicsView):
         pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
         pt = self.mapToScene(pos)
         coord = (pt.x(), pt.y())
-        if self._mode == "distance":
-            self._points.append(coord)
-            if len(self._points) == 2:
-                line = QtCore.QLineF(QtCore.QPointF(*self._points[0]), QtCore.QPointF(*self._points[1]))
-                self._item = self.scene().addLine(line, QtGui.QPen(QtCore.Qt.red, 2))
-                self.distance_measured.emit(self._points[0], self._points[1])
-                self._mode = None
-                self._points = []
-        elif self._mode == "area":
-            self._points.append(coord)
-            if self._item:
-                self.scene().removeItem(self._item)
-            poly = QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in self._points])
-            self._item = self.scene().addPolygon(poly, QtGui.QPen(QtCore.Qt.green, 2))
+        if self._mode == "ruler":
+            if event.button() == QtCore.Qt.LeftButton:
+                if self._anchor is None:
+                    self._anchor = coord
+                    self._anchor_item = self._add_square(coord)
+                    self._live_line = self.scene().addLine(
+                        QtCore.QLineF(pt, pt), QtGui.QPen(QtCore.Qt.red, 2)
+                    )
+                    self._live_text = self.scene().addSimpleText("")
+                else:
+                    term_item = self._add_square(coord)
+                    line_item = self._live_line
+                    text_item = self._live_text
+                    ticks = list(self._live_ticks)
+                    self._lines.append(
+                        {
+                            "start": self._anchor_item,
+                            "end": term_item,
+                            "line": line_item,
+                            "ticks": ticks,
+                            "text": text_item,
+                        }
+                    )
+                    self._anchor = None
+                    self._anchor_item = None
+                    self._live_line = None
+                    self._live_ticks = []
+                    self._live_text = None
+            elif event.button() == QtCore.Qt.RightButton:
+                if self._anchor is not None:
+                    self._clear_temp()
+                elif self._lines:
+                    last = self._lines.pop()
+                    self.scene().removeItem(last["end"])
+                    self.scene().removeItem(last["line"])
+                    for t in last["ticks"]:
+                        self.scene().removeItem(t)
+                    self.scene().removeItem(last["text"])
+                    self._anchor_item = last["start"]
+                    rect = self._anchor_item.rect()
+                    center = rect.center()
+                    self._anchor = (center.x(), center.y())
+                    self._live_line = self.scene().addLine(
+                        QtCore.QLineF(center, center), QtGui.QPen(QtCore.Qt.red, 2)
+                    )
+                    self._live_text = self.scene().addSimpleText("")
+                    self._live_ticks = []
         elif self._mode == "calibration":
             self._points.append(coord)
             if len(self._points) == 2:
-                line = QtCore.QLineF(QtCore.QPointF(*self._points[0]), QtCore.QPointF(*self._points[1]))
+                line = QtCore.QLineF(
+                    QtCore.QPointF(*self._points[0]), QtCore.QPointF(*self._points[1])
+                )
                 self._item = self.scene().addLine(line, QtGui.QPen(QtCore.Qt.blue, 2))
                 p1 = np.asarray(self._points[0])
                 p2 = np.asarray(self._points[1])
@@ -158,23 +276,9 @@ class MeasureView(QtWidgets.QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
-        if self._mode == "area" and len(self._points) >= 3:
-            poly = QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in self._points])
-            w = int(self._pixmap.pixmap().width())
-            h = int(self._pixmap.pixmap().height())
-            img = QtGui.QImage(w, h, QtGui.QImage.Format_Grayscale8)
-            img.fill(0)
-            painter = QtGui.QPainter(img)
-            painter.setBrush(QtCore.Qt.white)
-            painter.setPen(QtCore.Qt.NoPen)
-            painter.drawPolygon(poly)
-            painter.end()
-            ptr = img.bits()
-            ptr.setsize(w * h)
-            mask = np.frombuffer(ptr, np.uint8).reshape((h, w))
-            self.area_measured.emit(mask)
+        if self._mode == "ruler":
             self._mode = None
-            self._points = []
+            self._clear_temp()
         super().mouseDoubleClickEvent(event)
 
 
@@ -307,8 +411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.measure_button.setText("Measure")
         _mnu = QtWidgets.QMenu(self.measure_button)
         self.act_calibrate = _mnu.addAction("Calibrate")
-        self.act_measure_distance = _mnu.addAction("Distance")
-        self.act_measure_area = _mnu.addAction("Area")
+        self.act_ruler = _mnu.addAction("Ruler")
         self.measure_button.setMenu(_mnu)
         self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.toolbar.addWidget(self.measure_button)
@@ -669,10 +772,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
         self.act_calibrate.triggered.connect(self._start_calibration)
-        self.act_measure_distance.triggered.connect(self._start_measure_distance)
-        self.act_measure_area.triggered.connect(self._start_measure_area)
-        self.measure_view.distance_measured.connect(self._on_distance_measured)
-        self.measure_view.area_measured.connect(self._on_area_measured)
+        self.act_ruler.triggered.connect(self._start_ruler)
         self.measure_view.calibration_measured.connect(self._on_calibration_done)
 
         # camera controls
@@ -1628,21 +1728,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_calibration(self):
         self.measure_view.start_calibration()
 
-    def _start_measure_distance(self):
+    def _start_ruler(self):
         if self._ensure_current_lens():
-            self.measure_view.start_distance()
-
-    def _start_measure_area(self):
-        if self._ensure_current_lens():
-            self.measure_view.start_area()
-
-    def _on_distance_measured(self, p1, p2):
-        dist = measure_distance(p1, p2, self.current_lens.um_per_px)
-        QtWidgets.QMessageBox.information(self, "Distance", f"{dist:.3f} µm")
-
-    def _on_area_measured(self, mask):
-        area = measure_area(mask, self.current_lens.um_per_px)
-        QtWidgets.QMessageBox.information(self, "Area", f"{area:.3f} µm²")
+            self.measure_view.start_ruler(self.current_lens.um_per_px)
 
     def _on_calibration_done(self, pixels: float):
         microns, ok = QtWidgets.QInputDialog.getDouble(
