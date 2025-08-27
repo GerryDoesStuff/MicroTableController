@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from microstage_app.control.leveling import three_point_level, LevelingMode
+from microstage_app.control.leveling import (
+    three_point_level,
+    grid_level,
+    LevelingMode,
+)
 
 
 class DummyStage:
@@ -63,3 +67,34 @@ def test_three_point_level_insufficient_points(monkeypatch):
         with pytest.raises(ValueError) as exc:
             three_point_level(stage, cam, pts, mode)
         assert str(required) in str(exc.value)
+
+
+def test_grid_level_linear_autofocus(monkeypatch):
+    import microstage_app.control.leveling as leveling
+    monkeypatch.setattr(leveling, "AutoFocus", None)
+
+    def plane(x, y):
+        return x + 2 * y
+
+    stage = DummyStage(plane)
+    cam = DummyCamera()
+    rect = (0.0, 0.0, 1.0, 1.0)
+    model = grid_level(stage, cam, rect, rows=2, cols=2, mode=LevelingMode.LINEAR)
+    assert np.isclose(model.predict(2, 3), plane(2, 3))
+
+
+def test_grid_level_manual(monkeypatch):
+    import microstage_app.control.leveling as leveling
+    monkeypatch.setattr(leveling, "AutoFocus", None)
+    monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "")
+
+    def plane(x, y):
+        return x + 2 * y
+
+    stage = DummyStage(plane)
+    cam = DummyCamera()
+    rect = (0.0, 0.0, 1.0, 1.0)
+    model = grid_level(
+        stage, cam, rect, rows=2, cols=2, mode=LevelingMode.LINEAR, autofocus=False
+    )
+    assert np.isclose(model.predict(2, 3), plane(2, 3))
