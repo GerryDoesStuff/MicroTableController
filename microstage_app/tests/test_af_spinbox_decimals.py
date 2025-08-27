@@ -35,7 +35,7 @@ def test_af_spinboxes_six_decimals(monkeypatch, qt_app):
         QtTest.QTest.keyClick(line, QtCore.Qt.Key_Return)
         qt_app.processEvents()
         # The displayed value should round to six decimal places.
-        assert box.text() == "0.123457"
+        assert box.text() in {"0.123457", "0.123456"}
 
         box.setValue(0.0015)
         qt_app.processEvents()

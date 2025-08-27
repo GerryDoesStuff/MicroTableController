@@ -29,11 +29,16 @@ def test_lens_calibration_persist(tmp_path):
 
     profiles = Profiles.load_or_create()
     lens = Lens("40x", 0.25)
-    profiles.set(f"measurement.lenses.{lens.name}", lens.um_per_px)
+    res_key = "100x100"
+    profiles.set(
+        f"measurement.lenses.{lens.name}.{res_key}", lens.um_per_px
+    )
     profiles.save()
 
     profiles2 = Profiles.load_or_create()
-    stored = profiles2.get(f"measurement.lenses.{lens.name}", None, expected_type=float)
+    stored = profiles2.get(
+        f"measurement.lenses.{lens.name}.{res_key}", None, expected_type=float
+    )
     assert stored == pytest.approx(lens.um_per_px)
 
     Profiles.PATH = orig_path
