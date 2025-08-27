@@ -17,7 +17,7 @@ from ..control.focus_planes import (
     Area,
 )
 
-from ..utils.img import numpy_to_qimage
+from ..utils.img import numpy_to_qimage, draw_scale_bar
 from ..utils.log import LOG, log
 from ..utils.serial_worker import SerialWorker
 from ..utils.workers import run_async
@@ -1681,6 +1681,11 @@ class MainWindow(QtWidgets.QMainWindow):
             time.sleep(0.03)
             img = self.camera.snap()
             if img is not None:
+                if self.chk_scale_bar.isChecked():
+                    try:
+                        img = draw_scale_bar(img, self.current_lens.um_per_px)
+                    except Exception as e:
+                        log(f"Scale bar draw error: {e}")
                 self.image_writer.save_single(
                     img,
                     directory=directory,
