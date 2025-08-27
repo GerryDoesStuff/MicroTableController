@@ -17,8 +17,8 @@ class RasterConfig:
     x2_mm: float = 1.0
     y2_mm: float = 1.0
     serpentine: bool = True
-    feed_x_mm_min: float = 20.0
-    feed_y_mm_min: float = 20.0
+    feed_x_mm_min: float = 50.0
+    feed_y_mm_min: float = 50.0
     autofocus: bool = False
     capture: bool = True
 
