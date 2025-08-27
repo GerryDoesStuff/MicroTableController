@@ -26,6 +26,7 @@ from pathlib import Path
 import os
 import re
 import time
+import math
 
 
 def _load_stage_bounds():
@@ -73,6 +74,8 @@ class MeasureView(QtWidgets.QGraphicsView):
         self.scene().addItem(self._pixmap)
         self._mode = None
         self._reticle_enabled = False
+        self._scale_bar_enabled = False
+        self._scale_um_per_px = 1.0
 
         # ruler state
         self._anchor = None
@@ -91,21 +94,52 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._reticle_enabled = enabled
         self.viewport().update()
 
+    def set_scale_bar(self, enabled: bool):
+        self._scale_bar_enabled = enabled
+        self.viewport().update()
+
+    def set_scale_bar_um_per_px(self, um_per_px: float):
+        self._scale_um_per_px = um_per_px
+        if self._scale_bar_enabled:
+            self.viewport().update()
+
     def drawForeground(self, painter: QtGui.QPainter, rect: QtCore.QRectF) -> None:
         super().drawForeground(painter, rect)
-        if not self._reticle_enabled:
-            return
         pix = self._pixmap.pixmap()
         if pix.isNull():
             return
         br = self._pixmap.boundingRect()
-        cx = br.center().x()
-        cy = br.center().y()
         painter.save()
-        painter.setCompositionMode(QtGui.QPainter.CompositionMode_Difference)
-        painter.setPen(QtGui.QPen(QtCore.Qt.white))
-        painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
-        painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
+        if self._reticle_enabled:
+            cx = br.center().x()
+            cy = br.center().y()
+            painter.setCompositionMode(QtGui.QPainter.CompositionMode_Difference)
+            painter.setPen(QtGui.QPen(QtCore.Qt.white))
+            painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
+            painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
+        if self._scale_bar_enabled:
+            length_px = br.width() / 5
+            microns = length_px * self._scale_um_per_px
+            if microns > 0:
+                exp = math.floor(math.log10(microns))
+                nice_um = None
+                for m in (1, 2, 5):
+                    candidate = m * (10 ** exp)
+                    if candidate <= microns:
+                        nice_um = candidate
+                if nice_um is None:
+                    nice_um = microns
+                length_px = nice_um / self._scale_um_per_px
+                x0 = br.left() + 20
+                y0 = br.bottom() - 20
+                painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
+                painter.drawLine(x0, y0, x0 + length_px, y0)
+                painter.drawLine(x0, y0 - 5, x0, y0 + 5)
+                painter.drawLine(x0 + length_px, y0 - 5, x0 + length_px, y0 + 5)
+                text = (
+                    f"{nice_um / 1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
+                )
+                painter.drawText(x0, y0 - 7, text)
         painter.restore()
 
     def set_image(self, qimg: QtGui.QImage):
@@ -426,6 +460,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hue_slider.setValue(self.hue_spin.value())
         self.gamma_slider.setValue(self.gamma_spin.value())
 
+        self.measure_view.set_scale_bar(self.chk_scale_bar.isChecked())
+        self.measure_view.set_scale_bar_um_per_px(self.current_lens.um_per_px)
+
         self._connect_signals()
         self._init_persistent_fields()
         self._update_leveling_method()
@@ -591,6 +628,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr2.addWidget(self.btn_capture)
         self.chk_reticle = QtWidgets.QCheckBox("Reticle")
         ctr2.addWidget(self.chk_reticle)
+        self.chk_scale_bar = QtWidgets.QCheckBox("Scale bar")
+        ctr2.addWidget(self.chk_scale_bar)
         self.lens_combo = QtWidgets.QComboBox()
         self._refresh_lens_combo()
         ctr2.addWidget(self.lens_combo)
@@ -854,6 +893,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
+        self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
         self.lens_combo.currentIndexChanged.connect(self._on_lens_changed)
         self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
@@ -945,6 +985,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_format_changed(self, text: str):
         self.capture_format = text.lower()
         self.profiles.set('capture.format', self.capture_format)
+        self.profiles.save()
+
+    def _on_scale_bar_toggled(self, checked: bool):
+        self.measure_view.set_scale_bar(checked)
+        self.profiles.set('ui.scale_bar', checked)
         self.profiles.save()
 
     def _on_lens_changed(self, index: int):
@@ -1500,6 +1545,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 lens.um_per_px = v
         lens.calibrations[res_key] = lens.um_per_px
         self._refresh_lens_combo()
+        self.measure_view.set_scale_bar_um_per_px(lens.um_per_px)
 
     def _apply_resolution(self, i: int):
         if not self.camera: return
@@ -2027,6 +2073,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.profiles.save()
             self._refresh_lens_combo()
+            self.measure_view.set_scale_bar_um_per_px(um_per_px)
 
     # --------------------------- PERSISTENCE ---------------------------
 
@@ -2060,6 +2107,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.res_combo, "camera.resolution_index"),
             (self.decim_spin, "camera.display_decimation"),
             (self.lens_combo, "measurement.current_lens"),
+            (self.chk_scale_bar, "ui.scale_bar"),
         ]
 
     # --------------------------- PROFILES ---------------------------
