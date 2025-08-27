@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 1,
+    'version': 2,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -27,6 +27,14 @@ DEFAULTS = {
             'y2_mm': 4.0,
             'rows': 5,
             'cols': 5,
+        }
+    },
+    'measurement': {
+        'lenses': {
+            '5x': 1.0,
+            '10x': 1.0,
+            '20x': 1.0,
+            '50x': 1.0,
         }
     },
     # persistent capture settings
@@ -72,6 +80,12 @@ class Profiles:
                         merge(val, target[key])
 
             merge(DEFAULTS, data)
+            # migrate old single pixel_size into lenses dict if present
+            meas = data.get('measurement', {})
+            if isinstance(meas, dict) and 'pixel_size' in meas:
+                meas.setdefault('lenses', {})
+                meas['lenses']['10x'] = meas.pop('pixel_size')
+                changed = True
             data['version'] = cls.VERSION
             changed = True
         return changed
