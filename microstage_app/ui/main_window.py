@@ -69,6 +69,28 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._mode = None
         self._points = []
         self._item = None
+        self._reticle_enabled = False
+
+    def set_reticle(self, enabled: bool):
+        self._reticle_enabled = enabled
+        self.viewport().update()
+
+    def drawForeground(self, painter: QtGui.QPainter, rect: QtCore.QRectF) -> None:
+        super().drawForeground(painter, rect)
+        if not self._reticle_enabled:
+            return
+        pix = self._pixmap.pixmap()
+        if pix.isNull():
+            return
+        br = self._pixmap.boundingRect()
+        cx = br.center().x()
+        cy = br.center().y()
+        painter.save()
+        painter.setCompositionMode(QtGui.QPainter.CompositionMode_Difference)
+        painter.setPen(QtGui.QPen(QtCore.Qt.white))
+        painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
+        painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
+        painter.restore()
 
     def set_image(self, qimg: QtGui.QImage):
         self._pixmap.setPixmap(QtGui.QPixmap.fromImage(qimg))
@@ -376,6 +398,8 @@ class MainWindow(QtWidgets.QMainWindow):
         center.addWidget(self.measure_view, 1)
         ctr2 = QtWidgets.QHBoxLayout()
         ctr2.addWidget(self.btn_capture)
+        self.chk_reticle = QtWidgets.QCheckBox("Reticle")
+        ctr2.addWidget(self.chk_reticle)
         ctr2.addStretch(1)
         ctr2.addWidget(self.fps_label)
         center.addLayout(ctr2)
@@ -549,6 +573,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_cam_connect.clicked.connect(self._connect_camera)
         self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
+        self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.btn_home_all.clicked.connect(self._home_all)
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
         self.btn_home_y.clicked.connect(lambda: self._home_axis('y'))
