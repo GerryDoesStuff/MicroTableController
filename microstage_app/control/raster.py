@@ -51,22 +51,41 @@ class RasterRunner:
         self.fmt = fmt
         self.position_cb = position_cb
 
-        # Pre-compute coordinate matrix depending on mode
-        self.coord_matrix = []
-        if cfg.mode in ("rectangle", "parallelogram"):
+        self.coord_matrix = None
+
+    def _build_coord_matrix(self):
+        """Generate the coordinate matrix for the configured raster mode."""
+        if self.coord_matrix is not None:
+            return self.coord_matrix
+
+        cfg = self.cfg
+        matrix = []
+        if cfg.mode == "rectangle":
             col_dx = (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
             col_dy = (cfg.y2_mm - cfg.y1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
             row_dx = (cfg.x3_mm - cfg.x1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
             row_dy = (cfg.y3_mm - cfg.y1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
             for r in range(cfg.rows):
-                row = []
                 base_x = cfg.x1_mm + row_dx * r
                 base_y = cfg.y1_mm + row_dy * r
+                row = []
                 for c in range(cfg.cols):
                     x = base_x + col_dx * c
                     y = base_y + col_dy * c
                     row.append((x, y))
-                self.coord_matrix.append(row)
+                matrix.append(row)
+        elif cfg.mode == "parallelogram":
+            col_vec_x = (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
+            col_vec_y = (cfg.y2_mm - cfg.y1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
+            row_vec_x = (cfg.x3_mm - cfg.x1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            row_vec_y = (cfg.y3_mm - cfg.y1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            for r in range(cfg.rows):
+                row = []
+                for c in range(cfg.cols):
+                    x = cfg.x1_mm + c * col_vec_x + r * row_vec_x
+                    y = cfg.y1_mm + c * col_vec_y + r * row_vec_y
+                    row.append((x, y))
+                matrix.append(row)
         elif cfg.mode == "trapezoid":
             for r in range(cfg.rows):
                 t_r = r / (cfg.rows - 1) if cfg.rows > 1 else 0.0
@@ -80,20 +99,21 @@ class RasterRunner:
                     x = start_x + (end_x - start_x) * t_c
                     y = start_y + (end_y - start_y) * t_c
                     row.append((x, y))
-                self.coord_matrix.append(row)
+                matrix.append(row)
         else:  # pragma: no cover - validation
             raise ValueError(f"Unknown raster mode: {cfg.mode}")
+
+        self.coord_matrix = matrix
+        return matrix
 
     def run(self):
         """Execute raster scan and capture images for each tile.
 
-        Target coordinates are pre-computed during initialization based on
-        the selected raster ``mode``.  The stage is then stepped through these
-        coordinates in a serpentine pattern (if enabled) ensuring that every
-        tile is visited exactly once.
+        The coordinate matrix is generated based on :class:`RasterConfig.mode`
+        and then traversed in either serpentine or raster order.
         """
 
-        coord_matrix = self.coord_matrix
+        coord_matrix = self._build_coord_matrix()
 
         start_x, start_y = coord_matrix[0][0]
         try:
