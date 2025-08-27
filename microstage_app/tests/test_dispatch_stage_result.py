@@ -23,7 +23,8 @@ def test_dispatch_updates_stage_pos(monkeypatch, qt_app):
         pos = (1.0, 2.0, 3.0)
         win._dispatch_stage_result(win._on_stage_position, pos)
         QtWidgets.QApplication.processEvents()
-        assert "X1.000000" in win.stage_pos.text()
+        txt = win.stage_pos.text()
+        assert "X1.000000" in txt and "Y2.000000" in txt and "Z3.000000" in txt
     finally:
         win.preview_timer.stop()
         win.fps_timer.stop()
