@@ -236,15 +236,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
                 w.setChecked(val)
             elif isinstance(w, QtWidgets.QComboBox):
-                default = w.currentText()
-                val = self.profiles.get(path, default, expected_type=str)
-                if val in [w.itemText(i) for i in range(w.count())]:
+                data = w.currentData()
+                default = data if data is not None else w.currentText()
+                val = self.profiles.get(path, default, expected_type=(int, float, str))
+                if isinstance(val, (int, float)):
+                    pos = w.findData(val)
+                    if pos >= 0:
+                        w.setCurrentIndex(pos)
+                    else:
+                        log(f"WARNING: profile '{path}' option {val!r} not valid; using default {default!r}")
+                elif val in [w.itemText(i) for i in range(w.count())]:
                     w.setCurrentText(val)
                 else:
                     log(f"WARNING: profile '{path}' option {val!r} not valid; using default {default!r}")
             elif isinstance(w, QtWidgets.QLineEdit):
                 val = self.profiles.get(path, w.text(), expected_type=str)
                 w.setText(val)
+
+        # ensure sliders match spins after loading persisted values
+        self.brightness_slider.setValue(self.brightness_spin.value())
+        self.contrast_slider.setValue(self.contrast_spin.value())
+        self.saturation_slider.setValue(self.saturation_spin.value())
+        self.hue_slider.setValue(self.hue_spin.value())
+        self.gamma_slider.setValue(self.gamma_spin.value())
 
         self._connect_signals()
         self._init_persistent_fields()
@@ -749,6 +763,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._populate_binning()
             self._populate_resolutions()
             QtCore.QTimer.singleShot(0, self._populate_resolutions)
+            self._apply_camera_profile()
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
@@ -977,6 +992,92 @@ class MainWindow(QtWidgets.QMainWindow):
         if pos >= 0:
             self.res_combo.setCurrentIndex(pos)
         self.res_combo.blockSignals(False)
+
+    def _apply_camera_profile(self):
+        if not self.camera:
+            return
+        p = self.profiles
+        # Exposure and auto-exposure
+        auto = p.get('camera.auto_exposure', self.autoexp_chk.isChecked(), expected_type=bool)
+        ms = p.get('camera.exposure_ms', self.exp_spin.value(), expected_type=(int, float))
+        self.autoexp_chk.blockSignals(True)
+        self.autoexp_chk.setChecked(auto)
+        self.autoexp_chk.blockSignals(False)
+        self.exp_spin.blockSignals(True)
+        self.exp_spin.setValue(ms)
+        self.exp_spin.blockSignals(False)
+        self._apply_exposure()
+        # Gain
+        gain = p.get('camera.gain', self.gain_spin.value(), expected_type=(int, float))
+        self.gain_spin.blockSignals(True)
+        self.gain_spin.setValue(gain)
+        self.gain_spin.blockSignals(False)
+        if not auto:
+            self._apply_gain()
+        # Brightness
+        val = p.get('camera.brightness', self.brightness_spin.value(), expected_type=(int, float))
+        self.brightness_spin.blockSignals(True)
+        self.brightness_spin.setValue(val)
+        self.brightness_spin.blockSignals(False)
+        self._apply_brightness()
+        # Contrast
+        val = p.get('camera.contrast', self.contrast_spin.value(), expected_type=(int, float))
+        self.contrast_spin.blockSignals(True)
+        self.contrast_spin.setValue(val)
+        self.contrast_spin.blockSignals(False)
+        self._apply_contrast()
+        # Saturation
+        val = p.get('camera.saturation', self.saturation_spin.value(), expected_type=(int, float))
+        self.saturation_spin.blockSignals(True)
+        self.saturation_spin.setValue(val)
+        self.saturation_spin.blockSignals(False)
+        self._apply_saturation()
+        # Hue
+        val = p.get('camera.hue', self.hue_spin.value(), expected_type=(int, float))
+        self.hue_spin.blockSignals(True)
+        self.hue_spin.setValue(val)
+        self.hue_spin.blockSignals(False)
+        self._apply_hue()
+        # Gamma
+        val = p.get('camera.gamma', self.gamma_spin.value(), expected_type=(int, float))
+        self.gamma_spin.blockSignals(True)
+        self.gamma_spin.setValue(val)
+        self.gamma_spin.blockSignals(False)
+        self._apply_gamma()
+        # RAW mode
+        raw = p.get('camera.raw', self.raw_chk.isChecked(), expected_type=bool)
+        self.raw_chk.blockSignals(True)
+        self.raw_chk.setChecked(raw)
+        self.raw_chk.blockSignals(False)
+        self._apply_raw(raw)
+        # Binning
+        bin_val = p.get('camera.binning', self.bin_combo.currentData(), expected_type=(int, float))
+        self.bin_combo.blockSignals(True)
+        pos = self.bin_combo.findData(bin_val)
+        if pos >= 0:
+            self.bin_combo.setCurrentIndex(pos)
+        self.bin_combo.blockSignals(False)
+        self._apply_binning(self.bin_combo.currentIndex())
+        # Resolution
+        res_idx = p.get('camera.resolution_index', self.res_combo.currentData(), expected_type=(int, float))
+        self.res_combo.blockSignals(True)
+        pos = self.res_combo.findData(res_idx)
+        if pos >= 0:
+            self.res_combo.setCurrentIndex(pos)
+        self.res_combo.blockSignals(False)
+        self._apply_resolution(self.res_combo.currentIndex())
+        # Speed level
+        val = p.get('camera.speed_level', self.speed_spin.value(), expected_type=(int, float))
+        self.speed_spin.blockSignals(True)
+        self.speed_spin.setValue(val)
+        self.speed_spin.blockSignals(False)
+        self._apply_speed()
+        # Display decimation
+        val = p.get('camera.display_decimation', self.decim_spin.value(), expected_type=(int, float))
+        self.decim_spin.blockSignals(True)
+        self.decim_spin.setValue(val)
+        self.decim_spin.blockSignals(False)
+        self._apply_decimation()
 
     def _sync_cam_controls(self):
         if not self.camera:
@@ -1431,6 +1532,20 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.absx_spin, "ui.move.absx"),
             (self.absy_spin, "ui.move.absy"),
             (self.absz_spin, "ui.move.absz"),
+            # camera settings
+            (self.exp_spin, "camera.exposure_ms"),
+            (self.autoexp_chk, "camera.auto_exposure"),
+            (self.gain_spin, "camera.gain"),
+            (self.brightness_spin, "camera.brightness"),
+            (self.contrast_spin, "camera.contrast"),
+            (self.saturation_spin, "camera.saturation"),
+            (self.hue_spin, "camera.hue"),
+            (self.gamma_spin, "camera.gamma"),
+            (self.raw_chk, "camera.raw"),
+            (self.bin_combo, "camera.binning"),
+            (self.res_combo, "camera.resolution_index"),
+            (self.speed_spin, "camera.speed_level"),
+            (self.decim_spin, "camera.display_decimation"),
         ]
 
     # --------------------------- PROFILES ---------------------------
@@ -1449,7 +1564,8 @@ class MainWindow(QtWidgets.QMainWindow):
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = w.isChecked()
             elif isinstance(w, QtWidgets.QComboBox):
-                val = w.currentText()
+                data = w.currentData()
+                val = data if data is not None else w.currentText()
             elif isinstance(w, QtWidgets.QLineEdit):
                 val = w.text()
             else:

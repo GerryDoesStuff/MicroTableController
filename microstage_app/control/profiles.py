@@ -4,7 +4,21 @@ from ..utils.log import log
 DEFAULTS = {
     'version': 1,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
-    'camera': {'exposure_ms': 10.0, 'gain': 1.0, 'binning': 1},
+    'camera': {
+        'exposure_ms': 10.0,
+        'auto_exposure': False,
+        'gain': 100,
+        'brightness': 0,
+        'contrast': 0,
+        'saturation': 128,
+        'hue': 0,
+        'gamma': 100,
+        'raw': False,
+        'binning': 1,
+        'resolution_index': 0,
+        'speed_level': 0,
+        'display_decimation': 1,
+    },
     'scan_presets': {
         'raster': {
             'x1_mm': 0.0,
