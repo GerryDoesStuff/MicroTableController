@@ -545,26 +545,6 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         left.addWidget(af_box)
 
-        # Leveling controls
-        lvl_box = QtWidgets.QGroupBox("Leveling")
-        l = QtWidgets.QGridLayout(lvl_box)
-        self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
-        self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
-        self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
-        self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
-        self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
-        self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
-        self.level_status = QtWidgets.QLabel("Idle")
-        row = 0
-        l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
-        l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 2)
-        left.addWidget(lvl_box)
-
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
         self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
@@ -700,9 +680,33 @@ class MainWindow(QtWidgets.QMainWindow):
         c.setRowStretch(row, 1)
         rightw.addTab(camtab, "Camera")
 
-        # ---- Raster tab
-        rast = QtWidgets.QWidget()
-        r = QtWidgets.QGridLayout(rast)
+        # ---- Area tab
+        area = QtWidgets.QWidget()
+        a = QtWidgets.QVBoxLayout(area)
+
+        # Leveling controls
+        lvl_box = QtWidgets.QGroupBox("Leveling")
+        l = QtWidgets.QGridLayout(lvl_box)
+        self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
+        self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
+        self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
+        self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
+        self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
+        self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
+        self.level_status = QtWidgets.QLabel("Idle")
+        row = 0
+        l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
+        l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
+        l.addWidget(self.level_status, row, 0, 1, 2)
+        a.addWidget(lvl_box)
+
+        # Raster controls
+        rast_box = QtWidgets.QGroupBox("Raster")
+        r = QtWidgets.QGridLayout(rast_box)
         self.rows_spin = QtWidgets.QSpinBox(); self.rows_spin.setRange(1, 1000); self.rows_spin.setValue(5)
         self.cols_spin = QtWidgets.QSpinBox(); self.cols_spin.setRange(1, 1000); self.cols_spin.setValue(5)
 
@@ -731,25 +735,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
 
-        r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0); r.addWidget(self.raster_mode_combo, 0, 1)
-        r.addWidget(QtWidgets.QLabel("Rows:"), 1, 0); r.addWidget(self.rows_spin, 1, 1)
-        r.addWidget(QtWidgets.QLabel("Cols:"), 2, 0); r.addWidget(self.cols_spin, 2, 1)
-        r.addWidget(QtWidgets.QLabel("X1 (mm):"), 3, 0); r.addWidget(self.rast_x1_spin, 3, 1)
-        r.addWidget(QtWidgets.QLabel("Y1 (mm):"), 4, 0); r.addWidget(self.rast_y1_spin, 4, 1)
-        r.addWidget(self.btn_raster_p1, 5, 0, 1, 2)
-        r.addWidget(QtWidgets.QLabel("X2 (mm):"), 6, 0); r.addWidget(self.rast_x2_spin, 6, 1)
-        r.addWidget(QtWidgets.QLabel("Y2 (mm):"), 7, 0); r.addWidget(self.rast_y2_spin, 7, 1)
-        r.addWidget(self.btn_raster_p2, 8, 0, 1, 2)
-        r.addWidget(QtWidgets.QLabel("X3 (mm):"), 9, 0); r.addWidget(self.rast_x3_spin, 9, 1)
-        r.addWidget(QtWidgets.QLabel("Y3 (mm):"), 10, 0); r.addWidget(self.rast_y3_spin, 10, 1)
-        r.addWidget(self.btn_raster_p3, 11, 0, 1, 2)
-        r.addWidget(QtWidgets.QLabel("X4 (mm):"), 12, 0); r.addWidget(self.rast_x4_spin, 12, 1)
-        r.addWidget(QtWidgets.QLabel("Y4 (mm):"), 13, 0); r.addWidget(self.rast_y4_spin, 13, 1)
-        r.addWidget(self.btn_raster_p4, 14, 0, 1, 2)
-        r.addWidget(self.chk_raster_capture, 15, 0, 1, 2)
-        r.addWidget(self.chk_raster_af, 16, 0, 1, 2)
-        r.addWidget(self.btn_run_raster, 17, 0, 1, 2)
-        rightw.addTab(rast, "Raster")
+        r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0)
+        r.addWidget(self.raster_mode_combo, 0, 1)
+        r.addWidget(QtWidgets.QLabel("Rows:"), 0, 2)
+        r.addWidget(self.rows_spin, 0, 3)
+        r.addWidget(QtWidgets.QLabel("Cols:"), 0, 4)
+        r.addWidget(self.cols_spin, 0, 5)
+
+        r.addWidget(QtWidgets.QLabel("P1 X:"), 1, 0)
+        r.addWidget(self.rast_x1_spin, 1, 1)
+        r.addWidget(QtWidgets.QLabel("Y:"), 1, 2)
+        r.addWidget(self.rast_y1_spin, 1, 3)
+        r.addWidget(self.btn_raster_p1, 1, 4, 1, 2)
+
+        r.addWidget(QtWidgets.QLabel("P2 X:"), 2, 0)
+        r.addWidget(self.rast_x2_spin, 2, 1)
+        r.addWidget(QtWidgets.QLabel("Y:"), 2, 2)
+        r.addWidget(self.rast_y2_spin, 2, 3)
+        r.addWidget(self.btn_raster_p2, 2, 4, 1, 2)
+
+        r.addWidget(QtWidgets.QLabel("P3 X:"), 3, 0)
+        r.addWidget(self.rast_x3_spin, 3, 1)
+        r.addWidget(QtWidgets.QLabel("Y:"), 3, 2)
+        r.addWidget(self.rast_y3_spin, 3, 3)
+        r.addWidget(self.btn_raster_p3, 3, 4, 1, 2)
+
+        r.addWidget(QtWidgets.QLabel("P4 X:"), 4, 0)
+        r.addWidget(self.rast_x4_spin, 4, 1)
+        r.addWidget(QtWidgets.QLabel("Y:"), 4, 2)
+        r.addWidget(self.rast_y4_spin, 4, 3)
+        r.addWidget(self.btn_raster_p4, 4, 4, 1, 2)
+
+        r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
+        r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
+        r.addWidget(self.btn_run_raster, 6, 0, 1, 6)
+        r.setRowStretch(7, 1)
+        rast_box.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
+
+        a.addWidget(rast_box)
+        a.addStretch(1)
+        rightw.addTab(area, "Area")
 
         # ---- Scripts tab (restored)
         scripts = QtWidgets.QWidget()
