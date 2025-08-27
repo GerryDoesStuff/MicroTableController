@@ -230,23 +230,20 @@ class MeasureView(QtWidgets.QGraphicsView):
                     self._live_text = self.scene().addSimpleText("")
             elif event.button() == QtCore.Qt.RightButton:
                 if self._anchor is not None:
+                    # Cancel the live segment in progress
                     self._clear_temp()
                 elif self._lines:
+                    # Remove the most recently completed line
                     last = self._lines.pop()
+                    self.scene().removeItem(last["start"])
                     self.scene().removeItem(last["end"])
                     self.scene().removeItem(last["line"])
                     for t in last["ticks"]:
                         self.scene().removeItem(t)
                     self.scene().removeItem(last["text"])
-                    self._anchor_item = last["start"]
-                    rect = self._anchor_item.rect()
-                    center = rect.center()
-                    self._anchor = (center.x(), center.y())
-                    self._live_line = self.scene().addLine(
-                        QtCore.QLineF(center, center), QtGui.QPen(QtCore.Qt.red, 2)
-                    )
-                    self._live_text = self.scene().addSimpleText("")
-                    self._live_ticks = []
+                else:
+                    # No lines to remove; ignore the click
+                    pass
         elif self._mode == "calibration":
             self._points.append(coord)
             if len(self._points) == 2:
