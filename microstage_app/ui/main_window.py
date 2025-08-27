@@ -115,6 +115,10 @@ class MeasureView(QtWidgets.QGraphicsView):
             self.scene().removeItem(self._item)
             self._item = None
 
+    def clear_overlays(self):
+        self._mode = None
+        self._clear_temp()
+
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if not self._mode:
             return super().mousePressEvent(event)
@@ -200,7 +204,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles = Profiles.load_or_create()
         lenses_cfg = self.profiles.get('measurement.lenses', {}, expected_type=dict)
         self.lenses: dict[str, Lens] = {name: Lens(name, um_per_px) for name, um_per_px in lenses_cfg.items()}
-        self.current_lens = self.lenses.get('10x') or next(iter(self.lenses.values()), Lens('10x', 1.0))
+        cur_name = self.profiles.get('measurement.current_lens', '10x', expected_type=str)
+        self.current_lens = self.lenses.get(cur_name)
+        if not self.current_lens:
+            # fall back to a known lens or create a default
+            self.current_lens = self.lenses.get('10x') or Lens(cur_name, 1.0)
         self.lenses[self.current_lens.name] = self.current_lens
 
         # capture settings
@@ -430,6 +438,12 @@ class MainWindow(QtWidgets.QMainWindow):
         ctr2.addWidget(self.btn_capture)
         self.chk_reticle = QtWidgets.QCheckBox("Reticle")
         ctr2.addWidget(self.chk_reticle)
+        self.lens_combo = QtWidgets.QComboBox()
+        self.lens_combo.addItems(sorted(self.lenses.keys()))
+        self.lens_combo.setCurrentText(self.current_lens.name)
+        ctr2.addWidget(self.lens_combo)
+        self.btn_clear_screen = QtWidgets.QPushButton("Clear screen")
+        ctr2.addWidget(self.btn_clear_screen)
         ctr2.addStretch(1)
         ctr2.addWidget(self.fps_label)
         center.addLayout(ctr2)
@@ -604,6 +618,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
+        self.lens_combo.currentTextChanged.connect(self._on_lens_changed)
+        self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
         self.btn_home_y.clicked.connect(lambda: self._home_axis('y'))
@@ -691,6 +707,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_format_changed(self, text: str):
         self.capture_format = text.lower()
         self.profiles.set('capture.format', self.capture_format)
+        self.profiles.save()
+
+    def _on_lens_changed(self, name: str):
+        lens = self.lenses.get(name)
+        if not lens:
+            lens = Lens(name, 1.0)
+            self.lenses[name] = lens
+        self.current_lens = lens
+        self.profiles.set('measurement.current_lens', name)
         self.profiles.save()
 
     def _browse_capture_dir(self):
@@ -1616,6 +1641,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.res_combo, "camera.resolution_index"),
             (self.speed_spin, "camera.speed_level"),
             (self.decim_spin, "camera.display_decimation"),
+            (self.lens_combo, "measurement.current_lens"),
         ]
 
     # --------------------------- PROFILES ---------------------------
