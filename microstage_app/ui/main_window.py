@@ -1999,28 +1999,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- MEASUREMENT ---------------------------
 
-    def _ensure_current_lens(self) -> bool:
-        val, ok = QtWidgets.QInputDialog.getDouble(
-            self, "Calibration", "µm per pixel:", self.current_lens.um_per_px, 0.000001, 1e9, 6
-        )
-        if ok:
-            self.current_lens.um_per_px = val
-            res_key = self._current_res_key() or "default"
-            self.current_lens.calibrations[res_key] = val
-            self.profiles.set(
-                f"measurement.lenses.{self.current_lens.name}.{res_key}", val
-            )
-            self.profiles.save()
-            self._refresh_lens_combo()
-            return True
-        return False
-
     def _start_calibration(self):
         self.measure_view.start_calibration()
 
     def _start_ruler(self):
-        if self._ensure_current_lens():
-            self.measure_view.start_ruler(self.current_lens.um_per_px)
+        """Begin ruler measurement using the active lens calibration.
+
+        This bypasses the previous interactive calibration prompt and
+        instead directly uses the stored ``µm per pixel`` value for the
+        currently selected lens.  It assumes that ``self.current_lens`` has
+        been calibrated beforehand (either via a prior calibration run or
+        values loaded from profiles).
+        """
+
+        self.measure_view.start_ruler(self.current_lens.um_per_px)
 
     def _on_calibration_done(self, pixels: float):
         microns, ok = QtWidgets.QInputDialog.getDouble(
