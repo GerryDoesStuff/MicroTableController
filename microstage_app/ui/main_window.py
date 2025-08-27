@@ -670,27 +670,50 @@ class MainWindow(QtWidgets.QMainWindow):
         r = QtWidgets.QGridLayout(rast)
         self.rows_spin = QtWidgets.QSpinBox(); self.rows_spin.setRange(1, 1000); self.rows_spin.setValue(5)
         self.cols_spin = QtWidgets.QSpinBox(); self.cols_spin.setRange(1, 1000); self.cols_spin.setValue(5)
+
+        # Raster point spin boxes
         self.rast_x1_spin = QtWidgets.QDoubleSpinBox(); self.rast_x1_spin.setDecimals(3); self.rast_x1_spin.setRange(-1000.0, 1000.0); self.rast_x1_spin.setValue(0.0)
         self.rast_y1_spin = QtWidgets.QDoubleSpinBox(); self.rast_y1_spin.setDecimals(3); self.rast_y1_spin.setRange(-1000.0, 1000.0); self.rast_y1_spin.setValue(0.0)
         self.rast_x2_spin = QtWidgets.QDoubleSpinBox(); self.rast_x2_spin.setDecimals(3); self.rast_x2_spin.setRange(-1000.0, 1000.0); self.rast_x2_spin.setValue(4.0)
         self.rast_y2_spin = QtWidgets.QDoubleSpinBox(); self.rast_y2_spin.setDecimals(3); self.rast_y2_spin.setRange(-1000.0, 1000.0); self.rast_y2_spin.setValue(4.0)
+        self.rast_x3_spin = QtWidgets.QDoubleSpinBox(); self.rast_x3_spin.setDecimals(3); self.rast_x3_spin.setRange(-1000.0, 1000.0); self.rast_x3_spin.setValue(0.0)
+        self.rast_y3_spin = QtWidgets.QDoubleSpinBox(); self.rast_y3_spin.setDecimals(3); self.rast_y3_spin.setRange(-1000.0, 1000.0); self.rast_y3_spin.setValue(0.0)
+        self.rast_x4_spin = QtWidgets.QDoubleSpinBox(); self.rast_x4_spin.setDecimals(3); self.rast_x4_spin.setRange(-1000.0, 1000.0); self.rast_x4_spin.setValue(0.0)
+        self.rast_y4_spin = QtWidgets.QDoubleSpinBox(); self.rast_y4_spin.setDecimals(3); self.rast_y4_spin.setRange(-1000.0, 1000.0); self.rast_y4_spin.setValue(0.0)
+
+        # Raster point buttons
         self.btn_raster_p1 = QtWidgets.QPushButton("Raster Point 1")
         self.btn_raster_p2 = QtWidgets.QPushButton("Raster Point 2")
+        self.btn_raster_p3 = QtWidgets.QPushButton("Raster Point 3")
+        self.btn_raster_p4 = QtWidgets.QPushButton("Raster Point 4")
+
+        # Raster mode selection
+        self.raster_mode_combo = QtWidgets.QComboBox()
+        self.raster_mode_combo.addItems(["2-point", "3-point", "4-point"])
+
         self.chk_raster_capture = QtWidgets.QCheckBox("Capture images")
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
-        r.addWidget(QtWidgets.QLabel("Rows:"), 0, 0); r.addWidget(self.rows_spin, 0, 1)
-        r.addWidget(QtWidgets.QLabel("Cols:"), 1, 0); r.addWidget(self.cols_spin, 1, 1)
-        r.addWidget(QtWidgets.QLabel("X1 (mm):"), 2, 0); r.addWidget(self.rast_x1_spin, 2, 1)
-        r.addWidget(QtWidgets.QLabel("Y1 (mm):"), 3, 0); r.addWidget(self.rast_y1_spin, 3, 1)
-        r.addWidget(self.btn_raster_p1, 4, 0, 1, 2)
-        r.addWidget(QtWidgets.QLabel("X2 (mm):"), 5, 0); r.addWidget(self.rast_x2_spin, 5, 1)
-        r.addWidget(QtWidgets.QLabel("Y2 (mm):"), 6, 0); r.addWidget(self.rast_y2_spin, 6, 1)
-        r.addWidget(self.btn_raster_p2, 7, 0, 1, 2)
-        r.addWidget(self.chk_raster_capture, 8, 0, 1, 2)
-        r.addWidget(self.chk_raster_af, 9, 0, 1, 2)
-        r.addWidget(self.btn_run_raster, 10, 0, 1, 2)
+
+        r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0); r.addWidget(self.raster_mode_combo, 0, 1)
+        r.addWidget(QtWidgets.QLabel("Rows:"), 1, 0); r.addWidget(self.rows_spin, 1, 1)
+        r.addWidget(QtWidgets.QLabel("Cols:"), 2, 0); r.addWidget(self.cols_spin, 2, 1)
+        r.addWidget(QtWidgets.QLabel("X1 (mm):"), 3, 0); r.addWidget(self.rast_x1_spin, 3, 1)
+        r.addWidget(QtWidgets.QLabel("Y1 (mm):"), 4, 0); r.addWidget(self.rast_y1_spin, 4, 1)
+        r.addWidget(self.btn_raster_p1, 5, 0, 1, 2)
+        r.addWidget(QtWidgets.QLabel("X2 (mm):"), 6, 0); r.addWidget(self.rast_x2_spin, 6, 1)
+        r.addWidget(QtWidgets.QLabel("Y2 (mm):"), 7, 0); r.addWidget(self.rast_y2_spin, 7, 1)
+        r.addWidget(self.btn_raster_p2, 8, 0, 1, 2)
+        r.addWidget(QtWidgets.QLabel("X3 (mm):"), 9, 0); r.addWidget(self.rast_x3_spin, 9, 1)
+        r.addWidget(QtWidgets.QLabel("Y3 (mm):"), 10, 0); r.addWidget(self.rast_y3_spin, 10, 1)
+        r.addWidget(self.btn_raster_p3, 11, 0, 1, 2)
+        r.addWidget(QtWidgets.QLabel("X4 (mm):"), 12, 0); r.addWidget(self.rast_x4_spin, 12, 1)
+        r.addWidget(QtWidgets.QLabel("Y4 (mm):"), 13, 0); r.addWidget(self.rast_y4_spin, 13, 1)
+        r.addWidget(self.btn_raster_p4, 14, 0, 1, 2)
+        r.addWidget(self.chk_raster_capture, 15, 0, 1, 2)
+        r.addWidget(self.chk_raster_af, 16, 0, 1, 2)
+        r.addWidget(self.btn_run_raster, 17, 0, 1, 2)
         rightw.addTab(rast, "Raster")
 
         # ---- Scripts tab (restored)
@@ -763,6 +786,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
         self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))
+        self.btn_raster_p3.clicked.connect(lambda: self._set_raster_point(3))
+        self.btn_raster_p4.clicked.connect(lambda: self._set_raster_point(4))
         self.btn_run_raster.clicked.connect(self._run_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
@@ -1616,9 +1641,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if idx == 1:
                 self.rast_x1_spin.setValue(x)
                 self.rast_y1_spin.setValue(y)
-            else:
+            elif idx == 2:
                 self.rast_x2_spin.setValue(x)
                 self.rast_y2_spin.setValue(y)
+            elif idx == 3:
+                self.rast_x3_spin.setValue(x)
+                self.rast_y3_spin.setValue(y)
+            elif idx == 4:
+                self.rast_x4_spin.setValue(x)
+                self.rast_y4_spin.setValue(y)
 
         self.stage_worker.enqueue(self.stage.get_position, callback=cb)
 
