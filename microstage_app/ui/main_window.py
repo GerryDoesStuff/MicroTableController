@@ -9,7 +9,7 @@ from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
 from ..control.profiles import Profiles
 from ..io.storage import ImageWriter
-from ..analysis.measure import measure_distance, measure_area
+from ..analysis import Lens, measure_distance, measure_area
 
 from ..utils.img import numpy_to_qimage
 from ..utils.log import LOG, log
@@ -198,9 +198,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # profiles
         self.profiles = Profiles.load_or_create()
-        self.pixel_size = self.profiles.get('measurement.pixel_size', 1.0,
-                                            expected_type=(int, float),
-                                            min_value=0.0)
+        lenses_cfg = self.profiles.get('measurement.lenses', {}, expected_type=dict)
+        self.lenses: dict[str, Lens] = {name: Lens(name, um_per_px) for name, um_per_px in lenses_cfg.items()}
+        self.current_lens = self.lenses.get('10x') or next(iter(self.lenses.values()), Lens('10x', 1.0))
+        self.lenses[self.current_lens.name] = self.current_lens
 
         # capture settings
         dir_profile = self.profiles.get('capture.dir', self.image_writer.run_dir,
@@ -1556,31 +1557,31 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- MEASUREMENT ---------------------------
 
-    def _ensure_pixel_size(self) -> bool:
+    def _ensure_current_lens(self) -> bool:
         val, ok = QtWidgets.QInputDialog.getDouble(
-            self, "Calibration", "µm per pixel:", self.pixel_size, 0.000001, 1e9, 6
+            self, "Calibration", "µm per pixel:", self.current_lens.um_per_px, 0.000001, 1e9, 6
         )
         if ok:
-            self.pixel_size = val
-            self.profiles.set('measurement.pixel_size', self.pixel_size)
+            self.current_lens.um_per_px = val
+            self.profiles.set(f"measurement.lenses.{self.current_lens.name}", val)
             self.profiles.save()
             return True
         return False
 
     def _start_measure_distance(self):
-        if self._ensure_pixel_size():
+        if self._ensure_current_lens():
             self.measure_view.start_distance()
 
     def _start_measure_area(self):
-        if self._ensure_pixel_size():
+        if self._ensure_current_lens():
             self.measure_view.start_area()
 
     def _on_distance_measured(self, p1, p2):
-        dist = measure_distance(p1, p2, self.pixel_size)
+        dist = measure_distance(p1, p2, self.current_lens.um_per_px)
         QtWidgets.QMessageBox.information(self, "Distance", f"{dist:.3f} µm")
 
     def _on_area_measured(self, mask):
-        area = measure_area(mask, self.pixel_size)
+        area = measure_area(mask, self.current_lens.um_per_px)
         QtWidgets.QMessageBox.information(self, "Area", f"{area:.3f} µm²")
 
     # --------------------------- PERSISTENCE ---------------------------
