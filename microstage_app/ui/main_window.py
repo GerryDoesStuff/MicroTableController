@@ -629,7 +629,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.autoexp_chk = QtWidgets.QCheckBox("Auto")
         c.addWidget(QtWidgets.QLabel("Exposure:"), row, 0); c.addWidget(self.exp_spin, row, 1); c.addWidget(self.autoexp_chk, row, 2); row += 1
 
-        self.gain_spin = QtWidgets.QSpinBox(); self.gain_spin.setRange(1, 400); self.gain_spin.setValue(100)
+        self.gain_spin = QtWidgets.QDoubleSpinBox(); self.gain_spin.setRange(1.0, 4.0); self.gain_spin.setSingleStep(0.01); self.gain_spin.setValue(1.0)
+        self.gain_spin.setSuffix("x")
+        self.gain_spin.setToolTip("Analog gain (1.0–4.0x). Internally scaled ×100 for the SDK.")
         c.addWidget(QtWidgets.QLabel("Gain (AGain):"), row, 0); c.addWidget(self.gain_spin, row, 1); row += 1
 
         self.brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setRange(-255, 255)
@@ -870,7 +872,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # camera controls
         self.exp_spin.valueChanged.connect(self._apply_exposure)
         self.autoexp_chk.toggled.connect(self._apply_exposure)
-        self.gain_spin.valueChanged.connect(self._apply_gain)
+        self.gain_spin.valueChanged.connect(lambda v: self._apply_gain(v * 100))
         self.brightness_slider.valueChanged.connect(self.brightness_spin.setValue)
         self.brightness_spin.valueChanged.connect(self.brightness_slider.setValue)
         self.brightness_spin.valueChanged.connect(self._apply_brightness)
@@ -1195,7 +1197,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.exp_spin.blockSignals(True)
                 self.gain_spin.blockSignals(True)
                 ms = float(self.camera.get_exposure_ms())
-                gain = int(self.camera.get_gain())
+                gain = float(self.camera.get_gain())
                 self.exp_spin.setValue(ms)
                 self.gain_spin.setValue(gain)
             except Exception:
@@ -1395,7 +1397,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.exp_spin.blockSignals(True)
                 self.gain_spin.blockSignals(True)
                 ms = float(self.camera.get_exposure_ms())
-                gain = int(self.camera.get_gain())
+                gain = float(self.camera.get_gain())
                 self.exp_spin.setValue(ms)
                 self.gain_spin.setValue(gain)
             except Exception:
@@ -1404,9 +1406,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.exp_spin.blockSignals(False)
                 self.gain_spin.blockSignals(False)
 
-    def _apply_gain(self):
-        if not self.camera: return
-        self.camera.set_gain(int(self.gain_spin.value()))
+    def _apply_gain(self, again=None):
+        if not self.camera:
+            return
+        if again is None:
+            again = self.gain_spin.value() * 100
+        self.camera.set_gain(int(again))
 
     def _apply_brightness(self):
         if not self.camera: return

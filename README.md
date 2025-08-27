@@ -66,7 +66,7 @@ automatically when new settings are introduced.
 Saved fields include:
 
 - **Stage**: feed rate (`feed_mm_s`) and settle delay (`settle_ms`).
-- **Camera**: exposure time (`exposure_ms`), gain, and binning.
+- **Camera**: exposure time (`exposure_ms`), gain (1.0–4.0x), and binning.
 - **Scan presets**: default area region (`x1_mm`, `y1_mm`, `x2_mm`,
   `y2_mm`, `rows`, `cols`).
 - **Capture**: last used directory, base filename, auto-number toggle, and
