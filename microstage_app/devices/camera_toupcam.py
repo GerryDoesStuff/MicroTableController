@@ -160,25 +160,11 @@ class ToupcamCamera:
             except Exception:
                 log("Camera: USB type unknown")
 
-        # ensure highest bandwidth mode if supported
+        # force maximum bandwidth
         try:
-            if hasattr(self._cam, "get_MaxSpeed"):
-                maxspeed = self._cam.get_MaxSpeed()
-            elif hasattr(self._cam, "MaxSpeed"):
-                maxspeed = self._cam.MaxSpeed()
-            else:
-                maxspeed = None
-
-            if maxspeed is None:
-                log("Camera: speed query not supported")
-                return
-
-            cur = self._cam.get_Speed() if hasattr(self._cam, "get_Speed") else None
-            log(f"Camera: speed levels 0-{maxspeed}, current {cur}")
-            if cur is None or cur < maxspeed:
-                self.set_speed_level(maxspeed)
+            self.set_speed_level(5)
         except Exception as e:
-            log(f"Camera: speed query failed: {e}")
+            log(f"Camera: set speed failed: {e}")
 
     def _query_binning_options(self):
         """Populate supported digital binning factors if available."""
@@ -616,17 +602,18 @@ class ToupcamCamera:
             log(f"Camera: RAW8 fast mono={'ON' if self._raw_mode else 'OFF'}")
 
     def set_speed_level(self, level: int):
-        """Adjust USB bandwidth/speed if the SDK exposes it."""
+        """Force USB bandwidth to level 5 regardless of input."""
+        level = 5
         try:
             # Some SDKs expose put_Speed / get_Speed; others via put_Option
             if hasattr(self._cam, "put_Speed"):
-                self._cam.put_Speed(int(level))
+                self._cam.put_Speed(level)
             elif hasattr(self._tp, "TOUPCAM_OPTION_SPEED"):
-                self._cam.put_Option(self._tp.TOUPCAM_OPTION_SPEED, int(level))
+                self._cam.put_Option(self._tp.TOUPCAM_OPTION_SPEED, level)
             else:
                 log("Camera: speed option not supported")
                 return
-            log(f"Camera: speed level set to {level}")
+            log("Camera: speed level set to 5")
         except Exception as e:
             log(f"Camera: set_speed_level failed: {e}")
 

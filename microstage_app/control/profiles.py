@@ -16,7 +16,6 @@ DEFAULTS = {
         'raw': False,
         'binning': 1,
         'resolution_index': 0,
-        'speed_level': 0,
         'display_decimation': 1,
     },
     'scan_presets': {
