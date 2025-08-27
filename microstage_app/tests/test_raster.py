@@ -43,7 +43,19 @@ def test_raster_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=True)
+    cfg = RasterConfig(
+        rows=2,
+        cols=3,
+        x1_mm=0.0,
+        y1_mm=0.0,
+        x2_mm=2.0,
+        y2_mm=0.0,
+        x3_mm=0.0,
+        y3_mm=1.0,
+        x4_mm=2.0,
+        y4_mm=1.0,
+        serpentine=True,
+    )
     runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
     runner.run()
     assert writer.saved == [
@@ -67,7 +79,19 @@ def test_raster_no_serpentine(monkeypatch):
     stage = StageMock()
     cam = CameraMock()
     writer = WriterMock()
-    cfg = RasterConfig(rows=2, cols=3, x1_mm=0.0, y1_mm=0.0, x2_mm=2.0, y2_mm=1.0, serpentine=False)
+    cfg = RasterConfig(
+        rows=2,
+        cols=3,
+        x1_mm=0.0,
+        y1_mm=0.0,
+        x2_mm=2.0,
+        y2_mm=0.0,
+        x3_mm=0.0,
+        y3_mm=1.0,
+        x4_mm=2.0,
+        y4_mm=1.0,
+        serpentine=False,
+    )
     runner = RasterRunner(stage, cam, writer, cfg, directory="out", base_name="foo", fmt="bmp")
     runner.run()
     assert writer.saved == [
@@ -174,3 +198,52 @@ def test_raster_operation_order(monkeypatch, autofocus, capture, expected):
         events = events[1:]
 
     assert events == expected
+
+
+def test_raster_parallelogram_matrix():
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(
+        rows=2,
+        cols=3,
+        x1_mm=0.0,
+        y1_mm=0.0,
+        x2_mm=2.0,
+        y2_mm=0.0,
+        x3_mm=0.5,
+        y3_mm=1.0,
+        mode="parallelogram",
+        capture=False,
+    )
+    runner = RasterRunner(stage, cam, writer, cfg)
+    assert runner.coord_matrix == [
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
+        [(0.5, 1.0), (1.5, 1.0), (2.5, 1.0)],
+    ]
+
+
+def test_raster_trapezoid_matrix():
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(
+        rows=3,
+        cols=3,
+        x1_mm=0.0,
+        y1_mm=0.0,
+        x2_mm=4.0,
+        y2_mm=0.0,
+        x3_mm=1.0,
+        y3_mm=3.0,
+        x4_mm=3.0,
+        y4_mm=3.0,
+        mode="trapezoid",
+        capture=False,
+    )
+    runner = RasterRunner(stage, cam, writer, cfg)
+    assert runner.coord_matrix == [
+        [(0.0, 0.0), (2.0, 0.0), (4.0, 0.0)],
+        [(0.5, 1.5), (2.0, 1.5), (3.5, 1.5)],
+        [(1.0, 3.0), (2.0, 3.0), (3.0, 3.0)],
+    ]

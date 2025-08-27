@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 2,
+    'version': 3,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -24,9 +24,14 @@ DEFAULTS = {
             'x1_mm': 0.0,
             'y1_mm': 0.0,
             'x2_mm': 4.0,
-            'y2_mm': 4.0,
+            'y2_mm': 0.0,
+            'x3_mm': 0.0,
+            'y3_mm': 4.0,
+            'x4_mm': 4.0,
+            'y4_mm': 4.0,
             'rows': 5,
             'cols': 5,
+            'mode': 'rectangle',
         }
     },
     'measurement': {
