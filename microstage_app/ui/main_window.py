@@ -227,7 +227,11 @@ class MeasureView(QtWidgets.QGraphicsView):
                     self._live_line = self.scene().addLine(
                         QtCore.QLineF(pt, pt), QtGui.QPen(QtCore.Qt.red, 2)
                     )
-                    self._live_text = self.scene().addSimpleText("")
+                    self._live_text = self.scene().addText("")
+                    self._live_text.setDefaultTextColor(QtCore.Qt.red)
+                    font = self._live_text.font()
+                    font.setPointSizeF(font.pointSizeF() * 4)
+                    self._live_text.setFont(font)
             elif event.button() == QtCore.Qt.RightButton:
                 if self._anchor is not None:
                     # Cancel the live segment in progress
