@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import time
+from math import isclose
 
 try:
     from .autofocus import AutoFocus, FocusMetric
@@ -65,7 +66,22 @@ class RasterRunner:
         ys = [self.cfg.y1_mm + self.pitch_y_mm * r for r in range(self.cfg.rows)]
         coord_matrix = [[(x, y) for x in xs] for y in ys]
 
-        current_x, current_y = coord_matrix[0][0]
+        start_x, start_y = coord_matrix[0][0]
+        try:
+            pos = self.stage.get_position()
+        except Exception:
+            pos = None
+        if (
+            pos is None
+            or not (
+                isclose(pos[0], start_x, abs_tol=1e-6)
+                and isclose(pos[1], start_y, abs_tol=1e-6)
+            )
+        ):
+            self.stage.move_absolute(x=start_x, y=start_y)
+            self.stage.wait_for_moves()
+        current_x, current_y = start_x, start_y
+
         for r in range(self.cfg.rows):
             forward = (r % 2 == 0) or (not self.cfg.serpentine)
             cols = range(self.cfg.cols) if forward else range(self.cfg.cols - 1, -1, -1)
