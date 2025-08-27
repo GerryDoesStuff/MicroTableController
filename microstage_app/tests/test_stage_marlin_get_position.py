@@ -42,10 +42,10 @@ def test_get_position_and_label(monkeypatch, qt_app):
     try:
         win._on_stage_position((0.0, 0.0, z1))
         QtWidgets.QApplication.processEvents()
-        assert "Z1.000" in win.stage_pos.text()
+        assert "Z1.000000" in win.stage_pos.text()
         win._on_stage_position((0.0, 0.0, z2))
         QtWidgets.QApplication.processEvents()
-        assert "Z2.000" in win.stage_pos.text()
+        assert "Z2.000000" in win.stage_pos.text()
     finally:
         win.preview_timer.stop()
         win.fps_timer.stop()

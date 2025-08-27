@@ -1164,7 +1164,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # then the limits. This ensures the limits line never precedes the
         # coordinates, even if the stage bounds are unavailable.
         def _fmt(v):
-            return f"{v:.3f}" if v is not None else "—"
+            return f"{v:.6f}" if v is not None else "—"
         coords_line = (
             f"Pos: X{_fmt(self._last_pos['x'])} "
             f"Y{_fmt(self._last_pos['y'])} "
@@ -1173,9 +1173,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.stage_bounds:
             b = self.stage_bounds
             limits_line = (
-                f"Limits: X[{b['xmin']:.3f},{b['xmax']:.3f}] "
-                f"Y[{b['ymin']:.3f},{b['ymax']:.3f}] "
-                f"Z[{b['zmin']:.3f},{b['zmax']:.3f}]"
+                f"Limits: X[{b['xmin']:.6f},{b['xmax']:.6f}] "
+                f"Y[{b['ymin']:.6f},{b['ymax']:.6f}] "
+                f"Z[{b['zmin']:.6f},{b['zmax']:.6f}]"
             )
         else:
             limits_line = "Limits: —"
