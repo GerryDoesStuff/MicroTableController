@@ -55,6 +55,26 @@ Example usage:
 3. Click **Capture** repeatedly to produce `sample.tif`,
    `sample_1.tif`, `sample_2.tif`, …
 
+## Profiles and persistent settings
+
+The application stores user preferences and scan presets in a YAML file named
+`profiles.yaml` located in the application's working directory (alongside
+`main.py` when running from source or the packaged executable).
+
+Saved fields include:
+
+- **Stage**: feed rate (`feed_mm_s`) and settle delay (`settle_ms`).
+- **Camera**: exposure time (`exposure_ms`), gain, and binning.
+- **Scan presets**: default raster region (`x1_mm`, `y1_mm`, `x2_mm`,
+  `y2_mm`, `rows`, `cols`).
+- **Capture**: last used directory, base filename, auto-number toggle, and
+  file format.
+- **Jog panel**: step sizes, feed rates, and absolute positions for each axis.
+
+To reset to factory defaults, delete `profiles.yaml`; the file will be recreated
+the next time the app starts. To transfer your settings to another machine, copy
+this `profiles.yaml` file to the target system's working directory.
+
 ## Packaging
 ```bash
 pyinstaller -F -w -n MicroStageApp microstage_app/main.py
