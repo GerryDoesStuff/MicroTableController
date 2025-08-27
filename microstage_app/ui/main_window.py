@@ -94,14 +94,11 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._reticle_enabled = enabled
         self.viewport().update()
 
-    def set_scale_bar(self, enabled: bool):
+    def set_scale_bar(self, enabled: bool, um_per_px: float):
+        """Enable/disable the scale bar and set the current scale."""
         self._scale_bar_enabled = enabled
-        self.viewport().update()
-
-    def set_scale_bar_um_per_px(self, um_per_px: float):
         self._scale_um_per_px = um_per_px
-        if self._scale_bar_enabled:
-            self.viewport().update()
+        self.viewport().update()
 
     def drawForeground(self, painter: QtGui.QPainter, rect: QtCore.QRectF) -> None:
         super().drawForeground(painter, rect)
@@ -117,39 +114,44 @@ class MeasureView(QtWidgets.QGraphicsView):
             painter.setPen(QtGui.QPen(QtCore.Qt.white))
             painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
             painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
-        if self._scale_bar_enabled:
-            length_px = br.width() / 5
-            microns = length_px * self._scale_um_per_px
-            if microns > 0:
-                exp = math.floor(math.log10(microns))
-                nice_um = None
-                for m in (1, 2, 5):
-                    candidate = m * (10 ** exp)
-                    if candidate <= microns:
-                        nice_um = candidate
-                if nice_um is None:
-                    nice_um = microns
-                length_px = nice_um / self._scale_um_per_px
-                x0 = br.left() + 20
-                y0 = br.bottom() - 20
-                painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
-                painter.drawLine(x0, y0, x0 + length_px, y0)
-                painter.drawLine(x0, y0 - 5, x0, y0 + 5)
-                painter.drawLine(x0 + length_px, y0 - 5, x0 + length_px, y0 + 5)
-                text = (
-                    f"{nice_um / 1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
-                )
-                painter.drawText(x0, y0 - 7, text)
+
+        if self._scale_bar_enabled and self._scale_um_per_px > 0:
+            # compute a "nice" length that fits within ~20% of the image width
+            max_um = 0.2 * br.width() * self._scale_um_per_px
+            exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
+            nice_um = 10 ** exp
+            for m in (5, 2, 1):
+                candidate = m * (10 ** exp)
+                if candidate <= max_um:
+                    nice_um = candidate
+                    break
+            length_px = nice_um / self._scale_um_per_px
+            margin = 20
+            x0 = br.right() - margin - length_px
+            y0 = br.bottom() - margin
+            painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
+            painter.drawLine(x0, y0, x0 + length_px, y0)
+            label = (
+                f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
+            )
+            painter.drawText(x0, y0 - 7, label)
         painter.restore()
 
     def set_image(self, qimg: QtGui.QImage):
         self._pixmap.setPixmap(QtGui.QPixmap.fromImage(qimg))
         self.setSceneRect(self._pixmap.boundingRect())
         self.fitInView(self._pixmap, QtCore.Qt.KeepAspectRatio)
+        self.viewport().update()
 
     def clear_image(self):
         self._pixmap.setPixmap(QtGui.QPixmap())
         self._clear_temp()
+        self.viewport().update()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.fitInView(self._pixmap, QtCore.Qt.KeepAspectRatio)
+        self.viewport().update()
 
     def start_ruler(self, um_per_px: float):
         self.clear_overlays()
@@ -460,8 +462,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hue_slider.setValue(self.hue_spin.value())
         self.gamma_slider.setValue(self.gamma_spin.value())
 
-        self.measure_view.set_scale_bar(self.chk_scale_bar.isChecked())
-        self.measure_view.set_scale_bar_um_per_px(self.current_lens.um_per_px)
+        self.measure_view.set_scale_bar(
+            self.chk_scale_bar.isChecked(), self.current_lens.um_per_px
+        )
 
         self._connect_signals()
         self._init_persistent_fields()
@@ -988,7 +991,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles.save()
 
     def _on_scale_bar_toggled(self, checked: bool):
-        self.measure_view.set_scale_bar(checked)
+        self.measure_view.set_scale_bar(checked, self.current_lens.um_per_px)
         self.profiles.set('ui.scale_bar', checked)
         self.profiles.save()
 
@@ -1545,7 +1548,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 lens.um_per_px = v
         lens.calibrations[res_key] = lens.um_per_px
         self._refresh_lens_combo()
-        self.measure_view.set_scale_bar_um_per_px(lens.um_per_px)
+        self.measure_view.set_scale_bar(
+            self.chk_scale_bar.isChecked(), lens.um_per_px
+        )
 
     def _apply_resolution(self, i: int):
         if not self.camera: return
@@ -2073,7 +2078,9 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.profiles.save()
             self._refresh_lens_combo()
-            self.measure_view.set_scale_bar_um_per_px(um_per_px)
+            self.measure_view.set_scale_bar(
+                self.chk_scale_bar.isChecked(), um_per_px
+            )
 
     # --------------------------- PERSISTENCE ---------------------------
 
