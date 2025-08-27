@@ -1,37 +1,86 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Tuple, Optional
+
 import numpy as np
 
+class SurfaceKind(str, Enum):
+    LINEAR = "linear"
+    QUADRATIC = "quadratic"
+    CUBIC = "cubic"
+
+
 @dataclass
-class PlaneModel:
-    kind: str = "plane"  # 'plane' | 'quadratic'
-    coeffs: np.ndarray = field(default_factory=lambda: np.zeros((3,)))
+class SurfaceModel:
+    """Polynomial surface model.
+
+    At least 3/6/10 points are required to fit linear, quadratic or cubic
+    surfaces respectively.
+    """
+
+    kind: SurfaceKind = SurfaceKind.LINEAR
+    coeffs: np.ndarray = field(default_factory=lambda: np.zeros((0,)))
 
     def fit(self, pts: List[Tuple[float, float, float]]):
         P = np.array(pts, dtype=float)
-        x, y, z = P[:,0], P[:,1], P[:,2]
-        if self.kind == "plane":
+        x, y, z = P[:, 0], P[:, 1], P[:, 2]
+        if self.kind is SurfaceKind.LINEAR:
             A = np.c_[np.ones(len(x)), x, y]
-            self.coeffs, *_ = np.linalg.lstsq(A, z, rcond=None)
-        elif self.kind == "quadratic":
-            A = np.c_[np.ones(len(x)), x, y, x*x, x*y, y*y]
-            self.coeffs, *_ = np.linalg.lstsq(A, z, rcond=None)
+        elif self.kind is SurfaceKind.QUADRATIC:
+            A = np.c_[
+                np.ones(len(x)),
+                x,
+                y,
+                x ** 2,
+                x * y,
+                y ** 2,
+            ]
+        elif self.kind is SurfaceKind.CUBIC:
+            A = np.c_[
+                np.ones(len(x)),
+                x,
+                y,
+                x ** 2,
+                x * y,
+                y ** 2,
+                x ** 3,
+                (x ** 2) * y,
+                x * (y ** 2),
+                y ** 3,
+            ]
         else:
             raise ValueError(self.kind)
+        self.coeffs, *_ = np.linalg.lstsq(A, z, rcond=None)
 
     def predict(self, x, y) -> float:
-        if self.kind == "plane":
-            a,b,c = self.coeffs
-            return a + b*x + c*y
+        if self.kind is SurfaceKind.LINEAR:
+            a, b, c = self.coeffs
+            return a + b * x + c * y
+        elif self.kind is SurfaceKind.QUADRATIC:
+            a, b, c, d, e, f = self.coeffs
+            return a + b * x + c * y + d * x ** 2 + e * x * y + f * y ** 2
+        elif self.kind is SurfaceKind.CUBIC:
+            a, b, c, d, e, f, g, h, i, j = self.coeffs
+            return (
+                a
+                + b * x
+                + c * y
+                + d * x ** 2
+                + e * x * y
+                + f * y ** 2
+                + g * x ** 3
+                + h * (x ** 2) * y
+                + i * x * (y ** 2)
+                + j * y ** 3
+            )
         else:
-            a,b,c,d,e,f = self.coeffs
-            return a + b*x + c*y + d*x*x + e*x*y + f*y*y
+            raise ValueError(self.kind)
 
 @dataclass
 class Area:
     name: str
     polygon: List[Tuple[float, float]]
-    model: PlaneModel
+    model: SurfaceModel
     priority: int = 0
 
     def contains(self, x, y) -> bool:
