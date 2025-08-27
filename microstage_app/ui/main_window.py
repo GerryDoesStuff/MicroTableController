@@ -10,6 +10,12 @@ from ..control.raster import RasterRunner, RasterConfig
 from ..control.profiles import Profiles
 from ..io.storage import ImageWriter
 from ..analysis import Lens
+from ..control.focus_planes import (
+    FocusPlaneManager,
+    SurfaceModel,
+    SurfaceKind,
+    Area,
+)
 
 from ..utils.img import numpy_to_qimage
 from ..utils.log import LOG, log
@@ -317,8 +323,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack_worker = None
         self._last_stack_dir = None
 
+        # leveling state
+        self._level_thread = None
+        self._level_worker = None
+        self._leveling = False
+
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
+
+        # focus plane manager
+        self.focus_mgr = FocusPlaneManager()
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -393,6 +407,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._connect_signals()
         self._init_persistent_fields()
+        self._update_leveling_method()
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
@@ -529,6 +544,26 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(QtWidgets.QLabel("Fine step (mm):"), 3, 0); a.addWidget(self.af_fine, 3, 1)
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         left.addWidget(af_box)
+
+        # Leveling controls
+        lvl_box = QtWidgets.QGroupBox("Leveling")
+        l = QtWidgets.QGridLayout(lvl_box)
+        self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
+        self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
+        self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
+        self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
+        self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
+        self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
+        self.level_status = QtWidgets.QLabel("Idle")
+        row = 0
+        l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
+        l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
+        l.addWidget(self.level_status, row, 0, 1, 2)
+        left.addWidget(lvl_box)
 
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
@@ -762,6 +797,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.lens_combo.setCurrentIndex(idx)
         self.lens_combo.blockSignals(False)
 
+    def _update_leveling_method(self):
+        grid = self.level_method.currentText() == "Grid"
+        self.level_rows.setEnabled(grid)
+        self.level_cols.setEnabled(grid)
+
     def _connect_signals(self):
         self.btn_stage_connect.clicked.connect(self._connect_stage_async)
         self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
@@ -783,6 +823,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
+        self.btn_start_level.clicked.connect(self._run_leveling)
+        self.level_method.currentTextChanged.connect(self._update_leveling_method)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
         self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))
@@ -1571,6 +1613,129 @@ class MainWindow(QtWidgets.QMainWindow):
         self._af_thread, self._af_worker = t, w
         self._af_thread.finished.connect(self._cleanup_autofocus_thread)
         w.finished.connect(self._on_autofocus_done)
+
+    @QtCore.Slot()
+    def _cleanup_leveling_thread(self):
+        self._level_thread = None
+        self._level_worker = None
+        self._leveling = False
+
+    @QtCore.Slot(object, object)
+    def _on_leveling_done(self, model, err):
+        self.btn_start_level.setEnabled(True)
+        if err:
+            log(f"Leveling error: {err}")
+            self._set_leveling_status("Error")
+            QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
+        else:
+            self._set_leveling_status("Complete")
+            QtWidgets.QMessageBox.information(self, "Leveling", "Leveling complete.")
+
+    @QtCore.Slot(str)
+    def _set_leveling_status(self, text: str):
+        self.level_status.setText(text)
+
+    @QtCore.Slot(int, int)
+    def _prompt_manual_focus(self, idx: int, total: int):
+        QtWidgets.QMessageBox.information(
+            self,
+            "Leveling",
+            f"Manually focus at point {idx} of {total} then press OK to continue.",
+        )
+
+    def _run_leveling(self):
+        if self._leveling:
+            log("Leveling ignored: already running")
+            return
+        if not self.stage:
+            log("Leveling ignored: stage not connected")
+            return
+        auto_mode = self.level_mode.currentText() == "Auto"
+        if auto_mode and not self.camera:
+            log("Leveling ignored: camera not connected")
+            return
+
+        method = self.level_method.currentText()
+        kind = SurfaceKind[self.level_poly.currentText().upper()]
+        rows = self.level_rows.value()
+        cols = self.level_cols.value()
+        metric = FocusMetric(self.metric_combo.currentText())
+        z_range = float(self.af_range.value())
+        coarse = float(self.af_coarse.value())
+        fine = float(self.af_fine.value())
+        feed_xy = self.feedx_spin.value()
+        feed_z = self.feedz_spin.value()
+        stage = self.stage
+        camera = self.camera
+        self._leveling = True
+        self.btn_start_level.setEnabled(False)
+        self._set_leveling_status("Starting...")
+
+        def do_level():
+            bounds = self.stage_bounds or self._stage_bounds_fallback or {
+                "xmin": 0.0,
+                "xmax": 10.0,
+                "ymin": 0.0,
+                "ymax": 10.0,
+            }
+            xmin, xmax = bounds["xmin"], bounds["xmax"]
+            ymin, ymax = bounds["ymin"], bounds["ymax"]
+            if method == "Three-point":
+                coords = [
+                    (xmin, ymin),
+                    (xmax, ymin),
+                    (xmin, ymax),
+                ]
+            else:
+                xs = np.linspace(xmin, xmax, cols)
+                ys = np.linspace(ymin, ymax, rows)
+                coords = [(x, y) for y in ys for x in xs]
+            total = len(coords)
+            pts = []
+            for idx, (x, y) in enumerate(coords, 1):
+                QtCore.QMetaObject.invokeMethod(
+                    self,
+                    "_set_leveling_status",
+                    QtCore.Qt.QueuedConnection,
+                    QtCore.Q_ARG(str, f"Point {idx}/{total}"),
+                )
+                stage.move_absolute(x=x, y=y, feed_mm_per_min=feed_xy)
+                stage.wait_for_moves()
+                if auto_mode:
+                    af = AutoFocus(stage, camera)
+                    z = af.coarse_to_fine(
+                        metric=metric,
+                        z_range_mm=z_range,
+                        coarse_step_mm=coarse,
+                        fine_step_mm=fine,
+                        feed_mm_per_min=feed_z,
+                    )
+                else:
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_prompt_manual_focus",
+                        QtCore.Qt.BlockingQueuedConnection,
+                        QtCore.Q_ARG(int, idx),
+                        QtCore.Q_ARG(int, total),
+                    )
+                    pos = stage.get_position()
+                    z = pos[2] if pos else 0.0
+                pts.append((x, y, z))
+            model = SurfaceModel(kind)
+            model.fit(pts)
+            area = Area(
+                "bed",
+                [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)],
+                model,
+            )
+            self.focus_mgr.areas.clear()
+            self.focus_mgr.add_area(area)
+            return model
+
+        t, w = run_async(do_level)
+        self._level_thread, self._level_worker = t, w
+        self._level_thread.finished.connect(self._cleanup_leveling_thread)
+        w.finished.connect(self._on_leveling_done)
 
     @QtCore.Slot()
     def _cleanup_focus_stack_thread(self):
