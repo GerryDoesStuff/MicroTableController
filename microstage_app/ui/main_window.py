@@ -197,19 +197,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # UI
         self._build_ui()
 
-        # map user-editable widgets to profile paths for persistence
-        self._profile_widgets = {
-            self.stepx_spin: "ui.jog.stepx",
-            self.stepy_spin: "ui.jog.stepy",
-            self.stepz_spin: "ui.jog.stepz",
-            self.feedx_spin: "ui.jog.feedx",
-            self.feedy_spin: "ui.jog.feedy",
-            self.feedz_spin: "ui.jog.feedz",
-            self.absx_spin: "ui.move.absx",
-            self.absy_spin: "ui.move.absy",
-            self.absz_spin: "ui.move.absz",
-        }
-        for w, path in self._profile_widgets.items():
+        # load persisted values; extend _persistent_widgets() to add more fields
+        for w, path in self._persistent_widgets():
             val = self.profiles.get(path)
             if val is not None:
                 if isinstance(w, QtWidgets.QAbstractSpinBox):
@@ -1385,6 +1374,26 @@ class MainWindow(QtWidgets.QMainWindow):
         area = measure_area(mask, self.pixel_size)
         QtWidgets.QMessageBox.information(self, "Area", f"{area:.3f} µm²")
 
+    # --------------------------- PERSISTENCE ---------------------------
+
+    def _persistent_widgets(self):
+        """Return (widget, profile_path) pairs for UI persistence.
+
+        Extend this list when introducing new widgets that should have their
+        values loaded on startup and saved on close.
+        """
+        return [
+            (self.stepx_spin, "ui.jog.stepx"),
+            (self.stepy_spin, "ui.jog.stepy"),
+            (self.stepz_spin, "ui.jog.stepz"),
+            (self.feedx_spin, "ui.jog.feedx"),
+            (self.feedy_spin, "ui.jog.feedy"),
+            (self.feedz_spin, "ui.jog.feedz"),
+            (self.absx_spin, "ui.move.absx"),
+            (self.absy_spin, "ui.move.absy"),
+            (self.absz_spin, "ui.move.absz"),
+        ]
+
     # --------------------------- PROFILES ---------------------------
 
     def _reload_profiles(self):
@@ -1395,7 +1404,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------- CLOSE ---------------------------
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
-        for w, path in getattr(self, "_profile_widgets", {}).items():
+        for w, path in self._persistent_widgets():
             if isinstance(w, QtWidgets.QAbstractSpinBox):
                 val = w.value()
             elif isinstance(w, QtWidgets.QCheckBox):
