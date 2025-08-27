@@ -228,25 +228,6 @@ class MeasureView(QtWidgets.QGraphicsView):
                         QtCore.QLineF(pt, pt), QtGui.QPen(QtCore.Qt.red, 2)
                     )
                     self._live_text = self.scene().addSimpleText("")
-                else:
-                    term_item = self._add_square(coord)
-                    line_item = self._live_line
-                    text_item = self._live_text
-                    ticks = list(self._live_ticks)
-                    self._lines.append(
-                        {
-                            "start": self._anchor_item,
-                            "end": term_item,
-                            "line": line_item,
-                            "ticks": ticks,
-                            "text": text_item,
-                        }
-                    )
-                    self._anchor = None
-                    self._anchor_item = None
-                    self._live_line = None
-                    self._live_ticks = []
-                    self._live_text = None
             elif event.button() == QtCore.Qt.RightButton:
                 if self._anchor is not None:
                     self._clear_temp()
@@ -280,6 +261,36 @@ class MeasureView(QtWidgets.QGraphicsView):
                 self._mode = None
                 self._points = []
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        if (
+            self._mode == "ruler"
+            and event.button() == QtCore.Qt.LeftButton
+            and self._anchor is not None
+        ):
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            pt = self.mapToScene(pos)
+            coord = (pt.x(), pt.y())
+            self._update_live_line(coord)
+            term_item = self._add_square(coord)
+            line_item = self._live_line
+            text_item = self._live_text
+            ticks = list(self._live_ticks)
+            self._lines.append(
+                {
+                    "start": self._anchor_item,
+                    "end": term_item,
+                    "line": line_item,
+                    "ticks": ticks,
+                    "text": text_item,
+                }
+            )
+            self._anchor = None
+            self._anchor_item = None
+            self._live_line = None
+            self._live_ticks = []
+            self._live_text = None
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._mode == "ruler":
