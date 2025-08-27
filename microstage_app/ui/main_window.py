@@ -60,6 +60,7 @@ def _load_feed_limits():
 class MeasureView(QtWidgets.QGraphicsView):
     distance_measured = QtCore.Signal(tuple, tuple)
     area_measured = QtCore.Signal(object)
+    calibration_measured = QtCore.Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -109,6 +110,10 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._clear_temp()
         self._mode = "area"
 
+    def start_calibration(self):
+        self._clear_temp()
+        self._mode = "calibration"
+
     def _clear_temp(self):
         self._points = []
         if self._item:
@@ -139,6 +144,17 @@ class MeasureView(QtWidgets.QGraphicsView):
                 self.scene().removeItem(self._item)
             poly = QtGui.QPolygonF([QtCore.QPointF(x, y) for x, y in self._points])
             self._item = self.scene().addPolygon(poly, QtGui.QPen(QtCore.Qt.green, 2))
+        elif self._mode == "calibration":
+            self._points.append(coord)
+            if len(self._points) == 2:
+                line = QtCore.QLineF(QtCore.QPointF(*self._points[0]), QtCore.QPointF(*self._points[1]))
+                self._item = self.scene().addLine(line, QtGui.QPen(QtCore.Qt.blue, 2))
+                p1 = np.asarray(self._points[0])
+                p2 = np.asarray(self._points[1])
+                pixels = float(np.linalg.norm(p1 - p2))
+                self.calibration_measured.emit(pixels)
+                self._mode = None
+                self._points = []
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -253,13 +269,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 data = w.currentData()
                 default = data if data is not None else w.currentText()
                 val = self.profiles.get(path, default, expected_type=(int, float, str))
-                if isinstance(val, (int, float)):
-                    pos = w.findData(val)
-                    if pos >= 0:
-                        w.setCurrentIndex(pos)
-                    else:
-                        log(f"WARNING: profile '{path}' option {val!r} not valid; using default {default!r}")
-                elif val in [w.itemText(i) for i in range(w.count())]:
+                pos = w.findData(val)
+                if pos >= 0:
+                    w.setCurrentIndex(pos)
+                elif isinstance(val, str) and val in [w.itemText(i) for i in range(w.count())]:
                     w.setCurrentText(val)
                 else:
                     log(f"WARNING: profile '{path}' option {val!r} not valid; using default {default!r}")
@@ -293,6 +306,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.measure_button = QtWidgets.QToolButton()
         self.measure_button.setText("Measure")
         _mnu = QtWidgets.QMenu(self.measure_button)
+        self.act_calibrate = _mnu.addAction("Calibrate")
         self.act_measure_distance = _mnu.addAction("Distance")
         self.act_measure_area = _mnu.addAction("Area")
         self.measure_button.setMenu(_mnu)
@@ -439,8 +453,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_reticle = QtWidgets.QCheckBox("Reticle")
         ctr2.addWidget(self.chk_reticle)
         self.lens_combo = QtWidgets.QComboBox()
-        self.lens_combo.addItems(sorted(self.lenses.keys()))
-        self.lens_combo.setCurrentText(self.current_lens.name)
+        self._refresh_lens_combo()
         ctr2.addWidget(self.lens_combo)
         self.btn_clear_screen = QtWidgets.QPushButton("Clear screen")
         ctr2.addWidget(self.btn_clear_screen)
@@ -611,6 +624,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_stage_buttons()
         self._update_cam_buttons()
 
+    def _refresh_lens_combo(self):
+        self.lens_combo.blockSignals(True)
+        self.lens_combo.clear()
+        for lens in sorted(self.lenses.values(), key=lambda l: l.name):
+            self.lens_combo.addItem(
+                f"{lens.name} ({lens.um_per_px:.3f} µm/px)", lens.name
+            )
+        idx = self.lens_combo.findData(self.current_lens.name)
+        if idx >= 0:
+            self.lens_combo.setCurrentIndex(idx)
+        self.lens_combo.blockSignals(False)
+
     def _connect_signals(self):
         self.btn_stage_connect.clicked.connect(self._connect_stage_async)
         self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
@@ -618,7 +643,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
-        self.lens_combo.currentTextChanged.connect(self._on_lens_changed)
+        self.lens_combo.currentIndexChanged.connect(self._on_lens_changed)
         self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
@@ -643,10 +668,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
+        self.act_calibrate.triggered.connect(self._start_calibration)
         self.act_measure_distance.triggered.connect(self._start_measure_distance)
         self.act_measure_area.triggered.connect(self._start_measure_area)
         self.measure_view.distance_measured.connect(self._on_distance_measured)
         self.measure_view.area_measured.connect(self._on_area_measured)
+        self.measure_view.calibration_measured.connect(self._on_calibration_done)
 
         # camera controls
         self.exp_spin.valueChanged.connect(self._apply_exposure)
@@ -709,7 +736,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles.set('capture.format', self.capture_format)
         self.profiles.save()
 
-    def _on_lens_changed(self, name: str):
+    def _on_lens_changed(self, index: int):
+        name = self.lens_combo.itemData(index)
+        if not name:
+            return
         lens = self.lenses.get(name)
         if not lens:
             lens = Lens(name, 1.0)
@@ -717,6 +747,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_lens = lens
         self.profiles.set('measurement.current_lens', name)
         self.profiles.save()
+        self._refresh_lens_combo()
 
     def _browse_capture_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
@@ -1590,8 +1621,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_lens.um_per_px = val
             self.profiles.set(f"measurement.lenses.{self.current_lens.name}", val)
             self.profiles.save()
+            self._refresh_lens_combo()
             return True
         return False
+
+    def _start_calibration(self):
+        self.measure_view.start_calibration()
 
     def _start_measure_distance(self):
         if self._ensure_current_lens():
@@ -1608,6 +1643,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_area_measured(self, mask):
         area = measure_area(mask, self.current_lens.um_per_px)
         QtWidgets.QMessageBox.information(self, "Area", f"{area:.3f} µm²")
+
+    def _on_calibration_done(self, pixels: float):
+        microns, ok = QtWidgets.QInputDialog.getDouble(
+            self,
+            "Calibration",
+            f"Measured {pixels:.2f} px. Enter real-world distance (µm):",
+            self.current_lens.um_per_px * pixels,
+            0.000001,
+            1e9,
+            6,
+        )
+        if ok and pixels > 0:
+            um_per_px = microns / pixels
+            self.current_lens.um_per_px = um_per_px
+            self.profiles.set(f"measurement.lenses.{self.current_lens.name}", um_per_px)
+            self.profiles.save()
+            self._refresh_lens_combo()
 
     # --------------------------- PERSISTENCE ---------------------------
 
