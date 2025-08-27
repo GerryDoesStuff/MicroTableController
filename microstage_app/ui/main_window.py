@@ -1328,7 +1328,14 @@ class MainWindow(QtWidgets.QMainWindow):
         log("Raster: starting")
         t, w = run_async(do_raster)
         self._last_thread, self._last_worker = t, w
-        w.finished.connect(lambda res, err: log("Raster: done" if not err else f"Raster error: {err}"))
+        w.finished.connect(
+            lambda *_: self.stage_worker.enqueue(
+                self.stage.get_position, callback=self._on_stage_position
+            )
+        )
+        w.finished.connect(
+            lambda res, err: log("Raster: done" if not err else f"Raster error: {err}")
+        )
 
     def _run_example_script(self):
         if not (self.stage and self.camera):
