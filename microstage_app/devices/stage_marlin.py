@@ -135,18 +135,18 @@ class StageMarlin:
     def move_relative(self, dx=0, dy=0, dz=0, feed_mm_per_min=600, wait_ok=False):
         self.relative_mode()
         parts = ["G1"]
-        if dx: parts.append(f"X{dx:.4f}")
-        if dy: parts.append(f"Y{dy:.4f}")
-        if dz: parts.append(f"Z{dz:.4f}")
+        if dx: parts.append(f"X{dx:.6f}")
+        if dy: parts.append(f"Y{dy:.6f}")
+        if dz: parts.append(f"Z{dz:.6f}")
         parts.append(f"F{feed_mm_per_min:.2f}")
         self.send(" ".join(parts), wait_ok=wait_ok)
         self.absolute_mode()
 
     def move_absolute(self, x=None, y=None, z=None, feed_mm_per_min=600, wait_ok=False):
         parts = ["G1"]
-        if x is not None: parts.append(f"X{x:.4f}")
-        if y is not None: parts.append(f"Y{y:.4f}")
-        if z is not None: parts.append(f"Z{z:.4f}")
+        if x is not None: parts.append(f"X{x:.6f}")
+        if y is not None: parts.append(f"Y{y:.6f}")
+        if z is not None: parts.append(f"Z{z:.6f}")
         parts.append(f"F{feed_mm_per_min:.2f}")
         self.send("G90", wait_ok=True)
         self.send(" ".join(parts), wait_ok=wait_ok)
