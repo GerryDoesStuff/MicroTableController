@@ -1,9 +1,11 @@
 import os
 from types import SimpleNamespace
+import math
+from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from PySide6 import QtWidgets, QtGui, QtCore
 
 import microstage_app.ui.main_window as mw
@@ -35,7 +37,7 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
     orig_truetype = ImageFont.truetype
 
     def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+        if isinstance(font, (str, bytes)):
             raise OSError("missing font")
         return orig_truetype(font, size, *args, **kwargs)
 
@@ -55,6 +57,9 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
 
 
 def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
+    monkeypatch.setattr(
+        mw.MainWindow, "_update_raster_controls", lambda self: None, raising=False
+    )
     win = mw.MainWindow()
     win.stage = SimpleNamespace(wait_for_moves=lambda: None, get_position=lambda: (0, 0, 0))
     win.camera = SimpleNamespace(
@@ -82,7 +87,7 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
     orig_truetype = ImageFont.truetype
 
     def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+        if isinstance(font, (str, bytes)):
             raise OSError("missing font")
         return orig_truetype(font, size, *args, **kwargs)
 
@@ -135,3 +140,56 @@ def test_preview_scale_bar_pen_and_font(monkeypatch, qt_app):
     base_size = QtGui.QFont().pointSizeF()
     assert captured["font_size"] == pytest.approx(base_size * TEXT_SCALE)
     view.close()
+
+
+def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
+    img = np.zeros((100, 200, 3), dtype=np.uint8)
+    used = {}
+
+    orig_truetype = ImageFont.truetype
+
+    def spy_truetype(font, size=10, *args, **kwargs):
+        used["path"] = font
+        return orig_truetype(font, size, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", spy_truetype)
+
+    out = draw_scale_bar(img, 0.2)
+    Image.fromarray(out).save(tmp_path / "scale.png")
+
+    font_path = used["path"]
+    assert isinstance(font_path, (str, bytes)) and font_path
+
+    # restore original truetype for analysis
+    monkeypatch.setattr(ImageFont, "truetype", orig_truetype)
+
+    h, w, _ = img.shape
+    um_per_px = 0.2
+    max_um = 0.2 * w * um_per_px
+    exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
+    nice_um = 10 ** exp
+    for m in (5, 2, 1):
+        candidate = m * (10 ** exp)
+        if candidate <= max_um:
+            nice_um = candidate
+            break
+    length_px = int(round(nice_um / um_per_px))
+    x0 = int(round(w - 20 - length_px))
+    y0 = int(round(h - 20))
+
+    base_font = ImageFont.load_default()
+    font_size = base_font.size * TEXT_SCALE
+    font = ImageFont.truetype(str(Path(font_path).resolve()), font_size)
+    dummy = Image.new("RGB", (1, 1))
+    draw = ImageDraw.Draw(dummy)
+    label = f"{nice_um:.0f} µm"
+    bbox = draw.textbbox((0, 0), label, font=font)
+    pre = draw.textlength(f"{nice_um:.0f} ", font=font)
+    mu_w = draw.textlength("µ", font=font)
+    th = bbox[3] - bbox[1]
+    y_text = y0 - (7 * TEXT_SCALE) - th
+
+    x_start = int(x0 + pre)
+    x_end = int(min(w, x0 + pre + mu_w))
+    mu_region = out[y_text : y_text + th, x_start:x_end]
+    assert mu_region.size > 0 and np.any(mu_region == 255)
