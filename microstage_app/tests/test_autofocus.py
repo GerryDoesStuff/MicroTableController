@@ -15,6 +15,8 @@ class StageMock:
 class CameraMock:
     def snap(self):
         return object()
+    def name(self):
+        return "CameraMock"
 
 
 def test_autofocus_converges(monkeypatch):

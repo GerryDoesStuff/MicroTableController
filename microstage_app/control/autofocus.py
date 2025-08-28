@@ -101,6 +101,7 @@ class AutoFocus:
         metric: Optional[FocusMetric] = None,
         feed_mm_per_min: float = 240,
         fmt: str = "bmp",
+        lens_name: Optional[str] = None,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.
 
@@ -123,6 +124,8 @@ class AutoFocus:
             Feed rate for Z movement.
         fmt : str
             Image format passed to :meth:`ImageWriter.save_single`.
+        lens_name : str, optional
+            Name of the lens used for capture; included in image metadata.
 
         Returns
         -------
@@ -151,12 +154,19 @@ class AutoFocus:
                 if metric:
                     metrics.append(float("-inf"))
                 continue
+            pos = self.stage.get_position()
+            metadata = {
+                "Camera": self.camera.name(),
+                "Position": pos,
+                "Lens": lens_name,
+            }
             writer.save_single(
                 img,
                 directory=directory,
                 filename=f"{i:04d}",
                 auto_number=False,
                 fmt=fmt,
+                metadata=metadata,
             )
             if metric:
                 metrics.append(metric_value(img, metric))
