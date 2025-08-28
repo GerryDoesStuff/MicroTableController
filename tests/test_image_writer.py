@@ -74,19 +74,22 @@ def _load_tif(path):
 def _load_jpg(path):
     with Image.open(path) as img:
         exif = img.getexif()
-    return {
-        "camera": exif.get(271),
-        "position": exif.get(270),
-        "lens": exif.get(42036),
+    meta = {
+        "Make": exif.get(271),
+        "LensModel": exif.get(42036),
     }
+    blob = exif.get(270) or exif.get(37510)
+    if blob:
+        meta.update(json.loads(blob))
+    return meta
 
 
 @pytest.mark.parametrize(
     "fmt, metadata, loader",
     [
-        ("png", {"camera": "cam", "position": "pos", "lens": "lens"}, _load_png),
-        ("tif", {"camera": "cam", "position": "pos", "lens": "lens"}, _load_tif),
-        ("jpg", {271: "cam", 270: "pos", 42036: "lens"}, _load_jpg),
+        ("png", {"Make": "cam", "Position": "pos", "LensModel": "lens"}, _load_png),
+        ("tif", {"Make": "cam", "Position": "pos", "LensModel": "lens"}, _load_tif),
+        ("jpg", {"Make": "cam", "Position": "pos", "LensModel": "lens"}, _load_jpg),
     ],
 )
 def test_save_with_metadata_roundtrip(tmp_path, fmt, metadata, loader):
@@ -95,6 +98,6 @@ def test_save_with_metadata_roundtrip(tmp_path, fmt, metadata, loader):
     writer.save_single(img, directory=str(tmp_path), filename=f"meta_{fmt}", fmt=fmt, metadata=metadata)
     ext = "tif" if fmt == "tif" else fmt
     meta = loader(tmp_path / f"meta_{fmt}.{ext}")
-    assert meta["camera"] == "cam"
-    assert meta["position"] == "pos"
-    assert meta["lens"] == "lens"
+    assert meta["Make"] == "cam"
+    assert meta["Position"] == "pos"
+    assert meta["LensModel"] == "lens"

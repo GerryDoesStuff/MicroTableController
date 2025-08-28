@@ -1,6 +1,10 @@
-import os, datetime
+import os, datetime, json
 import tifffile
-from PIL import Image, PngImagePlugin
+from PIL import Image, PngImagePlugin, ExifTags
+
+EXIF_TAGS_REVERSE = {name.lower(): tag for tag, name in ExifTags.TAGS.items()}
+# Common alias for camera manufacturer
+EXIF_TAGS_REVERSE.setdefault("camera", EXIF_TAGS_REVERSE.get("make", 271))
 
 class ImageWriter:
     def __init__(self, base_dir='runs'):
@@ -94,11 +98,30 @@ class ImageWriter:
         """Save image as JPEG, embedding EXIF metadata if provided."""
         if metadata:
             exif = Image.Exif()
+            leftover = {}
             for key, value in metadata.items():
-                try:
-                    exif[int(key)] = str(value)
-                except Exception:
-                    continue
+                tag = None
+                if isinstance(key, int):
+                    tag = key
+                else:
+                    key_str = str(key)
+                    if key_str.isdigit():
+                        tag = int(key_str)
+                    else:
+                        tag = EXIF_TAGS_REVERSE.get(key_str.lower())
+                if tag is not None:
+                    try:
+                        exif[int(tag)] = str(value)
+                    except Exception:
+                        continue
+                else:
+                    leftover[str(key)] = value
+            if leftover:
+                json_blob = json.dumps(leftover)
+                if 270 not in exif:
+                    exif[270] = json_blob
+                else:
+                    exif[0x9286] = json_blob
             Image.fromarray(img_rgb).save(path, format="JPEG", exif=exif.tobytes())
         else:
             Image.fromarray(img_rgb).save(path, format="JPEG")
