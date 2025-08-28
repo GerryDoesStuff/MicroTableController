@@ -154,7 +154,7 @@ class MeasureView(QtWidgets.QGraphicsView):
         self.viewport().update()
 
     def start_ruler(self, um_per_px: float):
-        self.clear_overlays()
+        self._clear_temp()
         self._mode = "ruler"
         self._um_per_px = um_per_px
 
