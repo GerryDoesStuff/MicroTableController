@@ -108,11 +108,13 @@ class RasterRunner:
         self.coord_matrix = matrix
         return matrix
 
-    def run(self):
+    def run(self, stop_event=None):
         """Execute raster scan and capture images for each tile.
 
         The coordinate matrix is generated based on :class:`RasterConfig.mode`
-        and then traversed in either serpentine or raster order.
+        and then traversed in either serpentine or raster order.  If
+        ``stop_event`` is provided the scan will terminate early when the
+        event is set.
         """
 
         coord_matrix = self._build_coord_matrix()
@@ -134,9 +136,13 @@ class RasterRunner:
         current_x, current_y = start_x, start_y
 
         for r in range(self.cfg.rows):
+            if stop_event and stop_event.is_set():
+                return
             forward = (r % 2 == 0) or (not self.cfg.serpentine)
             cols = range(self.cfg.cols) if forward else range(self.cfg.cols - 1, -1, -1)
             for c in cols:
+                if stop_event and stop_event.is_set():
+                    return
                 target_x, target_y = coord_matrix[r][c]
                 dx = target_x - current_x
                 dy = target_y - current_y

@@ -25,6 +25,7 @@ def three_point_level(
     camera,
     points: Sequence[Tuple[float, float]],
     mode: LevelingMode = LevelingMode.LINEAR,
+    stop_event=None,
 ) -> SurfaceModel:
     """Fit a focus surface from measurements at multiple XY points.
 
@@ -64,6 +65,8 @@ def three_point_level(
 
     samples: List[Tuple[float, float, float]] = []
     for x, y in points:
+        if stop_event and stop_event.is_set():
+            raise RuntimeError("Leveling stopped")
         stage.move_absolute(x=x, y=y)
         stage.wait_for_moves()
 
@@ -117,9 +120,12 @@ def _probe_point(
     x: float,
     y: float,
     autofocus: bool,
+    stop_event=None,
 ) -> Tuple[float, float, float]:
     """Move to ``(x, y)`` and record the current Z position."""
 
+    if stop_event and stop_event.is_set():
+        raise RuntimeError("Leveling stopped")
     stage.move_absolute(x=x, y=y)
     stage.wait_for_moves()
 
@@ -148,6 +154,7 @@ def grid_level(
     cols: int,
     mode: LevelingMode = LevelingMode.LINEAR,
     autofocus: bool = True,
+    stop_event=None,
 ) -> SurfaceModel:
     """Fit a surface model by probing a grid of points.
 
@@ -175,10 +182,11 @@ def grid_level(
         Fitted surface model for the probed grid points.
     """
 
-    samples = [
-        _probe_point(stage, camera, x, y, autofocus)
-        for x, y in _grid_coords(rect, rows, cols)
-    ]
+    samples: List[Tuple[float, float, float]] = []
+    for x, y in _grid_coords(rect, rows, cols):
+        if stop_event and stop_event.is_set():
+            raise RuntimeError("Leveling stopped")
+        samples.append(_probe_point(stage, camera, x, y, autofocus, stop_event))
     model = SurfaceModel(kind=SurfaceKind(mode.value))
     model.fit(samples)
     return model

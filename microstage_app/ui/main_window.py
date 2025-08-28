@@ -27,6 +27,7 @@ import os
 import re
 import time
 import math
+import threading
 
 
 def _load_stage_bounds():
@@ -366,6 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # background op refs (prevent GC while running)
         self._last_thread = None
         self._last_worker = None
+        self._stop_event = threading.Event()
 
         # autofocus state
         self._autofocusing = False
@@ -805,6 +807,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
+        self.btn_stop = QtWidgets.QPushButton("Stop")
 
         r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0)
         r.addWidget(self.raster_mode_combo, 0, 1)
@@ -839,7 +842,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
         r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
-        r.addWidget(self.btn_run_raster, 6, 0, 1, 6)
+        r.addWidget(self.btn_run_raster, 6, 0, 1, 3)
+        r.addWidget(self.btn_stop, 6, 3, 1, 3)
         r.setRowStretch(7, 1)
         rast_box.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
@@ -928,6 +932,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_raster_p3.clicked.connect(lambda: self._set_raster_point(3))
         self.btn_raster_p4.clicked.connect(lambda: self._set_raster_point(4))
         self.btn_run_raster.clicked.connect(self._run_raster)
+        self.btn_stop.clicked.connect(self._stop_current_operation)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
@@ -1826,13 +1831,20 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(object, object)
     def _on_leveling_done(self, model, err):
         self.btn_start_level.setEnabled(True)
-        if err:
+        if self._stop_event.is_set():
+            log("Leveling cancelled")
+            self._set_leveling_status("Cancelled")
+            QtWidgets.QMessageBox.information(self, "Leveling", "Leveling cancelled.")
+            self._stop_event.clear()
+        elif err:
             log(f"Leveling error: {err}")
             self._set_leveling_status("Error")
             QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
+            self._stop_event.clear()
         else:
             self._set_leveling_status("Complete")
             QtWidgets.QMessageBox.information(self, "Leveling", "Leveling complete.")
+            self._stop_event.clear()
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
@@ -1874,6 +1886,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start_level.setEnabled(False)
         self._set_leveling_status("Starting...")
 
+        self._stop_event.clear()
+
         def do_level():
             bounds = self.stage_bounds or self._stage_bounds_fallback or {
                 "xmin": 0.0,
@@ -1896,6 +1910,8 @@ class MainWindow(QtWidgets.QMainWindow):
             total = len(coords)
             pts = []
             for idx, (x, y) in enumerate(coords, 1):
+                if self._stop_event.is_set():
+                    raise RuntimeError("Leveling stopped")
                 QtCore.QMetaObject.invokeMethod(
                     self,
                     "_set_leveling_status",
@@ -2066,6 +2082,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
+        self._stop_event.clear()
+
         def do_raster():
             runner = RasterRunner(
                 self.stage,
@@ -2081,7 +2099,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 ),
                 lens_name=self.current_lens.name,
             )
-            runner.run()
+            runner.run(stop_event=self._stop_event)
             return True
 
         log("Raster: starting")
@@ -2095,6 +2113,9 @@ class MainWindow(QtWidgets.QMainWindow):
         w.finished.connect(
             lambda res, err: log("Raster: done" if not err else f"Raster error: {err}")
         )
+
+    def _stop_current_operation(self):
+        self._stop_event.set()
 
     def _run_example_script(self):
         if not (self.stage and self.camera):
