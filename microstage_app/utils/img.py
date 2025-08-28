@@ -81,8 +81,14 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
     label = (
         f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
     )
-    font = ImageFont.load_default()
-    font = font.font_variant(size=font.size * TEXT_SCALE)
+
+    base_font = ImageFont.load_default()
+    font_size = base_font.size * TEXT_SCALE
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except OSError:
+        font = base_font.font_variant(size=font_size)
+
     bbox = draw.textbbox((0, 0), label, font=font)
     th = bbox[3] - bbox[1]
     draw.text(
