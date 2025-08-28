@@ -45,6 +45,15 @@ def test_af_spinboxes_six_decimals(monkeypatch, qt_app):
         qt_app.processEvents()
         assert box.text() == "0.100000"
 
+        box.setValue(0.0005)
+        qt_app.processEvents()
+        assert box.text() == "0.000500"
+
+    for box in (win.stepx_spin, win.stepy_spin, win.stepz_spin):
+        box.setValue(0.0005)
+        qt_app.processEvents()
+        assert box.text() == "0.000500"
+
     win.preview_timer.stop()
     win.fps_timer.stop()
     win.close()
