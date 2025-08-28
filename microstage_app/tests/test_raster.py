@@ -1,3 +1,5 @@
+import threading
+
 import microstage_app.control.raster as raster
 from microstage_app.control.raster import RasterRunner, RasterConfig
 import pytest
@@ -183,6 +185,40 @@ def test_raster_operation_order(monkeypatch, autofocus, capture, expected):
         events = events[1:]
 
     assert events == expected
+
+
+def test_raster_cancels_with_event(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=2, cols=2)
+    runner = RasterRunner(stage, cam, writer, cfg)
+
+    cancel_event = threading.Event()
+
+    def move_relative(dx=0.0, dy=0.0, dz=0.0, feed_mm_per_min=0.0):
+        stage.moves.append((dx, dy, dz))
+        stage.pos[0] += dx
+        stage.pos[1] += dy
+        stage.pos[2] += dz
+        cancel_event.set()
+
+    stage.move_relative = move_relative
+
+    def wait_for_moves():
+        if cancel_event.is_set():
+            runner.stop()
+
+    stage.wait_for_moves = wait_for_moves
+
+    monkeypatch.setattr(raster.time, "sleep", lambda s: None)
+
+    runner.run()
+
+    cancel_event.clear()
+    assert not cancel_event.is_set()
+    assert len(stage.moves) == 1
+    assert len(writer.saved) == 1
 
 
 def test_raster_parallelogram_matrix():
