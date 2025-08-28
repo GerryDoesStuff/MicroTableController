@@ -1910,6 +1910,18 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Manually focus at point {idx} of {total} then press OK to continue.",
         )
 
+    @QtCore.Slot(int, int, bool)
+    def _prompt_move_to_point(self, idx: int, total: int, auto: bool):
+        if auto:
+            msg = (
+                f"Move the stage to point {idx} of {total} then press OK to autofocus."
+            )
+        else:
+            msg = (
+                f"Move the stage to point {idx} of {total}, focus manually, then press OK to continue."
+            )
+        QtWidgets.QMessageBox.information(self, "Leveling", msg)
+
     def _run_leveling(self):
         if self._leveling:
             log("Leveling ignored: already running")
@@ -1948,46 +1960,75 @@ class MainWindow(QtWidgets.QMainWindow):
             xmin, xmax = bounds["xmin"], bounds["xmax"]
             ymin, ymax = bounds["ymin"], bounds["ymax"]
             if method == "Three-point":
-                coords = [
-                    (xmin, ymin),
-                    (xmax, ymin),
-                    (xmin, ymax),
-                ]
+                total = 3
+                pts = []
+                for idx in range(1, total + 1):
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_set_leveling_status",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, f"Select point {idx}/{total}"),
+                    )
+                    QtCore.QMetaObject.invokeMethod(
+                        self,
+                        "_prompt_move_to_point",
+                        QtCore.Qt.BlockingQueuedConnection,
+                        QtCore.Q_ARG(int, idx),
+                        QtCore.Q_ARG(int, total),
+                        QtCore.Q_ARG(bool, auto_mode),
+                    )
+                    if auto_mode:
+                        af = AutoFocus(stage, camera)
+                        _ = af.coarse_to_fine(
+                            metric=metric,
+                            z_range_mm=z_range,
+                            coarse_step_mm=coarse,
+                            fine_step_mm=fine,
+                            feed_mm_per_min=feed_z,
+                        )
+                    pos = stage.get_position()
+                    if pos:
+                        pts.append((pos[0], pos[1], pos[2]))
+                    else:
+                        pts.append((0.0, 0.0, 0.0))
             else:
                 xs = np.linspace(xmin, xmax, cols)
                 ys = np.linspace(ymin, ymax, rows)
                 coords = [(x, y) for y in ys for x in xs]
-            total = len(coords)
-            pts = []
-            for idx, (x, y) in enumerate(coords, 1):
-                QtCore.QMetaObject.invokeMethod(
-                    self,
-                    "_set_leveling_status",
-                    QtCore.Qt.QueuedConnection,
-                    QtCore.Q_ARG(str, f"Point {idx}/{total}"),
-                )
-                stage.move_absolute(x=x, y=y, feed_mm_per_min=feed_xy)
-                stage.wait_for_moves()
-                if auto_mode:
-                    af = AutoFocus(stage, camera)
-                    z = af.coarse_to_fine(
-                        metric=metric,
-                        z_range_mm=z_range,
-                        coarse_step_mm=coarse,
-                        fine_step_mm=fine,
-                        feed_mm_per_min=feed_z,
-                    )
-                else:
+                total = len(coords)
+                pts = []
+                for idx, (x, y) in enumerate(coords, 1):
                     QtCore.QMetaObject.invokeMethod(
                         self,
-                        "_prompt_manual_focus",
-                        QtCore.Qt.BlockingQueuedConnection,
-                        QtCore.Q_ARG(int, idx),
-                        QtCore.Q_ARG(int, total),
+                        "_set_leveling_status",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, f"Point {idx}/{total}"),
                     )
+                    stage.move_absolute(x=x, y=y, feed_mm_per_min=feed_xy)
+                    stage.wait_for_moves()
+                    if auto_mode:
+                        af = AutoFocus(stage, camera)
+                        _ = af.coarse_to_fine(
+                            metric=metric,
+                            z_range_mm=z_range,
+                            coarse_step_mm=coarse,
+                            fine_step_mm=fine,
+                            feed_mm_per_min=feed_z,
+                        )
+                    else:
+                        QtCore.QMetaObject.invokeMethod(
+                            self,
+                            "_prompt_manual_focus",
+                            QtCore.Qt.BlockingQueuedConnection,
+                            QtCore.Q_ARG(int, idx),
+                            QtCore.Q_ARG(int, total),
+                        )
                     pos = stage.get_position()
-                    z = pos[2] if pos else 0.0
-                pts.append((x, y, z))
+                    if pos:
+                        x_meas, y_meas, z = pos
+                    else:
+                        x_meas, y_meas, z = x, y, 0.0
+                    pts.append((x_meas, y_meas, z))
             model = SurfaceModel(kind)
             model.fit(pts)
             area = Area(
