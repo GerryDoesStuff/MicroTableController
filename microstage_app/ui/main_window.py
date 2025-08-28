@@ -2209,6 +2209,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._raster_runner:
             log("Raster: stop requested")
             self._raster_runner.stop()
+            if self._raster_thread:
+                self._raster_thread.quit()
+                self._raster_thread.wait()
         if self._level_thread:
             log("Leveling: stop requested")
             self._level_thread.requestInterruption()
@@ -2351,6 +2354,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.profiles.set(path, val)
         self.profiles.save()
         try:
+            self._stop_all()
+            if self._raster_thread:
+                self._raster_thread.quit()
+                self._raster_thread.wait()
             if self.stage_worker:
                 self.stage_worker.stop()
             if self.stage_thread:
