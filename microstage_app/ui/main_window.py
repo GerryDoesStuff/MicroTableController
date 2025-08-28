@@ -617,8 +617,6 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(QtWidgets.QLabel("Coarse step (mm):"), 2, 0); a.addWidget(self.af_coarse, 2, 1)
         a.addWidget(QtWidgets.QLabel("Fine step (mm):"), 3, 0); a.addWidget(self.af_fine, 3, 1)
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
-        left.addWidget(af_box)
-
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
         self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
@@ -627,7 +625,13 @@ class MainWindow(QtWidgets.QMainWindow):
         s.addWidget(QtWidgets.QLabel("Range (mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
         s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
         s.addWidget(self.btn_focus_stack, 2, 0, 1, 2)
-        left.addWidget(stack_box)
+
+        af_box.setMaximumWidth(240)
+        stack_box.setMaximumWidth(240)
+        af_stack_row = QtWidgets.QHBoxLayout()
+        af_stack_row.addWidget(af_box)
+        af_stack_row.addWidget(stack_box)
+        left.addLayout(af_stack_row)
 
         left.addStretch(1)
         left.addWidget(self.stage_pos)
