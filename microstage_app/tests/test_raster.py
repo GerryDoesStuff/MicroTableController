@@ -73,7 +73,7 @@ def test_raster_traversal_modes(mode, serpentine):
     if mode == "rectangle":
         cfg_kwargs.update(x2_mm=2.0, y2_mm=0.0, x3_mm=0.0, y3_mm=1.0, x4_mm=2.0, y4_mm=1.0)
     elif mode == "parallelogram":
-        cfg_kwargs.update(x2_mm=2.0, y2_mm=0.0, x3_mm=0.5, y3_mm=1.0)
+        cfg_kwargs.update(x2_mm=2.0, y2_mm=0.0, x3_mm=2.5, y3_mm=1.0)
     elif mode == "trapezoid":
         cfg_kwargs.update(x2_mm=4.0, y2_mm=0.0, x3_mm=1.0, y3_mm=2.0, x4_mm=3.0, y4_mm=2.0)
 
@@ -254,7 +254,7 @@ def test_raster_parallelogram_matrix():
         y1_mm=0.0,
         x2_mm=2.0,
         y2_mm=0.0,
-        x3_mm=0.5,
+        x3_mm=2.5,
         y3_mm=1.0,
         mode="parallelogram",
         capture=False,

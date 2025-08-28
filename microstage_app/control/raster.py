@@ -15,6 +15,14 @@ except Exception:  # pragma: no cover - autofocus deps may be missing
 
 @dataclass
 class RasterConfig:
+    """Configuration for raster scans.
+
+    For ``mode="parallelogram"`` the three defined points correspond to the
+    top-left (``x1_mm``, ``y1_mm``), top-right (``x2_mm``, ``y2_mm``), and
+    bottom-right (``x3_mm``, ``y3_mm``) corners of the area. The remaining
+    corner is inferred from these coordinates.
+    """
+
     rows: int = 5
     cols: int = 5
     x1_mm: float = 0.0
@@ -63,7 +71,11 @@ class RasterRunner:
         self._stop = False
 
     def _build_coord_matrix(self):
-        """Generate the coordinate matrix for the configured raster mode."""
+        """Generate the coordinate matrix for the configured raster mode.
+
+        For ``mode="parallelogram"`` the supplied points are interpreted as
+        top-left, top-right, and bottom-right corners respectively.
+        """
         if self.coord_matrix is not None:
             return self.coord_matrix
 
@@ -86,8 +98,8 @@ class RasterRunner:
         elif cfg.mode == "parallelogram":
             col_vec_x = (cfg.x2_mm - cfg.x1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
             col_vec_y = (cfg.y2_mm - cfg.y1_mm) / (cfg.cols - 1) if cfg.cols > 1 else 0.0
-            row_vec_x = (cfg.x3_mm - cfg.x1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
-            row_vec_y = (cfg.y3_mm - cfg.y1_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            row_vec_x = (cfg.x3_mm - cfg.x2_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
+            row_vec_y = (cfg.y3_mm - cfg.y2_mm) / (cfg.rows - 1) if cfg.rows > 1 else 0.0
             for r in range(cfg.rows):
                 row = []
                 for c in range(cfg.cols):
