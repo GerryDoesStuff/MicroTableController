@@ -54,6 +54,7 @@ class RasterRunner:
         self.lens_name = lens_name
 
         self.coord_matrix = None
+        self._stop = False
 
     def _build_coord_matrix(self):
         """Generate the coordinate matrix for the configured raster mode."""
@@ -108,6 +109,10 @@ class RasterRunner:
         self.coord_matrix = matrix
         return matrix
 
+    def stop(self):
+        """Request that the raster scan stop after the current move."""
+        self._stop = True
+
     def run(self):
         """Execute raster scan and capture images for each tile.
 
@@ -131,6 +136,8 @@ class RasterRunner:
         ):
             self.stage.move_absolute(x=start_x, y=start_y)
             self.stage.wait_for_moves()
+            if self._stop:
+                return
         current_x, current_y = start_x, start_y
 
         for r in range(self.cfg.rows):
@@ -145,6 +152,8 @@ class RasterRunner:
                     current_x, current_y = target_x, target_y
 
                 self.stage.wait_for_moves()
+                if self._stop:
+                    return
                 if self.position_cb:
                     try:
                         pos = self.stage.get_position()
