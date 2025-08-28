@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import pytest
 
@@ -183,3 +185,46 @@ def test_grid_level_manual_records_z(monkeypatch):
     ]
     assert np.allclose(stage.positions, expected)
     assert np.isclose(model.predict(2, 3), plane(2, 3))
+
+
+def test_grid_level_event_cancel(monkeypatch):
+    import microstage_app.control.leveling as leveling
+    monkeypatch.setattr(leveling, "AutoFocus", None)
+
+    cancel_event = threading.Event()
+
+    def plane(x, y):
+        return x + 2 * y
+
+    class CancelStage(ManualStage):
+        def __init__(self, surface, event):
+            super().__init__(surface)
+            self.event = event
+            self.move_calls = 0
+
+        def move_absolute(self, x=None, y=None, z=None, feed_mm_per_min=0.0):
+            super().move_absolute(x=x, y=y, z=z, feed_mm_per_min=feed_mm_per_min)
+            self.move_calls += 1
+            if self.move_calls == 2:
+                self.event.set()
+
+        def wait_for_moves(self):
+            if self.event.is_set():
+                raise RuntimeError("cancelled")
+
+        def get_position(self):
+            if self.event.is_set():
+                raise AssertionError("get_position called after cancel")
+            return super().get_position()
+
+    stage = CancelStage(plane, cancel_event)
+    cam = DummyCamera()
+    rect = (0.0, 0.0, 1.0, 1.0)
+
+    with pytest.raises(RuntimeError):
+        grid_level(stage, cam, rect, rows=2, cols=2, mode=LevelingMode.LINEAR)
+
+    cancel_event.clear()
+    assert not cancel_event.is_set()
+    assert stage.move_calls == 2
+    assert len(stage.positions) == 1
