@@ -17,7 +17,7 @@ from ..control.focus_planes import (
     Area,
 )
 
-from ..utils.img import numpy_to_qimage, draw_scale_bar
+from ..utils.img import numpy_to_qimage, draw_scale_bar, VERT_SCALE, TEXT_SCALE
 from ..utils.log import LOG, log
 from ..utils.serial_worker import SerialWorker
 from ..utils.workers import run_async
@@ -129,12 +129,20 @@ class MeasureView(QtWidgets.QGraphicsView):
             margin = 20
             x0 = br.right() - margin - length_px
             y0 = br.bottom() - margin
-            painter.setPen(QtGui.QPen(QtCore.Qt.white, 2))
+            painter.setPen(QtGui.QPen(QtCore.Qt.white, 2 * VERT_SCALE))
             painter.drawLine(x0, y0, x0 + length_px, y0)
             label = (
                 f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
             )
-            painter.drawText(x0, y0 - 7, label)
+            font = painter.font()
+            ps = font.pointSizeF()
+            if ps > 0:
+                font.setPointSizeF(ps * TEXT_SCALE)
+            else:
+                font.setPixelSize(font.pixelSize() * TEXT_SCALE)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            painter.drawText(x0, y0 - (7 * TEXT_SCALE) - fm.descent(), label)
         painter.restore()
 
     def set_image(self, qimg: QtGui.QImage):

@@ -4,11 +4,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from PIL import ImageDraw, ImageFont
-from PySide6 import QtWidgets
+from PySide6 import QtWidgets, QtGui, QtCore
 
 import microstage_app.ui.main_window as mw
 from microstage_app.analysis import Lens
-from microstage_app.utils.img import draw_scale_bar
+from microstage_app.utils.img import draw_scale_bar, VERT_SCALE, TEXT_SCALE
 
 
 @pytest.fixture
@@ -102,3 +102,36 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
     win.preview_timer.stop()
     win.fps_timer.stop()
     win.close()
+
+
+def test_preview_scale_bar_pen_and_font(monkeypatch, qt_app):
+    view = mw.MeasureView()
+    view.set_scale_bar(True, 1.0)
+    img = QtGui.QImage(200, 100, QtGui.QImage.Format_RGB32)
+    img.fill(QtCore.Qt.black)
+    view.set_image(img)
+
+    captured = {}
+    orig_setPen = QtGui.QPainter.setPen
+    orig_setFont = QtGui.QPainter.setFont
+
+    def fake_setPen(self, pen):
+        captured["pen_width"] = pen.width()
+        orig_setPen(self, pen)
+
+    def fake_setFont(self, font):
+        captured["font_size"] = font.pointSizeF()
+        orig_setFont(self, font)
+
+    monkeypatch.setattr(QtGui.QPainter, "setPen", fake_setPen)
+    monkeypatch.setattr(QtGui.QPainter, "setFont", fake_setFont)
+
+    target = QtGui.QImage(200, 100, QtGui.QImage.Format_RGB32)
+    painter = QtGui.QPainter(target)
+    view.drawForeground(painter, QtCore.QRectF(target.rect()))
+    painter.end()
+
+    assert captured["pen_width"] == 2 * VERT_SCALE
+    base_size = QtGui.QFont().pointSizeF()
+    assert captured["font_size"] == pytest.approx(base_size * TEXT_SCALE)
+    view.close()

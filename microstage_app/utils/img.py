@@ -4,6 +4,10 @@ import numpy as np
 from PySide6 import QtGui
 from PIL import Image, ImageDraw, ImageFont
 
+# Scaling factors for the scale bar drawing used across the application
+VERT_SCALE = 2  # line thickness multiplier
+TEXT_SCALE = 4  # font size multiplier
+
 def numpy_to_qimage(img: np.ndarray) -> QtGui.QImage:
     if img.ndim == 2:
         h, w = img.shape
@@ -44,10 +48,6 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
         raise ValueError(f"Unsupported image shape: {img.shape}")
 
     h, w, _ = img.shape
-
-    # Scaling factors for the scale bar drawing
-    VERT_SCALE = 2  # line thickness multiplier
-    TEXT_SCALE = 4  # font size multiplier
 
     # Compute a "nice" length that fits within ~20% of the image width
     max_um = 0.2 * w * um_per_px
