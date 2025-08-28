@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import time
 from math import isclose
+from threading import Event
+from typing import Optional
 
 try:
     from .autofocus import AutoFocus, FocusMetric
@@ -113,7 +115,7 @@ class RasterRunner:
         """Request that the raster scan stop after the current move."""
         self._stop = True
 
-    def run(self):
+    def run(self, stop_event: Optional[Event] = None):
         """Execute raster scan and capture images for each tile.
 
         The coordinate matrix is generated based on :class:`RasterConfig.mode`
@@ -121,6 +123,9 @@ class RasterRunner:
         """
 
         coord_matrix = self._build_coord_matrix()
+
+        if stop_event and stop_event.is_set():
+            return
 
         start_x, start_y = coord_matrix[0][0]
         try:
@@ -134,6 +139,8 @@ class RasterRunner:
                 and isclose(pos[1], start_y, abs_tol=1e-6)
             )
         ):
+            if stop_event and stop_event.is_set():
+                return
             self.stage.move_absolute(x=start_x, y=start_y)
             self.stage.wait_for_moves()
             if self._stop:
