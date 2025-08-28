@@ -220,7 +220,7 @@ class MeasureView(QtWidgets.QGraphicsView):
 
         pixels = length
         microns = pixels * self._um_per_px
-        self._live_text.setText(f"{pixels:.1f} px / {microns:.1f} µm")
+        self._live_text.setPlainText(f"{pixels:.1f} px / {microns:.1f} µm")
 
         if length > 0:
             unit_x = line.dx() / length
