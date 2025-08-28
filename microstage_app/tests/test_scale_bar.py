@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PIL import ImageDraw
+from PIL import ImageDraw, ImageFont
 from PySide6 import QtWidgets
 
 import microstage_app.ui.main_window as mw
@@ -31,6 +31,15 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
         return orig_text(self, xy, text, fill=fill, font=font)
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", fake_text)
+
+    orig_truetype = ImageFont.truetype
+
+    def fake_truetype(font, size=10, *args, **kwargs):
+        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+            raise OSError("missing font")
+        return orig_truetype(font, size, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", fake_truetype)
 
     out = draw_scale_bar(img, 1.0)
 
@@ -69,6 +78,15 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
         return None, SimpleNamespace(finished=DummySignal())
 
     monkeypatch.setattr(mw, "run_async", fake_run_async)
+
+    orig_truetype = ImageFont.truetype
+
+    def fake_truetype(font, size=10, *args, **kwargs):
+        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+            raise OSError("missing font")
+        return orig_truetype(font, size, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", fake_truetype)
 
     win._capture()
     out = saved["img"]
