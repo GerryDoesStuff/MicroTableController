@@ -64,6 +64,24 @@ def make_window(monkeypatch, tmp_path, qt_app):
     yield win, captured
     win.preview_timer.stop(); win.fps_timer.stop(); win.close()
 
+
+@pytest.mark.parametrize(
+    "mode,p3_en,p4_en",
+    [
+        ("2-point", False, False),
+        ("3-point", True, False),
+        ("4-point", True, True),
+    ],
+)
+def test_raster_mode_control_enablement(make_window, qt_app, mode, p3_en, p4_en):
+    win, _ = make_window
+    win.raster_mode_combo.setCurrentText(mode)
+    qt_app.processEvents()
+    for w in (win.rast_x3_spin, win.rast_y3_spin, win.btn_raster_p3):
+        assert w.isEnabled() is p3_en
+    for w in (win.rast_x4_spin, win.rast_y4_spin, win.btn_raster_p4):
+        assert w.isEnabled() is p4_en
+
 def test_raster_mode_two_point(make_window):
     win, captured = make_window
     win.raster_mode_combo.setCurrentText("2-point")
