@@ -911,6 +911,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reload_profiles()
         self._update_stage_buttons()
         self._update_cam_buttons()
+        self._update_raster_mode()
 
     def _refresh_lens_combo(self):
         self.lens_combo.blockSignals(True)
@@ -928,6 +929,15 @@ class MainWindow(QtWidgets.QMainWindow):
         grid = self.level_method.currentText() == "Grid"
         self.level_rows.setEnabled(grid)
         self.level_cols.setEnabled(grid)
+
+    def _update_raster_mode(self):
+        mode = self.raster_mode_combo.currentText()
+        p3 = mode in ("3-point", "4-point")
+        p4 = mode == "4-point"
+        for w in (self.rast_x3_spin, self.rast_y3_spin, self.btn_raster_p3):
+            w.setEnabled(p3)
+        for w in (self.rast_x4_spin, self.rast_y4_spin, self.btn_raster_p4):
+            w.setEnabled(p4)
 
     def _connect_signals(self):
         self.btn_stage_connect.clicked.connect(self._connect_stage_async)
@@ -955,6 +965,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_apply_level.clicked.connect(self._apply_leveling)
         self.btn_disable_level.clicked.connect(self._disable_leveling)
         self.level_method.currentTextChanged.connect(self._update_leveling_method)
+        self.raster_mode_combo.currentTextChanged.connect(self._update_raster_mode)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
         self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))

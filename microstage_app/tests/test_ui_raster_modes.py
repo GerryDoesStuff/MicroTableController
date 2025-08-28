@@ -64,6 +64,37 @@ def make_window(monkeypatch, tmp_path, qt_app):
     yield win, captured
     win.preview_timer.stop(); win.fps_timer.stop(); win.close()
 
+
+def test_raster_mode_control_enablement(make_window, qt_app):
+    win, _ = make_window
+
+    win.raster_mode_combo.setCurrentText("2-point")
+    qt_app.processEvents()
+    assert not win.rast_x3_spin.isEnabled()
+    assert not win.rast_y3_spin.isEnabled()
+    assert not win.btn_raster_p3.isEnabled()
+    assert not win.rast_x4_spin.isEnabled()
+    assert not win.rast_y4_spin.isEnabled()
+    assert not win.btn_raster_p4.isEnabled()
+
+    win.raster_mode_combo.setCurrentText("3-point")
+    qt_app.processEvents()
+    assert win.rast_x3_spin.isEnabled()
+    assert win.rast_y3_spin.isEnabled()
+    assert win.btn_raster_p3.isEnabled()
+    assert not win.rast_x4_spin.isEnabled()
+    assert not win.rast_y4_spin.isEnabled()
+    assert not win.btn_raster_p4.isEnabled()
+
+    win.raster_mode_combo.setCurrentText("4-point")
+    qt_app.processEvents()
+    assert win.rast_x3_spin.isEnabled()
+    assert win.rast_y3_spin.isEnabled()
+    assert win.btn_raster_p3.isEnabled()
+    assert win.rast_x4_spin.isEnabled()
+    assert win.rast_y4_spin.isEnabled()
+    assert win.btn_raster_p4.isEnabled()
+
 def test_raster_mode_two_point(make_window):
     win, captured = make_window
     win.raster_mode_combo.setCurrentText("2-point")
