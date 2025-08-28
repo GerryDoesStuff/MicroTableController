@@ -492,6 +492,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_signals()
         self._init_persistent_fields()
         self._update_leveling_method()
+        self._update_raster_controls()
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
@@ -929,6 +930,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.level_rows.setEnabled(grid)
         self.level_cols.setEnabled(grid)
 
+    def _update_raster_controls(self):
+        mode = self.raster_mode_combo.currentText()
+        enable_p3 = mode in ("3-point", "4-point")
+        enable_p4 = mode == "4-point"
+        self.rast_x3_spin.setEnabled(enable_p3)
+        self.rast_y3_spin.setEnabled(enable_p3)
+        self.btn_raster_p3.setEnabled(enable_p3)
+        self.rast_x4_spin.setEnabled(enable_p4)
+        self.rast_y4_spin.setEnabled(enable_p4)
+        self.btn_raster_p4.setEnabled(enable_p4)
+
     def _connect_signals(self):
         self.btn_stage_connect.clicked.connect(self._connect_stage_async)
         self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
@@ -955,6 +967,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_apply_level.clicked.connect(self._apply_leveling)
         self.btn_disable_level.clicked.connect(self._disable_leveling)
         self.level_method.currentTextChanged.connect(self._update_leveling_method)
+        self.raster_mode_combo.currentTextChanged.connect(self._update_raster_controls)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
         self.btn_raster_p2.clicked.connect(lambda: self._set_raster_point(2))
