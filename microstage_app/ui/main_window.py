@@ -421,10 +421,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture", expected_type=str)
         self.auto_number = self.profiles.get('capture.auto_number', False, expected_type=bool)
-        fmt = self.profiles.get('capture.format', 'bmp', expected_type=str)
+        fmt = self.profiles.get('capture.format', 'png', expected_type=str)
         if fmt.lower() not in {"bmp", "tif", "png", "jpg"}:
-            log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'bmp'")
-            fmt = 'bmp'
+            log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'png'")
+            fmt = 'png'
         self.capture_format = fmt
 
         # timers
