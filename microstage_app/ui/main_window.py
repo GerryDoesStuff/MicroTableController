@@ -217,6 +217,11 @@ class MeasureView(QtWidgets.QGraphicsView):
         self._live_ticks = []
 
         length = line.length()
+
+        pixels = length
+        microns = pixels * self._um_per_px
+        self._live_text.setText(f"{pixels:.1f} px / {microns:.1f} µm")
+
         if length > 0:
             unit_x = line.dx() / length
             unit_y = line.dy() / length
@@ -235,12 +240,11 @@ class MeasureView(QtWidgets.QGraphicsView):
                 )
                 self._live_ticks.append(tick)
 
-            pixels = length
-            microns = pixels * self._um_per_px
-            self._live_text.setText(f"{pixels:.1f} px / {microns:.1f} µm")
             midx = self._anchor[0] + unit_x * length / 2
             midy = self._anchor[1] + unit_y * length / 2
             self._live_text.setPos(midx + norm_x * 10, midy + norm_y * 10)
+        else:
+            self._live_text.setPos(*self._anchor)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._mode == "ruler" and self._anchor is not None:
@@ -268,6 +272,7 @@ class MeasureView(QtWidgets.QGraphicsView):
                     font = self._live_text.font()
                     font.setPointSizeF(font.pointSizeF() * 4)
                     self._live_text.setFont(font)
+                    self._update_live_line(coord)
             elif event.button() == QtCore.Qt.RightButton:
                 if self._anchor is not None:
                     # Cancel the live segment in progress
