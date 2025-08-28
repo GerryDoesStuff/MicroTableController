@@ -2138,6 +2138,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if not (self.stage and self.camera):
             log("Raster ignored: stage or camera not connected")
             return
+        if self._raster_thread or self._raster_runner:
+            log("Raster ignored: raster already running")
+            QtWidgets.QMessageBox.warning(
+                self, "Raster", "A raster operation is already in progress."
+            )
+            return
         cfg = RasterConfig(
             rows=self.rows_spin.value(),
             cols=self.cols_spin.value(),
