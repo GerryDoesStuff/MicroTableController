@@ -1,7 +1,10 @@
 from pathlib import Path
 import sys
+import json
 
 import numpy as np
+import pytest
+import tifffile
 from PIL import Image
 
 # Ensure the repository root is on sys.path so ``microstage_app`` is importable
@@ -56,3 +59,42 @@ def test_save_with_explicit_format(tmp_path):
     out_dir = tmp_path / "fmt"
     writer.save_single(img, directory=str(out_dir), filename="foo", fmt="tif")
     assert (out_dir / "foo.tif").exists()
+
+
+def _load_png(path):
+    with Image.open(path) as img:
+        return img.info
+
+
+def _load_tif(path):
+    with tifffile.TiffFile(path) as tif:
+        return json.loads(tif.pages[0].tags["ImageDescription"].value)
+
+
+def _load_jpg(path):
+    with Image.open(path) as img:
+        exif = img.getexif()
+    return {
+        "camera": exif.get(271),
+        "position": exif.get(270),
+        "lens": exif.get(42036),
+    }
+
+
+@pytest.mark.parametrize(
+    "fmt, metadata, loader",
+    [
+        ("png", {"camera": "cam", "position": "pos", "lens": "lens"}, _load_png),
+        ("tif", {"camera": "cam", "position": "pos", "lens": "lens"}, _load_tif),
+        ("jpg", {271: "cam", 270: "pos", 42036: "lens"}, _load_jpg),
+    ],
+)
+def test_save_with_metadata_roundtrip(tmp_path, fmt, metadata, loader):
+    writer = ImageWriter(base_dir=str(tmp_path / "runs"))
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    writer.save_single(img, directory=str(tmp_path), filename=f"meta_{fmt}", fmt=fmt, metadata=metadata)
+    ext = "tif" if fmt == "tif" else fmt
+    meta = loader(tmp_path / f"meta_{fmt}.{ext}")
+    assert meta["camera"] == "cam"
+    assert meta["position"] == "pos"
+    assert meta["lens"] == "lens"
