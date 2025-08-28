@@ -1,6 +1,7 @@
 import microstage_app.control.autofocus as af
 from microstage_app.control.autofocus import AutoFocus, FocusMetric
 import pytest
+import numpy as np
 
 class StageMock:
     def __init__(self):
@@ -95,3 +96,22 @@ def test_feed_rate_passed_to_stage(monkeypatch):
         feed_mm_per_min=55,
     )
     assert all(feed == 55 for _, feed in stage.moves)
+
+
+def test_metric_value_handles_rgb_and_grayscale():
+    gray = np.array([[0, 50], [100, 150]], dtype=np.uint8)
+    rgb = np.stack([gray] * 3, axis=-1)
+
+    lap_gray = af.metric_value(gray, FocusMetric.LAPLACIAN)
+    lap_rgb = af.metric_value(rgb, FocusMetric.LAPLACIAN)
+    assert lap_rgb == pytest.approx(lap_gray)
+
+    ten_gray = af.metric_value(gray, FocusMetric.TENENGRAD)
+    ten_rgb = af.metric_value(rgb, FocusMetric.TENENGRAD)
+    assert ten_rgb == pytest.approx(ten_gray)
+
+
+def test_metric_value_invalid_channels_raise():
+    bad = np.zeros((4, 4, 2), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        af.metric_value(bad, FocusMetric.LAPLACIAN)

@@ -12,15 +12,46 @@ class FocusMetric(str, Enum):
     LAPLACIAN = "LaplacianVar"
     TENENGRAD = "Tenengrad"
 
-def metric_value(img_rgb, metric: FocusMetric):
-    gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+def metric_value(img, metric: FocusMetric):
+    """Compute a focus metric for an image.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image. May be either a single-channel grayscale image or a
+        three-channel RGB image.
+    metric : FocusMetric
+        The metric to compute.
+
+    Returns
+    -------
+    float
+        Calculated metric value.
+
+    Raises
+    ------
+    ValueError
+        If the image does not have 1 or 3 channels.
+    """
+    if img.ndim == 2:
+        gray = img
+    elif img.ndim == 3:
+        if img.shape[2] == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        elif img.shape[2] == 1:
+            gray = img[..., 0]
+        else:
+            raise ValueError(f"Unsupported image shape: {img.shape}")
+    else:
+        raise ValueError(f"Unsupported image shape: {img.shape}")
+
     if metric == FocusMetric.LAPLACIAN:
         lap = cv2.Laplacian(gray, cv2.CV_64F)
         return float(lap.var())
     elif metric == FocusMetric.TENENGRAD:
         gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
         gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-        return float(np.mean(gx*gx + gy*gy))
+        return float(np.mean(gx * gx + gy * gy))
     else:
         raise ValueError(metric)
 
