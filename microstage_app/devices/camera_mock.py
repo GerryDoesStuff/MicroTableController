@@ -10,6 +10,8 @@ class MockCamera:
         self._exposure_ms = 10.0
         self._auto = False
         self._gain = 100
+        self._color_depths = [8, 16]
+        self._color_depth = 8
 
     def name(self): return "MockCamera"
     def start_stream(self): self._running = True
@@ -62,3 +64,15 @@ class MockCamera:
 
     def get_gain(self):
         return float(self._gain) / 100.0
+
+    # Color depth API ---------------------------------------------------------
+
+    def list_color_depths(self):
+        return list(self._color_depths)
+
+    def get_color_depth(self):
+        return int(self._color_depth)
+
+    def set_color_depth(self, depth: int):
+        if depth in self._color_depths:
+            self._color_depth = int(depth)

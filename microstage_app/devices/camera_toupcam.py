@@ -27,7 +27,8 @@ def create_camera():
     if not devs:
         from .camera_mock import MockCamera
         return MockCamera()
-    return ToupcamCamera(tp, devs[0].id, devs[0].displayname)
+    flags = getattr(getattr(devs[0], "model", None), "flag", 0)
+    return ToupcamCamera(tp, devs[0].id, devs[0].displayname, flags)
 
 class ToupcamCamera:
     """
@@ -39,10 +40,11 @@ class ToupcamCamera:
       - display decimation (drop frames for UI)
     """
 
-    def __init__(self, tp, dev_id, name):
+    def __init__(self, tp, dev_id, name, flags=0):
         self._tp = tp
         self._id = dev_id
         self._name = name
+        self._flags = int(flags)
 
         self._cam = None
         # bytearray buffer for PullImageV2; reshaped view cached in _arr
@@ -64,6 +66,10 @@ class ToupcamCamera:
         # binning support
         self._bin_factors = [1]
         self._binning = 1
+
+        # color depth support
+        self._color_depths = [8]
+        self._color_depth = 8
 
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
@@ -192,6 +198,19 @@ class ToupcamCamera:
         self._cam = self._tp.Toupcam.Open(self._id)
         if not self._cam:
             raise RuntimeError("Toupcam.Open returned null")
+
+        # Determine supported color depths from capability flags
+        self._color_depths = [8]
+        for depth, flag in [
+            (10, "TOUPCAM_FLAG_RAW10"),
+            (11, "TOUPCAM_FLAG_RAW11"),
+            (12, "TOUPCAM_FLAG_RAW12"),
+            (14, "TOUPCAM_FLAG_RAW14"),
+            (16, "TOUPCAM_FLAG_RAW16"),
+        ]:
+            if self._flags & getattr(self._tp, flag, 0):
+                self._color_depths.append(depth)
+        self._color_depth = self._color_depths[0]
 
         # default: RGB24, query size, allocate
         self._raw_mode = False
@@ -486,6 +505,28 @@ class ToupcamCamera:
         except Exception as e:
             log(f"Camera: set_binning failed: {e}")
 
+    # ---- color depth -------------------------------------------------
+
+    def list_color_depths(self):
+        """Return a list of supported color depths in bits."""
+        return list(self._color_depths)
+
+    def get_color_depth(self) -> int:
+        return int(self._color_depth)
+
+    def set_color_depth(self, depth: int):
+        depth = int(depth)
+        if depth not in self._color_depths:
+            return
+        try:
+            if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BITDEPTH"):
+                self._cam.put_Option(self._tp.TOUPCAM_OPTION_BITDEPTH, 1 if depth > 8 else 0)
+            self._color_depth = depth
+            self._bits = 16 if (self._raw_mode and depth > 8) else (8 if self._raw_mode else 24)
+            self._update_dimensions()
+        except Exception as e:
+            log(f"Camera: set_color_depth failed: {e}")
+
     def get_resolution_index(self) -> int:
         """Return current resolution index if available."""
         try:
@@ -593,7 +634,7 @@ class ToupcamCamera:
 
     def set_raw_fast_mono(self, enable: bool):
         self._raw_mode = bool(enable)
-        self._bits = 8 if self._raw_mode else 24
+        self._bits = 16 if (self._raw_mode and self._color_depth > 8) else (8 if self._raw_mode else 24)
         try:
             self._force_rgb_or_raw()
         finally:

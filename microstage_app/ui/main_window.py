@@ -728,6 +728,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gamma_slider.setValue(self.gamma_spin.value())
         c.addWidget(QtWidgets.QLabel("Gamma:"), row, 0); c.addWidget(self.gamma_slider, row, 1); c.addWidget(self.gamma_spin, row, 2); row += 1
 
+        self.depth_combo = QtWidgets.QComboBox()
+        c.addWidget(QtWidgets.QLabel("Color depth:"), row, 0); c.addWidget(self.depth_combo, row, 1, 1, 2); row += 1
+
         self.raw_chk = QtWidgets.QCheckBox("RAW8 fast mono (triples bandwidth efficiency)")
         c.addWidget(self.raw_chk, row, 0, 1, 3); row += 1
 
@@ -955,6 +958,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gamma_slider.valueChanged.connect(self.gamma_spin.setValue)
         self.gamma_spin.valueChanged.connect(self.gamma_slider.setValue)
         self.gamma_spin.valueChanged.connect(self._apply_gamma)
+        self.depth_combo.currentIndexChanged.connect(self._apply_color_depth)
         self.raw_chk.toggled.connect(self._apply_raw)
         self.bin_combo.currentIndexChanged.connect(self._apply_binning)
         self.res_combo.currentIndexChanged.connect(self._apply_resolution)
@@ -1099,6 +1103,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.camera.start_stream()
             self._apply_speed()
             # populate after stream start so all options are available
+            self._populate_color_depths()
             self._populate_binning()
             self._populate_resolutions()
             QtCore.QTimer.singleShot(0, self._populate_resolutions)
@@ -1125,6 +1130,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.measure_view.clear_image()
         self.res_combo.clear()
         self.bin_combo.clear()
+        self.depth_combo.clear()
         self._update_cam_buttons()
 
     def _connect_stage_async(self):
@@ -1287,6 +1293,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- CAMERA APPLY ---------------------------
 
+    def _populate_color_depths(self):
+        if not self.camera or not hasattr(self.camera, "list_color_depths"):
+            self.depth_combo.clear()
+            self.depth_combo.setEnabled(False)
+            return
+        self.depth_combo.blockSignals(True)
+        self.depth_combo.clear()
+        try:
+            depths = self.camera.list_color_depths()
+            for d in depths:
+                self.depth_combo.addItem(f"{d}-bit", d)
+            cur = depths[0] if depths else None
+            if hasattr(self.camera, "get_color_depth"):
+                try:
+                    cur = int(self.camera.get_color_depth())
+                except Exception:
+                    pass
+            if cur is not None:
+                pos = self.depth_combo.findData(cur)
+                if pos >= 0:
+                    self.depth_combo.setCurrentIndex(pos)
+        except Exception:
+            pass
+        self.depth_combo.setEnabled(self.depth_combo.count() > 0)
+        self.depth_combo.blockSignals(False)
+
     def _populate_binning(self):
         if not self.camera or not hasattr(self.camera, "list_binning_factors"):
             self.bin_combo.clear()
@@ -1383,6 +1415,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gamma_spin.setValue(val)
         self.gamma_spin.blockSignals(False)
         self._apply_gamma()
+        # Color depth
+        depth = p.get('camera.color_depth', self.depth_combo.currentData(), expected_type=(int, float))
+        self.depth_combo.blockSignals(True)
+        pos = self.depth_combo.findData(depth)
+        if pos >= 0:
+            self.depth_combo.setCurrentIndex(pos)
+        self.depth_combo.blockSignals(False)
+        self._apply_color_depth(self.depth_combo.currentIndex())
         # RAW mode
         raw = p.get('camera.raw', self.raw_chk.isChecked(), expected_type=bool)
         self.raw_chk.blockSignals(True)
@@ -1503,6 +1543,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.camera: return
         if hasattr(self.camera, "set_gamma"):
             self.camera.set_gamma(int(self.gamma_spin.value()))
+
+    def _apply_color_depth(self, i: int):
+        if not self.camera:
+            return
+        depth = self.depth_combo.currentData()
+        if depth is None:
+            return
+        try:
+            self.camera.set_color_depth(int(depth))
+        except Exception:
+            pass
 
     def _apply_raw(self, on: bool):
         if not self.camera: return
@@ -2120,6 +2171,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.saturation_spin, "camera.saturation"),
             (self.hue_spin, "camera.hue"),
             (self.gamma_spin, "camera.gamma"),
+            (self.depth_combo, "camera.color_depth"),
             (self.raw_chk, "camera.raw"),
             (self.bin_combo, "camera.binning"),
             (self.res_combo, "camera.resolution_index"),

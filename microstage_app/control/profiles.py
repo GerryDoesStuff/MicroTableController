@@ -14,6 +14,7 @@ DEFAULTS = {
         'hue': 0,
         'gamma': 100,
         'raw': False,
+        'color_depth': 8,
         'binning': 1,
         'resolution_index': 0,
         'display_decimation': 1,
