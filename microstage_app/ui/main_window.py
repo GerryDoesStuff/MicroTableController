@@ -112,7 +112,7 @@ class MeasureView(QtWidgets.QGraphicsView):
             cx = br.center().x()
             cy = br.center().y()
             painter.setCompositionMode(QtGui.QPainter.CompositionMode_Difference)
-            painter.setPen(QtGui.QPen(QtCore.Qt.white))
+            painter.setPen(QtGui.QPen(QtCore.Qt.white, 3 * VERT_SCALE))
             painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
             painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
             painter.restore()
