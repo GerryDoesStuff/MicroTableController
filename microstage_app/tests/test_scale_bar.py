@@ -47,8 +47,11 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
 
 def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
     win = mw.MainWindow()
-    win.stage = SimpleNamespace(wait_for_moves=lambda: None)
-    win.camera = SimpleNamespace(snap=lambda: np.zeros((100, 200, 3), dtype=np.uint8))
+    win.stage = SimpleNamespace(wait_for_moves=lambda: None, get_position=lambda: (0, 0, 0))
+    win.camera = SimpleNamespace(
+        snap=lambda: np.zeros((100, 200, 3), dtype=np.uint8),
+        name=lambda: "CameraMock",
+    )
     win.capture_dir = str(tmp_path)
     win.capture_name = "img"
     win.auto_number = False

@@ -1743,12 +1743,19 @@ class MainWindow(QtWidgets.QMainWindow):
                         img = draw_scale_bar(img, self.current_lens.um_per_px)
                     except Exception as e:
                         log(f"Scale bar draw error: {e}")
+                pos = self.stage.get_position()
+                meta = {
+                    "Camera": self.camera.name(),
+                    "Position": pos,
+                    "Lens": self.current_lens.name,
+                }
                 self.image_writer.save_single(
                     img,
                     directory=directory,
                     filename=name,
                     auto_number=auto_num,
                     fmt=self.capture_format,
+                    metadata=meta,
                 )
             return True
 
@@ -1978,6 +1985,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 metric=FocusMetric.LAPLACIAN,
                 feed_mm_per_min=feed,
                 fmt=self.capture_format,
+                lens_name=self.current_lens.name,
             )
 
         log(f"Focus stack: range={rng} step={step} dir={stack_dir}")
@@ -2071,6 +2079,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 position_cb=lambda pos: self.stage_worker.enqueue(
                     self.stage.get_position, callback=self._on_stage_position
                 ),
+                lens_name=self.current_lens.name,
             )
             runner.run()
             return True

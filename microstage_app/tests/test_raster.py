@@ -31,12 +31,22 @@ class CameraMock:
     def snap(self):
         self.count += 1
         return self.count
+    def name(self):
+        return "CameraMock"
 
 class WriterMock:
     def __init__(self):
         self.saved = []
-    def save_single(self, img, directory=None, filename="capture", auto_number=False, fmt="bmp"):
-        self.saved.append((img, directory, filename, auto_number, fmt))
+    def save_single(
+        self,
+        img,
+        directory=None,
+        filename="capture",
+        auto_number=False,
+        fmt="bmp",
+        metadata=None,
+    ):
+        self.saved.append((img, directory, filename, auto_number, fmt, metadata))
 
 
 @pytest.mark.parametrize("mode", ["rectangle", "parallelogram", "trapezoid"])

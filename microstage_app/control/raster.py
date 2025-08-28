@@ -40,6 +40,7 @@ class RasterRunner:
         auto_number=False,
         fmt="tif",
         position_cb=None,
+        lens_name=None,
     ):
         self.stage = stage
         self.camera = camera
@@ -50,6 +51,7 @@ class RasterRunner:
         self.auto_number = auto_number
         self.fmt = fmt
         self.position_cb = position_cb
+        self.lens_name = lens_name
 
         self.coord_matrix = None
 
@@ -164,12 +166,19 @@ class RasterRunner:
                     if img is not None:
                         save_c = c
                         fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
+                        pos = self.stage.get_position()
+                        metadata = {
+                            "Camera": self.camera.name(),
+                            "Position": pos,
+                            "Lens": self.lens_name,
+                        }
                         self.writer.save_single(
                             img,
                             directory=self.directory,
                             filename=fname,
                             auto_number=self.auto_number,
                             fmt=self.fmt,
+                            metadata=metadata,
                         )
                     time.sleep(1)
 
