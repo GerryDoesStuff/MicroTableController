@@ -33,7 +33,7 @@ def test_camera_settings_persist(tmp_path):
     w.hue_spin.setValue(5)
     w.gamma_spin.setValue(70)
     w.raw_chk.setChecked(True)
-    w.decim_spin.setValue(3)
+    w.speed_spin.setValue(3)
     w.close()
 
     w2 = MainWindow()
@@ -46,6 +46,6 @@ def test_camera_settings_persist(tmp_path):
     assert w2.hue_spin.value() == 5
     assert w2.gamma_spin.value() == 70
     assert w2.raw_chk.isChecked() is True
-    assert w2.decim_spin.value() == 3
+    assert w2.speed_spin.value() == 3
     w2.close()
     Profiles.PATH = orig_path

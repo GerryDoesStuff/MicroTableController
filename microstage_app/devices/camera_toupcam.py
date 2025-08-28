@@ -37,7 +37,6 @@ class ToupcamCamera:
       - RAW8 (fast mono) toggle
       - resolution list (put_eSize) + ROI presets (put_Roi if available)
       - USB 'Speed/Bandwidth' level (if supported)
-      - display decimation (drop frames for UI)
     """
 
     def __init__(self, tp, dev_id, name, flags=0):
@@ -76,8 +75,7 @@ class ToupcamCamera:
         self._first_logged = False
         self._cb_thread = None
 
-        # stats / throttling
-        self._display_every = 1
+        # stats
         self._event_count = 0
         self._fps = 0.0
         self._fps_n = 0
@@ -193,9 +191,12 @@ class ToupcamCamera:
             except Exception:
                 log("Camera: USB type unknown")
 
-        # force maximum bandwidth
+        # query maximum speed level and default to the highest
         try:
-            self.set_speed_level(5)
+            if hasattr(self._cam, "get_MaxSpeed"):
+                max_level = int(self._cam.get_MaxSpeed())
+                log(f"Camera: max speed level {max_level}")
+                self.set_speed_level(max_level)
         except Exception as e:
             log(f"Camera: set speed failed: {e}")
 
@@ -259,11 +260,6 @@ class ToupcamCamera:
                     return
 
                 self._event_count += 1
-                if (self._event_count % max(1, self._display_every)) != 0:
-                    # drain but skip UI update to reduce CPU load
-                    self._cam.PullImageV2(self._buf_ptr, self._bits, None)
-                    return
-
                 t0 = time.perf_counter()
                 self._cam.PullImageV2(self._buf_ptr, self._bits, None)
                 t1 = time.perf_counter()
@@ -376,9 +372,21 @@ class ToupcamCamera:
 
     # ---- performance knobs ----
 
-    def set_display_decimation(self, n: int):
-        self._display_every = max(1, int(n))
-        log(f"Camera: display every {self._display_every} frame(s)")
+    def get_speed_range(self):
+        try:
+            if hasattr(self._cam, "get_MaxSpeed"):
+                return list(range(int(self._cam.get_MaxSpeed()) + 1))
+        except Exception:
+            pass
+        return []
+
+    def get_speed_level(self):
+        try:
+            if hasattr(self._cam, "get_Speed"):
+                return int(self._cam.get_Speed())
+        except Exception:
+            pass
+        return None
 
     def _probe_resolutions(self):
         """Attempt to discover valid resolutions when enumeration is unavailable."""
@@ -708,8 +716,6 @@ class ToupcamCamera:
             log(f"Camera: RAW8 fast mono={'ON' if self._raw_mode else 'OFF'}")
 
     def set_speed_level(self, level: int):
-        """Force USB bandwidth to level 5 regardless of input."""
-        level = 5
         try:
             # Some SDKs expose put_Speed / get_Speed; others via put_Option
             if hasattr(self._cam, "put_Speed"):
@@ -719,7 +725,7 @@ class ToupcamCamera:
             else:
                 log("Camera: speed option not supported")
                 return
-            log("Camera: speed level set to 5")
+            log(f"Camera: speed level set to {level}")
         except Exception as e:
             log(f"Camera: set_speed_level failed: {e}")
 

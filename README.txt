@@ -91,7 +91,7 @@ Jog:
 
 Camera:
 - Exposure (ms) (Auto optional), Gain, RAW8 fast mono (8-bit; ~1/3 bandwidth vs RGB24), Resolution index,
-  ROI presets (Full, 2048^2, 1024^2, 512^2), and display decimation (show every Nth frame). USB bandwidth is fixed to level 5.
+  ROI presets (Full, 2048^2, 1024^2, 512^2), and selectable USB bandwidth level.
 - Smaller ROI / shorter exposure -> higher FPS.
 
 Capture:
