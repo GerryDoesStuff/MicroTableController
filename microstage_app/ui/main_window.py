@@ -828,8 +828,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
-        self.btn_stop_raster = QtWidgets.QPushButton("Stop Raster")
-        self.btn_stop_raster.setEnabled(False)
+        self.btn_stop = QtWidgets.QPushButton("Stop")
+        self.btn_stop.setToolTip(
+            "Stop active raster, leveling, or focus stack operations"
+        )
+        self.btn_stop.setEnabled(False)
 
         r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0)
         r.addWidget(self.raster_mode_combo, 0, 1)
@@ -865,7 +868,7 @@ class MainWindow(QtWidgets.QMainWindow):
         r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
         r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
         r.addWidget(self.btn_run_raster, 6, 0, 1, 3)
-        r.addWidget(self.btn_stop_raster, 6, 3, 1, 3)
+        r.addWidget(self.btn_stop, 6, 3, 1, 3)
         r.setRowStretch(7, 1)
         rast_box.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
@@ -956,7 +959,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_raster_p3.clicked.connect(lambda: self._set_raster_point(3))
         self.btn_raster_p4.clicked.connect(lambda: self._set_raster_point(4))
         self.btn_run_raster.clicked.connect(self._run_raster)
-        self.btn_stop_raster.clicked.connect(self._stop_raster)
+        self.btn_stop.clicked.connect(self._stop_all)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
@@ -1871,6 +1874,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
+        self._update_stop_button()
 
     @QtCore.Slot(object, object)
     def _on_leveling_done(self, model, err):
@@ -2003,11 +2007,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread, self._level_worker = t, w
         self._level_thread.finished.connect(self._cleanup_leveling_thread)
         w.finished.connect(self._on_leveling_done)
+        self._update_stop_button()
 
     @QtCore.Slot()
     def _cleanup_focus_stack_thread(self):
         self._stack_thread = None
         self._stack_worker = None
+        self._update_stop_button()
 
     @QtCore.Slot(object, object)
     def _on_focus_stack_done(self, best_idx, err):
@@ -2057,6 +2063,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._stack_thread, self._stack_worker = t, w
         self._stack_thread.finished.connect(self._cleanup_focus_stack_thread)
         w.finished.connect(self._on_focus_stack_done)
+        self._update_stop_button()
 
     def _set_raster_point(self, idx: int):
         if not self.stage_worker:
@@ -2154,13 +2161,23 @@ class MainWindow(QtWidgets.QMainWindow):
         t, w = run_async(do_raster)
         self._raster_thread, self._raster_worker = t, w
         self.btn_run_raster.setEnabled(False)
-        self.btn_stop_raster.setEnabled(True)
+        self._update_stop_button()
         w.finished.connect(self._on_raster_finished)
 
-    def _stop_raster(self):
+    def _stop_all(self):
         if self._raster_runner:
             log("Raster: stop requested")
             self._raster_runner.stop()
+        if self._level_thread:
+            log("Leveling: stop requested")
+            self._level_thread.requestInterruption()
+        if self._stack_thread:
+            log("Focus stack: stop requested")
+            self._stack_thread.requestInterruption()
+
+    def _update_stop_button(self):
+        active = bool(self._raster_runner or self._level_thread or self._stack_thread)
+        self.btn_stop.setEnabled(active)
 
     @QtCore.Slot(object, object)
     def _on_raster_finished(self, res, err):
@@ -2168,7 +2185,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._raster_thread = None
         self._raster_worker = None
         self.btn_run_raster.setEnabled(True)
-        self.btn_stop_raster.setEnabled(False)
+        self._update_stop_button()
         if self.stage_worker:
             self.stage_worker.enqueue(
                 self.stage.get_position, callback=self._on_stage_position
