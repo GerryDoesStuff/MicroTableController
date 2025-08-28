@@ -47,7 +47,6 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
 
     # Scaling factors for the scale bar drawing
     VERT_SCALE = 2  # line thickness multiplier
-    HORIZ_SCALE = 8  # bar length multiplier
     TEXT_SCALE = 4  # font size multiplier
 
     # Compute a "nice" length that fits within ~20% of the image width
@@ -60,14 +59,12 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
             nice_um = candidate
             break
 
-    # Scale the length horizontally and clamp to image bounds
-    length_px = int(round(nice_um / um_per_px)) * HORIZ_SCALE
+    # Scale the length and clamp to image bounds
+    length_px = int(round(nice_um / um_per_px))
     max_length = w - 40  # leave 20px margin on each side
     if length_px > max_length:
         length_px = max_length
         nice_um = length_px * um_per_px
-    else:
-        nice_um *= HORIZ_SCALE
 
     margin = 20
     x0 = int(round(w - margin - length_px))
