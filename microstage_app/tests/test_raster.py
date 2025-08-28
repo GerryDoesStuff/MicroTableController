@@ -1,4 +1,3 @@
-import os
 import threading
 from types import SimpleNamespace
 
@@ -328,7 +327,7 @@ def test_raster_capture_contains_scale_bar(monkeypatch):
     orig_truetype = ImageFont.truetype
 
     def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+        if isinstance(font, (str, bytes)):
             raise OSError("missing font")
         return orig_truetype(font, size, *args, **kwargs)
 

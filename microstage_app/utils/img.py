@@ -1,8 +1,11 @@
 import math
+import subprocess
 
 import numpy as np
 from PySide6 import QtGui
 from PIL import Image, ImageDraw, ImageFont
+
+from .log import log
 
 # Scaling factors for the scale bar drawing used across the application
 VERT_SCALE = 2  # line thickness multiplier
@@ -84,10 +87,25 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
 
     base_font = ImageFont.load_default()
     font_size = base_font.size * TEXT_SCALE
-    try:
-        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
-    except OSError:
-        font = base_font.font_variant(size=font_size)
+    font = base_font.font_variant(size=font_size)
+
+    qapp = QtGui.QGuiApplication.instance()
+    font_path = ""
+    if qapp is not None:
+        family = qapp.font().family()
+        try:
+            res = subprocess.run(
+                ["fc-match", "-f", "%{file}\n", family],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            font_path = res.stdout.strip()
+            font = ImageFont.truetype(font_path, font_size)
+        except Exception as e:
+            log(
+                f"WARNING: failed to load scale bar font {font_path or family}: {e}; using default font"
+            )
 
     bbox = draw.textbbox((0, 0), label, font=font)
     th = bbox[3] - bbox[1]
