@@ -17,7 +17,7 @@ DEFAULTS = {
         'color_depth': 8,
         'binning': 1,
         'resolution_index': 0,
-        'display_decimation': 1,
+        'usb_speed': 5,
     },
     'scan_presets': {
         'raster': {

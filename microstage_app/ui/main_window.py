@@ -766,8 +766,8 @@ class MainWindow(QtWidgets.QMainWindow):
         c.addWidget(self.btn_roi_full, row, 0); c.addWidget(self.btn_roi_2048, row, 1); c.addWidget(self.btn_roi_1024, row, 2); row += 1
         c.addWidget(self.btn_roi_512, row, 0); row += 1
 
-        self.decim_spin = QtWidgets.QSpinBox(); self.decim_spin.setRange(1, 8); self.decim_spin.setValue(1)
-        c.addWidget(QtWidgets.QLabel("Display every Nth frame:"), row, 0); c.addWidget(self.decim_spin, row, 1); row += 1
+        self.speed_spin = QtWidgets.QSpinBox(); self.speed_spin.setRange(0, 5); self.speed_spin.setValue(5)
+        c.addWidget(QtWidgets.QLabel("USB speed level:"), row, 0); c.addWidget(self.speed_spin, row, 1); row += 1
 
         c.setRowStretch(row, 1)
         rightw.addTab(camtab, "Camera")
@@ -1000,7 +1000,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_roi_2048.clicked.connect(lambda: self._apply_roi(2048))
         self.btn_roi_1024.clicked.connect(lambda: self._apply_roi(1024))
         self.btn_roi_512.clicked.connect(lambda: self._apply_roi(512))
-        self.decim_spin.valueChanged.connect(self._apply_decimation)
+        self.speed_spin.valueChanged.connect(self._apply_speed)
 
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
@@ -1154,6 +1154,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
+            self._populate_speed_levels()
             self._apply_speed()
             # populate after stream start so all options are available
             self._populate_color_depths()
@@ -1346,6 +1347,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- CAMERA APPLY ---------------------------
 
+    def _populate_speed_levels(self):
+        if not self.camera or not hasattr(self.camera, "get_speed_range"):
+            self.speed_spin.setEnabled(False)
+            return
+        self.speed_spin.blockSignals(True)
+        try:
+            rng = self.camera.get_speed_range()
+            if rng:
+                self.speed_spin.setRange(rng[0], rng[-1])
+                cur = self.camera.get_speed_level()
+                if cur is not None:
+                    self.speed_spin.setValue(cur)
+            self.speed_spin.setEnabled(bool(rng))
+        except Exception:
+            self.speed_spin.setEnabled(False)
+        self.speed_spin.blockSignals(False)
+
     def _populate_color_depths(self):
         if not self.camera or not hasattr(self.camera, "list_color_depths"):
             self.depth_combo.clear()
@@ -1498,12 +1516,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.res_combo.setCurrentIndex(pos)
         self.res_combo.blockSignals(False)
         self._apply_resolution(self.res_combo.currentIndex())
-        # Display decimation
-        val = p.get('camera.display_decimation', self.decim_spin.value(), expected_type=(int, float))
-        self.decim_spin.blockSignals(True)
-        self.decim_spin.setValue(val)
-        self.decim_spin.blockSignals(False)
-        self._apply_decimation()
+        # USB speed level
+        val = p.get('camera.usb_speed', self.speed_spin.value(), expected_type=(int, float))
+        self.speed_spin.blockSignals(True)
+        self.speed_spin.setValue(val)
+        self.speed_spin.blockSignals(False)
+        self._apply_speed()
 
     def _sync_cam_controls(self):
         if not self.camera:
@@ -1681,12 +1699,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_speed(self):
         if not self.camera or not hasattr(self.camera, "set_speed_level"):
             return
-        # USB bandwidth is fixed at level 5
-        self.camera.set_speed_level(5)
-
-    def _apply_decimation(self):
-        if not self.camera: return
-        self.camera.set_display_decimation(int(self.decim_spin.value()))
+        self.camera.set_speed_level(int(self.speed_spin.value()))
 
     # --------------------------- STAGE OPS ---------------------------
 
@@ -2356,7 +2369,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.raw_chk, "camera.raw"),
             (self.bin_combo, "camera.binning"),
             (self.res_combo, "camera.resolution_index"),
-            (self.decim_spin, "camera.display_decimation"),
+            (self.speed_spin, "camera.usb_speed"),
             (self.lens_combo, "measurement.current_lens"),
             (self.chk_scale_bar, "ui.scale_bar"),
         ]
