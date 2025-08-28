@@ -1102,6 +1102,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_worker.enqueue(self.stage.wait_for_moves)
         self.stage_worker.enqueue(self.stage.get_position, callback=self._on_stage_position)
 
+    def _set_movement_controls_enabled(self, enabled: bool):
+        controls = [
+            self.btn_home_all,
+            self.btn_home_x,
+            self.btn_home_y,
+            self.btn_home_z,
+            self.btn_xm,
+            self.btn_xp,
+            self.btn_ym,
+            self.btn_yp,
+            self.btn_zm,
+            self.btn_zp,
+            self.btn_move_to_coords,
+        ]
+        for btn in controls:
+            btn.setEnabled(enabled)
+
     @QtCore.Slot(str)
     def _append_log(self, line: str):
         self.log_view.appendPlainText(line)
@@ -1873,6 +1890,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot()
     def _cleanup_leveling_thread(self):
+        self._set_movement_controls_enabled(True)
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
@@ -1880,6 +1898,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object, object)
     def _on_leveling_done(self, model, err):
+        self._set_movement_controls_enabled(True)
         self.btn_start_level.setEnabled(True)
         if err:
             log(f"Leveling error: {err}")
@@ -2046,6 +2065,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.focus_mgr.add_area(area)
             return model
 
+        self._set_movement_controls_enabled(False)
         t, w = run_async(do_level)
         self._level_thread, self._level_worker = t, w
         self._level_thread.finished.connect(self._cleanup_leveling_thread)
@@ -2208,6 +2228,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return True
 
         log("Raster: starting")
+        self._set_movement_controls_enabled(False)
         t, w = run_async(do_raster)
         self._raster_thread, self._raster_worker = t, w
         self.btn_run_raster.setEnabled(False)
@@ -2215,6 +2236,7 @@ class MainWindow(QtWidgets.QMainWindow):
         w.finished.connect(self._on_raster_finished)
 
     def _stop_all(self):
+        self._set_movement_controls_enabled(False)
         if self._raster_runner:
             log("Raster: stop requested")
             self._raster_runner.stop()
@@ -2237,6 +2259,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._raster_runner = None
         self._raster_thread = None
         self._raster_worker = None
+        self._set_movement_controls_enabled(True)
         self.btn_run_raster.setEnabled(True)
         self._update_stop_button()
         if self.stage_worker:
