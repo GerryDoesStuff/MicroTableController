@@ -2077,8 +2077,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.focus_mgr.areas.clear()
             self.focus_mgr.add_area(area)
             return model
-
-        self._set_movement_controls_enabled(False)
+        # Allow manual stage movement while leveling so users can position
+        # the stage if needed. Previously movement controls were disabled
+        # here which prevented manual adjustments during the leveling
+        # process.
         t, w = run_async(do_level)
         self._level_thread, self._level_worker = t, w
         self._level_thread.finished.connect(self._cleanup_leveling_thread)
