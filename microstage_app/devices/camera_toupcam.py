@@ -74,6 +74,7 @@ class ToupcamCamera:
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
         self._first_logged = False
+        self._cb_thread = None
 
         # stats / throttling
         self._display_every = 1
@@ -124,6 +125,32 @@ class ToupcamCamera:
                 self._cam.put_Option(self._tp.TOUPCAM_OPTION_RAW, 1 if self._raw_mode else 0)
         except Exception as e:
             log(f"Camera: RAW toggle not supported: {e}")
+
+    def _set_pixel_format(self, fmt):
+        """Set pixel format if supported, avoiding the callback thread."""
+        if fmt is None:
+            return False
+        if not (
+            hasattr(self._cam, "put_Option")
+            and hasattr(self._tp, "TOUPCAM_OPTION_PIXEL_FORMAT")
+        ):
+            return False
+
+        def do_set():
+            try:
+                self._cam.put_Option(self._tp.TOUPCAM_OPTION_PIXEL_FORMAT, fmt)
+            except Exception as e:
+                log(f"Camera: pixel format not supported: {e}")
+            try:
+                self._update_dimensions()
+            except Exception:
+                pass
+
+        if self._cb_thread is not None and threading.current_thread() is self._cb_thread:
+            threading.Thread(target=do_set).start()
+        else:
+            do_set()
+        return True
 
     def _init_usb_and_speed(self):
         """Query USB type and maximize bandwidth if possible."""
@@ -225,6 +252,8 @@ class ToupcamCamera:
         self._init_usb_and_speed()
 
         def _on_event(evt, ctx=None):
+            if self._cb_thread is None:
+                self._cb_thread = threading.current_thread()
             try:
                 if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001) or self._cam is None:
                     return
@@ -518,14 +547,31 @@ class ToupcamCamera:
         depth = int(depth)
         if depth not in self._color_depths:
             return
+        updated = False
         try:
             if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BITDEPTH"):
                 self._cam.put_Option(self._tp.TOUPCAM_OPTION_BITDEPTH, 1 if depth > 8 else 0)
             self._color_depth = depth
             self._bits = 16 if (self._raw_mode and depth > 8) else (8 if self._raw_mode else 24)
-            self._update_dimensions()
+            fmt = None
+            if self._raw_mode:
+                if depth <= 8:
+                    fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RAW8", None)
+                else:
+                    fmt = getattr(self._tp, f"TOUPCAM_PIXELFORMAT_RAW{depth}", None)
+                    if fmt is None:
+                        fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RAW16", None)
+            else:
+                fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RGB888", None)
+            updated = self._set_pixel_format(fmt)
         except Exception as e:
             log(f"Camera: set_color_depth failed: {e}")
+        finally:
+            if not updated:
+                try:
+                    self._update_dimensions()
+                except Exception:
+                    pass
 
     def get_resolution_index(self) -> int:
         """Return current resolution index if available."""
@@ -634,12 +680,31 @@ class ToupcamCamera:
 
     def set_raw_fast_mono(self, enable: bool):
         self._raw_mode = bool(enable)
-        self._bits = 16 if (self._raw_mode and self._color_depth > 8) else (8 if self._raw_mode else 24)
+        self._bits = 16 if (self._raw_mode and self._color_depth > 8) else (
+            8 if self._raw_mode else 24
+        )
+        updated = False
         try:
             self._force_rgb_or_raw()
+            fmt = None
+            if self._raw_mode:
+                if self._color_depth <= 8:
+                    fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RAW8", None)
+                else:
+                    fmt = getattr(self._tp, f"TOUPCAM_PIXELFORMAT_RAW{self._color_depth}", None)
+                    if fmt is None:
+                        fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RAW16", None)
+            else:
+                fmt = getattr(self._tp, "TOUPCAM_PIXELFORMAT_RGB888", None)
+            updated = self._set_pixel_format(fmt)
+        except Exception as e:
+            log(f"Camera: set_raw_fast_mono failed: {e}")
         finally:
-            # size unchanged, but stride may change with bits
-            self._update_dimensions()
+            if not updated:
+                try:
+                    self._update_dimensions()
+                except Exception:
+                    pass
             log(f"Camera: RAW8 fast mono={'ON' if self._raw_mode else 'OFF'}")
 
     def set_speed_level(self, level: int):
