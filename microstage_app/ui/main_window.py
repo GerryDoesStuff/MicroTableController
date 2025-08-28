@@ -2191,6 +2191,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage.get_position, callback=self._on_stage_position
             ),
             lens_name=self.current_lens.name,
+            scale_bar_um_per_px=self.current_lens.um_per_px if self.chk_scale_bar.isChecked() else None,
         )
         self._raster_runner = runner
 

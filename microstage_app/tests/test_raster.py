@@ -285,3 +285,22 @@ def test_raster_trapezoid_matrix():
         [(0.5, 1.5), (2.0, 1.5), (3.5, 1.5)],
         [(1.0, 3.0), (2.0, 3.0), (3.0, 3.0)],
     ]
+
+
+def test_raster_scale_bar(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1)
+    called = []
+
+    def fake_draw(img, um_per_px):
+        called.append(um_per_px)
+        return img
+
+    monkeypatch.setattr(raster, "draw_scale_bar", fake_draw)
+
+    runner = RasterRunner(stage, cam, writer, cfg, scale_bar_um_per_px=1.23)
+    runner.run()
+
+    assert called == [1.23]

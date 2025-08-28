@@ -4,6 +4,8 @@ from math import isclose
 from threading import Event
 from typing import Optional
 
+from ..utils.img import draw_scale_bar
+
 try:
     from .autofocus import AutoFocus, FocusMetric
 except Exception:  # pragma: no cover - autofocus deps may be missing
@@ -43,6 +45,7 @@ class RasterRunner:
         fmt="tif",
         position_cb=None,
         lens_name=None,
+        scale_bar_um_per_px: Optional[float] = None,
     ):
         self.stage = stage
         self.camera = camera
@@ -54,6 +57,7 @@ class RasterRunner:
         self.fmt = fmt
         self.position_cb = position_cb
         self.lens_name = lens_name
+        self.scale_bar_um_per_px = scale_bar_um_per_px
 
         self.coord_matrix = None
         self._stop = False
@@ -180,6 +184,8 @@ class RasterRunner:
                 if do_capture:
                     img = self.camera.snap()
                     if img is not None:
+                        if self.scale_bar_um_per_px is not None:
+                            img = draw_scale_bar(img, self.scale_bar_um_per_px)
                         save_c = c
                         fname = f"{self.base_name}_r{r:04d}_c{save_c:04d}"
                         pos = self.stage.get_position()
