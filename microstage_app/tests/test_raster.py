@@ -138,6 +138,23 @@ def test_raster_initial_move():
     assert stage.moves_abs == [(0.0, 0.0, 0.0)]
 
 
+def test_raster_initial_move_cancelled():
+    stage = StageMock(x=1.0, y=1.0)
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1, x1_mm=0.0, y1_mm=0.0, capture=False)
+    runner = RasterRunner(stage, cam, writer, cfg)
+
+    stop_event = threading.Event()
+    stop_event.set()
+
+    runner.run(stop_event=stop_event)
+
+    assert stage.moves_abs == []
+    assert stage.moves == []
+    assert writer.saved == []
+
+
 @pytest.mark.parametrize(
     "autofocus,capture,expected",
     [
