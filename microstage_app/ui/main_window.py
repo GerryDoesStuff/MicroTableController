@@ -367,6 +367,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_thread = None
         self._last_worker = None
 
+        # raster state
+        self._raster_runner = None
+        self._raster_thread = None
+        self._raster_worker = None
+
         # autofocus state
         self._autofocusing = False
         self._af_thread = None
@@ -805,6 +810,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
+        self.btn_stop_raster = QtWidgets.QPushButton("Stop Raster")
+        self.btn_stop_raster.setEnabled(False)
 
         r.addWidget(QtWidgets.QLabel("Mode:"), 0, 0)
         r.addWidget(self.raster_mode_combo, 0, 1)
@@ -839,7 +846,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
         r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
-        r.addWidget(self.btn_run_raster, 6, 0, 1, 6)
+        r.addWidget(self.btn_run_raster, 6, 0, 1, 3)
+        r.addWidget(self.btn_stop_raster, 6, 3, 1, 3)
         r.setRowStretch(7, 1)
         rast_box.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
 
@@ -928,6 +936,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_raster_p3.clicked.connect(lambda: self._set_raster_point(3))
         self.btn_raster_p4.clicked.connect(lambda: self._set_raster_point(4))
         self.btn_run_raster.clicked.connect(self._run_raster)
+        self.btn_stop_raster.clicked.connect(self._stop_raster)
         self.btn_reload_profiles.clicked.connect(self._reload_profiles)
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
@@ -2066,35 +2075,50 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
+        runner = RasterRunner(
+            self.stage,
+            self.camera,
+            self.image_writer,
+            cfg,
+            directory=directory,
+            base_name=name,
+            auto_number=auto_num,
+            fmt=fmt,
+            position_cb=lambda pos: self.stage_worker.enqueue(
+                self.stage.get_position, callback=self._on_stage_position
+            ),
+            lens_name=self.current_lens.name,
+        )
+        self._raster_runner = runner
+
         def do_raster():
-            runner = RasterRunner(
-                self.stage,
-                self.camera,
-                self.image_writer,
-                cfg,
-                directory=directory,
-                base_name=name,
-                auto_number=auto_num,
-                fmt=fmt,
-                position_cb=lambda pos: self.stage_worker.enqueue(
-                    self.stage.get_position, callback=self._on_stage_position
-                ),
-                lens_name=self.current_lens.name,
-            )
             runner.run()
             return True
 
         log("Raster: starting")
         t, w = run_async(do_raster)
-        self._last_thread, self._last_worker = t, w
-        w.finished.connect(
-            lambda *_: self.stage_worker.enqueue(
+        self._raster_thread, self._raster_worker = t, w
+        self.btn_run_raster.setEnabled(False)
+        self.btn_stop_raster.setEnabled(True)
+        w.finished.connect(self._on_raster_finished)
+
+    def _stop_raster(self):
+        if self._raster_runner:
+            log("Raster: stop requested")
+            self._raster_runner.stop()
+
+    @QtCore.Slot(object, object)
+    def _on_raster_finished(self, res, err):
+        self._raster_runner = None
+        self._raster_thread = None
+        self._raster_worker = None
+        self.btn_run_raster.setEnabled(True)
+        self.btn_stop_raster.setEnabled(False)
+        if self.stage_worker:
+            self.stage_worker.enqueue(
                 self.stage.get_position, callback=self._on_stage_position
             )
-        )
-        w.finished.connect(
-            lambda res, err: log("Raster: done" if not err else f"Raster error: {err}")
-        )
+        log("Raster: done" if not err else f"Raster error: {err}")
 
     def _run_example_script(self):
         if not (self.stage and self.camera):
