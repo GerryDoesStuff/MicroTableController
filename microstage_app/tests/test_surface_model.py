@@ -1,4 +1,5 @@
 import numpy as np
+import re
 
 from microstage_app.control.focus_planes import SurfaceModel, SurfaceKind
 
@@ -101,4 +102,13 @@ def test_surface_model_cubic_coefficients():
     m = SurfaceModel(kind=SurfaceKind.CUBIC)
     m.fit(pts)
     assert np.allclose(m.coeffs, [a, b, c, d, e, f, g, h, i, j])
+
+
+def test_surface_model_equation_linear():
+    pts = [(0, 0, 0), (1, 0, 1), (0, 1, 1)]
+    m = SurfaceModel(kind=SurfaceKind.LINEAR)
+    m.fit(pts)
+    eq = m.equation()
+    nums = [float(n) for n in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", eq)]
+    assert np.allclose(nums, m.coeffs)
 

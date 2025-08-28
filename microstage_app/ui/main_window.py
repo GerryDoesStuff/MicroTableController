@@ -1919,7 +1919,13 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
         else:
             self._set_leveling_status("Complete")
-            QtWidgets.QMessageBox.information(self, "Leveling", "Leveling complete.")
+            eq = model.equation() if model else ""
+            log(f"Leveling model ({model.kind.value}): {eq}")
+            QtWidgets.QMessageBox.information(
+                self,
+                "Leveling",
+                f"Leveling complete.\n{model.kind.value} model: {eq}",
+            )
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):

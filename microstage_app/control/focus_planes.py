@@ -76,6 +76,28 @@ class SurfaceModel:
         else:
             raise ValueError(self.kind)
 
+    def equation(self) -> str:
+        """Return a human-readable equation for the surface."""
+        coeffs = [f"{c:.6g}" for c in self.coeffs]
+        if self.kind is SurfaceKind.LINEAR:
+            a, b, c = coeffs
+            return f"z = {a} + {b}*x + {c}*y"
+        elif self.kind is SurfaceKind.QUADRATIC:
+            a, b, c, d, e, f = coeffs
+            return (
+                "z = "
+                f"{a} + {b}*x + {c}*y + {d}*x^2 + {e}*x*y + {f}*y^2"
+            )
+        elif self.kind is SurfaceKind.CUBIC:
+            a, b, c, d, e, f, g, h, i, j = coeffs
+            return (
+                "z = "
+                f"{a} + {b}*x + {c}*y + {d}*x^2 + {e}*x*y + {f}*y^2 "
+                f"+ {g}*x^3 + {h}*x^2*y + {i}*x*y^2 + {j}*y^3"
+            )
+        else:
+            raise ValueError(self.kind)
+
 @dataclass
 class Area:
     name: str
