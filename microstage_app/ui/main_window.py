@@ -332,6 +332,7 @@ class MeasureView(QtWidgets.QGraphicsView):
             self._live_line = None
             self._live_ticks = []
             self._live_text = None
+            self._mode = None
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
