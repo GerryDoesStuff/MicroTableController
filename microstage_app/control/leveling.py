@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from threading import Event
 from typing import Iterable, Sequence, Tuple, List
 
 try:
@@ -25,6 +26,7 @@ def three_point_level(
     camera,
     points: Sequence[Tuple[float, float]],
     mode: LevelingMode = LevelingMode.LINEAR,
+    stop_event: Event | None = None,
 ) -> SurfaceModel:
     """Fit a focus surface from measurements at multiple XY points.
 
@@ -39,6 +41,9 @@ def three_point_level(
         XY coordinates in millimetres to probe.
     mode : LevelingMode
         Surface fitting model to use.
+    stop_event : threading.Event, optional
+        Event used to signal cancellation. If set, probing stops and a
+        ``RuntimeError`` is raised.
 
     Returns
     -------
@@ -49,6 +54,9 @@ def three_point_level(
     ------
     ValueError
         If insufficient points are supplied for the requested ``mode``.
+    RuntimeError
+        If ``stop_event`` is set during execution or the stage fails to
+        return a valid position.
     """
 
     required = {
@@ -64,8 +72,12 @@ def three_point_level(
 
     samples: List[Tuple[float, float, float]] = []
     for x, y in points:
+        if stop_event and stop_event.is_set():
+            raise RuntimeError("operation cancelled")
         stage.move_absolute(x=x, y=y)
         stage.wait_for_moves()
+        if stop_event and stop_event.is_set():
+            raise RuntimeError("operation cancelled")
 
         if AutoFocus and camera is not None:  # pragma: no branch
             try:
@@ -117,11 +129,43 @@ def _probe_point(
     x: float,
     y: float,
     autofocus: bool,
+    stop_event: Event | None = None,
 ) -> Tuple[float, float, float]:
-    """Move to ``(x, y)`` and record the current Z position."""
+    """Move to ``(x, y)`` and record the current Z position.
+
+    Parameters
+    ----------
+    stage : Stage-like object
+        Provides movement and position queries.
+    camera : camera-like object
+        Used with :class:`AutoFocus` when ``autofocus`` is True.
+    x, y : float
+        XY coordinates in millimetres to probe.
+    autofocus : bool
+        Whether to run autofocus at the point or wait for manual focus.
+    stop_event : threading.Event, optional
+        Event used to signal cancellation. When set, a ``RuntimeError``
+        is raised.
+
+    Returns
+    -------
+    Tuple[float, float, float]
+        The probed ``(x, y, z)`` position.
+
+    Raises
+    ------
+    RuntimeError
+        If the stage fails to report a position or ``stop_event`` is set.
+    """
+
+    if stop_event and stop_event.is_set():
+        raise RuntimeError("operation cancelled")
 
     stage.move_absolute(x=x, y=y)
     stage.wait_for_moves()
+
+    if stop_event and stop_event.is_set():
+        raise RuntimeError("operation cancelled")
 
     if autofocus:
         if AutoFocus and camera is not None:  # pragma: no branch
@@ -133,6 +177,9 @@ def _probe_point(
                 pass
     else:
         input("Focus at the current point and press Enter to continue...")
+
+    if stop_event and stop_event.is_set():
+        raise RuntimeError("operation cancelled")
 
     pos = stage.get_position()
     if pos is None or len(pos) < 3:
@@ -148,6 +195,7 @@ def grid_level(
     cols: int,
     mode: LevelingMode = LevelingMode.LINEAR,
     autofocus: bool = True,
+    stop_event: Event | None = None,
 ) -> SurfaceModel:
     """Fit a surface model by probing a grid of points.
 
@@ -168,17 +216,28 @@ def grid_level(
     autofocus : bool, default True
         If True use autofocus at each node, otherwise wait for user
         confirmation after manual focusing.
+    stop_event : threading.Event, optional
+        Event used to signal cancellation. If set, a ``RuntimeError`` is
+        raised.
 
     Returns
     -------
     SurfaceModel
         Fitted surface model for the probed grid points.
+    
+    Raises
+    ------
+    RuntimeError
+        If ``stop_event`` is set during execution or a probe fails to
+        return a valid position.
     """
 
-    samples = [
-        _probe_point(stage, camera, x, y, autofocus)
-        for x, y in _grid_coords(rect, rows, cols)
-    ]
+    samples: List[Tuple[float, float, float]] = []
+    for x, y in _grid_coords(rect, rows, cols):
+        if stop_event and stop_event.is_set():
+            raise RuntimeError("operation cancelled")
+        samples.append(_probe_point(stage, camera, x, y, autofocus, stop_event))
+
     model = SurfaceModel(kind=SurfaceKind(mode.value))
     model.fit(samples)
     return model
