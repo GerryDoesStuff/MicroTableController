@@ -214,19 +214,19 @@ class StageMarlin:
         # machine coordinates remain.
         before_count = re.split(r"count", resp, flags=re.IGNORECASE)[0]
         x = y = z = None
-        m = re.search(r"X:\s*([-+]?\d*\.?\d+)", before_count)
+        m = re.search(r"X:\s*([-+]?\d*\.?\d+)", before_count, flags=re.IGNORECASE)
         if m:
             try:
                 x = float(m.group(1))
             except ValueError:
                 pass
-        m = re.search(r"Y:\s*([-+]?\d*\.?\d+)", before_count)
+        m = re.search(r"Y:\s*([-+]?\d*\.?\d+)", before_count, flags=re.IGNORECASE)
         if m:
             try:
                 y = float(m.group(1))
             except ValueError:
                 pass
-        m = re.search(r"Z:\s*([-+]?\d*\.?\d+)", before_count)
+        m = re.search(r"Z:\s*([-+]?\d*\.?\d+)", before_count, flags=re.IGNORECASE)
         if m:
             try:
                 z = float(m.group(1))

@@ -24,9 +24,10 @@ def qt_app():
 
 
 def test_get_position_and_label(monkeypatch, qt_app):
+    # Use lowercase axis labels to ensure parsing is case-insensitive
     responses = [
-        "X:1.00 Y:0.00 Z:1.00 E:0.00 count X:0 Y:0 Z:0",
-        "X:1.00 Y:0.00 Z:2.00 E:0.00 count X:0 Y:0 Z:0",
+        "x:1.00 y:0.00 z:1.00 e:0.00 count x:0 y:0 z:0",
+        "x:1.00 y:0.00 z:2.00 e:0.00 count x:0 y:0 z:0",
     ]
     stage = FakeStage(responses)
     x1, _, z1 = stage.get_position()
