@@ -1,8 +1,13 @@
+import os
 import threading
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+from PIL import ImageFont
 
 import microstage_app.control.raster as raster
 from microstage_app.control.raster import RasterRunner, RasterConfig
-import pytest
 
 class StageMock:
     def __init__(self, x=0.0, y=0.0, z=0.0):
@@ -304,3 +309,38 @@ def test_raster_scale_bar(monkeypatch):
     runner.run()
 
     assert called == [1.23]
+
+
+def test_raster_capture_contains_scale_bar(monkeypatch):
+    stage = StageMock()
+    cam = SimpleNamespace(
+        snap=lambda: np.zeros((100, 200, 3), dtype=np.uint8),
+        name=lambda: "CameraMock",
+    )
+    saved = {}
+    writer = SimpleNamespace(
+        save_single=lambda img, **kw: saved.setdefault("img", img)
+    )
+    cfg = RasterConfig(rows=1, cols=1)
+
+    monkeypatch.setattr(raster.time, "sleep", lambda s: None)
+
+    orig_truetype = ImageFont.truetype
+
+    def fake_truetype(font, size=10, *args, **kwargs):
+        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+            raise OSError("missing font")
+        return orig_truetype(font, size, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", fake_truetype)
+
+    runner = RasterRunner(stage, cam, writer, cfg, scale_bar_um_per_px=1.0)
+    runner.run()
+
+    out = saved["img"]
+    bar_row = out[80]
+    bar_pixels = np.where(np.all(bar_row == 255, axis=1))[0]
+    assert bar_pixels[0] == 160
+    assert bar_pixels[-1] - bar_pixels[0] == 20
+    assert np.all(bar_row[:160] == 0)
+    assert np.all(bar_row[181:] == 0)
