@@ -492,6 +492,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_signals()
         self._init_persistent_fields()
         self._update_leveling_method()
+        self._update_raster_controls()
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
