@@ -392,6 +392,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # focus plane manager
         self.focus_mgr = FocusPlaneManager()
+        # flag indicating whether leveling corrections are applied
+        self.leveling_enabled = False
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -769,7 +771,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
         self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
         self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
-        self.level_status = QtWidgets.QLabel("Idle")
+        self.btn_apply_level = QtWidgets.QPushButton("Apply Leveling")
+        self.btn_disable_level = QtWidgets.QPushButton("Disable Leveling")
+        self.level_status = QtWidgets.QLabel("Disabled")
         row = 0
         l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
@@ -777,6 +781,8 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
         l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
+        l.addWidget(self.btn_apply_level, row, 0, 1, 2); row += 1
+        l.addWidget(self.btn_disable_level, row, 0, 1, 2); row += 1
         l.addWidget(self.level_status, row, 0, 1, 2)
         a.addWidget(lvl_box)
 
@@ -929,6 +935,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
         self.btn_start_level.clicked.connect(self._run_leveling)
+        self.btn_apply_level.clicked.connect(self._apply_leveling)
+        self.btn_disable_level.clicked.connect(self._disable_leveling)
         self.level_method.currentTextChanged.connect(self._update_leveling_method)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
         self.btn_raster_p1.clicked.connect(lambda: self._set_raster_point(1))
@@ -1069,6 +1077,8 @@ class MainWindow(QtWidgets.QMainWindow):
         x = self.absx_spin.value()
         y = self.absy_spin.value()
         z = self.absz_spin.value()
+        if self.leveling_enabled:
+            z += self.focus_mgr.z_offset(x, y, z)
         feed = max(self.feedx_spin.value(), self.feedy_spin.value(), self.feedz_spin.value())
         log(f"Move to: x={x} y={y} z={z} F={feed}")
         self.stage_worker.enqueue(self.stage.move_absolute, x, y, z, feed, True)
@@ -1683,15 +1693,33 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         f = max(1.0, float(feed))
         log(f"Jog: dx={dx} dy={dy} dz={dz} F={f}")
-        self.stage_worker.enqueue(
-            self.stage.move_relative,
-            dx,
-            dy,
-            dz,
-            f,
-            wait_ok,
-            callback=callback,
-        )
+        if self.leveling_enabled:
+            x0 = self._last_pos["x"] or 0.0
+            y0 = self._last_pos["y"] or 0.0
+            z0 = self._last_pos["z"] or 0.0
+            x = x0 + dx
+            y = y0 + dy
+            z = z0 + dz
+            z += self.focus_mgr.z_offset(x, y, z)
+            self.stage_worker.enqueue(
+                self.stage.move_absolute,
+                x,
+                y,
+                z,
+                f,
+                wait_ok,
+                callback=callback,
+            )
+        else:
+            self.stage_worker.enqueue(
+                self.stage.move_relative,
+                dx,
+                dy,
+                dz,
+                f,
+                wait_ok,
+                callback=callback,
+            )
         self.stage_worker.enqueue(self.stage.wait_for_moves)
         self.stage_worker.enqueue(
             self.stage.get_position, callback=self._on_stage_position
@@ -1846,6 +1874,21 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
         self.level_status.setText(text)
+
+    @QtCore.Slot()
+    def _apply_leveling(self):
+        if self.focus_mgr.areas:
+            self.leveling_enabled = True
+            self._set_leveling_status("Enabled")
+        else:
+            QtWidgets.QMessageBox.warning(
+                self, "Leveling", "No leveling data to apply.")
+
+    @QtCore.Slot()
+    def _disable_leveling(self):
+        self.focus_mgr.areas.clear()
+        self.leveling_enabled = False
+        self._set_leveling_status("Disabled")
 
     @QtCore.Slot(int, int)
     def _prompt_manual_focus(self, idx: int, total: int):
