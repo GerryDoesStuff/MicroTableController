@@ -45,6 +45,11 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
 
     h, w, _ = img.shape
 
+    # Scaling factors for the scale bar drawing
+    VERT_SCALE = 2  # line thickness multiplier
+    HORIZ_SCALE = 8  # bar length multiplier
+    TEXT_SCALE = 4  # font size multiplier
+
     # Compute a "nice" length that fits within ~20% of the image width
     max_um = 0.2 * w * um_per_px
     exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
@@ -55,21 +60,39 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
             nice_um = candidate
             break
 
-    length_px = int(round(nice_um / um_per_px))
+    # Scale the length horizontally and clamp to image bounds
+    length_px = int(round(nice_um / um_per_px)) * HORIZ_SCALE
+    max_length = w - 40  # leave 20px margin on each side
+    if length_px > max_length:
+        length_px = max_length
+        nice_um = length_px * um_per_px
+    else:
+        nice_um *= HORIZ_SCALE
+
     margin = 20
     x0 = int(round(w - margin - length_px))
     y0 = int(round(h - margin))
 
     pil = Image.fromarray(img)
     draw = ImageDraw.Draw(pil)
-    draw.line([(x0, y0), (x0 + length_px, y0)], fill=(255, 255, 255), width=2)
+    draw.line(
+        [(x0, y0), (x0 + length_px, y0)],
+        fill=(255, 255, 255),
+        width=2 * VERT_SCALE,
+    )
 
     label = (
         f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
     )
     font = ImageFont.load_default()
+    font = font.font_variant(size=font.size * TEXT_SCALE)
     bbox = draw.textbbox((0, 0), label, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((x0, y0 - 7 - th), label, fill=(255, 255, 255), font=font)
+    th = bbox[3] - bbox[1]
+    draw.text(
+        (x0, y0 - (7 * TEXT_SCALE) - th),
+        label,
+        fill=(255, 255, 255),
+        font=font,
+    )
 
     return np.array(pil)
