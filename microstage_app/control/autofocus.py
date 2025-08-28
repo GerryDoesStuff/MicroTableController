@@ -100,7 +100,7 @@ class AutoFocus:
         directory: Optional[str] = None,
         metric: Optional[FocusMetric] = None,
         feed_mm_per_min: float = 240,
-        fmt: str = "bmp",
+        fmt: str = "png",
         lens_name: Optional[str] = None,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.

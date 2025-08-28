@@ -43,7 +43,7 @@ DEFAULTS = {
         }
     },
     # persistent capture settings
-    'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'bmp'},
+    'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'png'},
     # jog UI persistence
     'jog': {
         'step': {'x': 0.1, 'y': 0.1, 'z': 0.1},

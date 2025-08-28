@@ -55,7 +55,6 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
     win.capture_dir = str(tmp_path)
     win.capture_name = "img"
     win.auto_number = False
-    win.capture_format = "bmp"
     win.chk_scale_bar.setChecked(True)
     win.current_lens = Lens("test", 1.0)
 

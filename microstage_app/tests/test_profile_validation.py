@@ -42,9 +42,9 @@ def test_invalid_profile_values(monkeypatch, tmp_path, qt_app):
     assert win.stepx_spin.value() == pytest.approx(0.100)
     # out-of-range value should fall back to default
     assert win.feedx_spin.value() == pytest.approx(50.0)
-    # invalid capture format should fall back to bmp
-    assert win.capture_format == "bmp"
-    assert win.format_combo.currentText() == "BMP"
+    # invalid capture format should fall back to png
+    assert win.capture_format == "png"
+    assert win.format_combo.currentText() == "PNG"
 
     win.preview_timer.stop(); win.fps_timer.stop(); win.close()
 
