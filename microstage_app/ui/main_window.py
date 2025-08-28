@@ -2340,6 +2340,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(object, object)
     def _on_raster_finished(self, res, err):
+        thread = self._raster_thread
+        if thread and thread.isRunning():
+            thread.wait()
         self._raster_runner = None
         self._raster_thread = None
         self._raster_worker = None
