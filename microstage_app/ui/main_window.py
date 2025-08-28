@@ -2179,18 +2179,89 @@ class MainWindow(QtWidgets.QMainWindow):
                 self, "Raster", "A raster operation is already in progress."
             )
             return
-        cfg = RasterConfig(
+        cfg_kwargs = dict(
             rows=self.rows_spin.value(),
             cols=self.cols_spin.value(),
-            x1_mm=self.rast_x1_spin.value(),
-            y1_mm=self.rast_y1_spin.value(),
-            x2_mm=self.rast_x2_spin.value(),
-            y2_mm=self.rast_y2_spin.value(),
             feed_x_mm_min=self.feedx_spin.value(),
             feed_y_mm_min=self.feedy_spin.value(),
             autofocus=self.chk_raster_af.isChecked(),
             capture=self.chk_raster_capture.isChecked(),
         )
+        # common required points
+        x1 = self.rast_x1_spin.value()
+        y1 = self.rast_y1_spin.value()
+        x2 = self.rast_x2_spin.value()
+        y2 = self.rast_y2_spin.value()
+        mode = self.raster_mode_combo.currentText()
+
+        if mode == "2-point":
+            if x1 == x2 and y1 == y2:
+                QtWidgets.QMessageBox.warning(
+                    self, "Raster", "Points 1 and 2 must be distinct."
+                )
+                return
+            left, right = sorted([x1, x2])
+            top, bottom = sorted([y1, y2])
+            cfg_kwargs.update(
+                x1_mm=left,
+                y1_mm=top,
+                x2_mm=right,
+                y2_mm=top,
+                x3_mm=left,
+                y3_mm=bottom,
+                x4_mm=right,
+                y4_mm=bottom,
+                mode="rectangle",
+            )
+        elif mode == "3-point":
+            x3 = self.rast_x3_spin.value()
+            y3 = self.rast_y3_spin.value()
+            if (x3, y3) in [(x1, y1), (x2, y2)]:
+                QtWidgets.QMessageBox.warning(
+                    self, "Raster", "Point 3 must be distinct from points 1 and 2."
+                )
+                return
+            cfg_kwargs.update(
+                x1_mm=x1,
+                y1_mm=y1,
+                x2_mm=x2,
+                y2_mm=y2,
+                x3_mm=x3,
+                y3_mm=y3,
+                mode="parallelogram",
+            )
+        elif mode == "4-point":
+            x3 = self.rast_x3_spin.value()
+            y3 = self.rast_y3_spin.value()
+            x4 = self.rast_x4_spin.value()
+            y4 = self.rast_y4_spin.value()
+            points = [(x1, y1), (x2, y2), (x3, y3), (x4, y4)]
+            if len(set(points)) < 4:
+                QtWidgets.QMessageBox.warning(
+                    self, "Raster", "All four points must be distinct."
+                )
+                return
+            cfg_kwargs.update(
+                x1_mm=x1,
+                y1_mm=y1,
+                x2_mm=x2,
+                y2_mm=y2,
+                x3_mm=x3,
+                y3_mm=y3,
+                x4_mm=x4,
+                y4_mm=y4,
+                mode="trapezoid",
+            )
+        else:
+            cfg_kwargs.update(
+                x1_mm=x1,
+                y1_mm=y1,
+                x2_mm=x2,
+                y2_mm=y2,
+                mode="rectangle",
+            )
+
+        cfg = RasterConfig(**cfg_kwargs)
 
         directory = self.capture_dir
         name = self.capture_name
