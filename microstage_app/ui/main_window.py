@@ -108,12 +108,14 @@ class MeasureView(QtWidgets.QGraphicsView):
         br = self._pixmap.boundingRect()
         painter.save()
         if self._reticle_enabled:
+            painter.save()
             cx = br.center().x()
             cy = br.center().y()
             painter.setCompositionMode(QtGui.QPainter.CompositionMode_Difference)
             painter.setPen(QtGui.QPen(QtCore.Qt.white))
             painter.drawLine(QtCore.QLineF(br.left(), cy, br.right(), cy))
             painter.drawLine(QtCore.QLineF(cx, br.top(), cx, br.bottom()))
+            painter.restore()
 
         if self._scale_bar_enabled and self._scale_um_per_px > 0:
             # compute a "nice" length that fits within ~20% of the image width
