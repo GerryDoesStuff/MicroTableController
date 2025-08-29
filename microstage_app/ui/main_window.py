@@ -1,5 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
+from .system_monitor_tab import SystemMonitorTab
+
 import numpy as np
 import cv2
 
@@ -923,6 +925,11 @@ class MainWindow(QtWidgets.QMainWindow):
         s.addWidget(self.btn_run_example_script)
         s.addStretch(1)
         rightw.addTab(scripts, "Scripts")
+
+        # ---- System monitor tab
+        self.system_tab = SystemMonitorTab()
+        rightw.addTab(self.system_tab, "System")
+        self.system_tab.start()
 
         # log pane
         self.log_view = QtWidgets.QPlainTextEdit()
@@ -2697,5 +2704,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.camera.stop_stream()
                 except Exception:
                     pass
+            if hasattr(self, "system_tab"):
+                self.system_tab.stop()
         finally:
             return super().closeEvent(e)

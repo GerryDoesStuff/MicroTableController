@@ -13,9 +13,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```
    On Linux, OpenCV (`opencv-python`) requires the system library `libGL.so.1`.
    Install it via your package manager, e.g. `sudo apt-get install -y libgl1`,
- or run the helper script `scripts/install_libgl1.sh`. For headless setups,
+  or run the helper script `scripts/install_libgl1.sh`. For headless setups,
   you may instead install `opencv-python-headless` to avoid the `libGL`
-  dependency.
+  dependency. The system monitor tab uses `psutil`; NVIDIA GPU metrics also
+  require the optional `nvidia-ml-py3` package and appropriate drivers.
 
    Optional GPU acceleration for captures and autofocus metrics is available
    when OpenCV is built with CUDA modules. The application automatically
@@ -56,6 +57,8 @@ will be enabled.
 - Validated capture directory/filename fields with optional auto-numbering to prevent overwrites.
 - Optional CUDA acceleration for capture, autofocus metrics, and scale-bar
   drawing when OpenCV is built with CUDA; falls back to CPU otherwise.
+- System monitor tab displaying CPU load and, when supported, NVIDIA GPU
+  utilization via NVML.
 
 ## Capture directory & file naming
 
