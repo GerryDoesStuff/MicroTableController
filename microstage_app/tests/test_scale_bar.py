@@ -193,3 +193,34 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     x_end = int(min(w, x0 + pre + mu_w))
     mu_region = out[y_text : y_text + th, x_start:x_end]
     assert mu_region.size > 0 and np.any(mu_region == 255)
+
+
+def test_selecting_lens_updates_scale_bar(monkeypatch, qt_app):
+    """Changing the lens selection updates the scale bar calibration."""
+    monkeypatch.setattr(mw.MainWindow, "_auto_connect_async", lambda self: None)
+    win = mw.MainWindow()
+
+    lens_a = Lens("5x", 2.0)
+    lens_b = Lens("10x", 1.0)
+    win.lenses = {lens_a.name: lens_a, lens_b.name: lens_b}
+    win.current_lens = lens_a
+    win._refresh_lens_combo()
+
+    win.chk_scale_bar.setChecked(True)
+    captured = {}
+
+    def fake_set_scale_bar(enabled, um_per_px):
+        captured["enabled"] = enabled
+        captured["um_per_px"] = um_per_px
+
+    monkeypatch.setattr(win.measure_view, "set_scale_bar", fake_set_scale_bar)
+
+    idx = win.lens_combo.findData("10x")
+    win.lens_combo.setCurrentIndex(idx)
+
+    assert captured["enabled"] is True
+    assert captured["um_per_px"] == pytest.approx(1.0)
+
+    win.preview_timer.stop()
+    win.fps_timer.stop()
+    win.close()
