@@ -85,6 +85,7 @@ def test_raster_traversal_modes(mode, serpentine):
     # expected moves and filenames
     expected_moves = []
     expected_files = []
+    expected_meta = []
     current_x, current_y = coord_matrix[0][0]
     for r in range(cfg.rows):
         forward = (r % 2 == 0) or (not serpentine)
@@ -97,9 +98,12 @@ def test_raster_traversal_modes(mode, serpentine):
                 expected_moves.append((dx, dy, 0.0))
             current_x, current_y = target_x, target_y
             expected_files.append(f"foo_r{r:04d}_c{c:04d}")
+            expected_meta.append((r, c))
 
     assert stage.moves == expected_moves
     assert [f[2] for f in writer.saved] == expected_files
+    assert [m[5]["Row"] for m in writer.saved] == [r for r, _ in expected_meta]
+    assert [m[5]["Column"] for m in writer.saved] == [c for _, c in expected_meta]
 
 
 def test_raster_capture_disabled():

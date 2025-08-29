@@ -27,6 +27,7 @@ import os
 import re
 import time
 import math
+import datetime
 
 
 def _load_stage_bounds():
@@ -1845,6 +1846,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     "Camera": self.camera.name(),
                     "Position": pos,
                     "Lens": self.current_lens.name,
+                    "LensUmPerPx": self.current_lens.um_per_px,
+                    "Exposure_ms": getattr(self.camera, "get_exposure_ms", lambda: None)(),
+                    "Gain": getattr(self.camera, "get_gain", lambda: None)(),
+                    "Time": datetime.datetime.now().isoformat(),
                 }
                 self.image_writer.save_single(
                     img,
@@ -2324,6 +2329,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage.get_position, callback=self._on_stage_position
             ),
             lens_name=self.current_lens.name,
+            lens_um_per_px=self.current_lens.um_per_px,
             scale_bar_um_per_px=self.current_lens.um_per_px if self.chk_scale_bar.isChecked() else None,
         )
         self._raster_runner = runner
