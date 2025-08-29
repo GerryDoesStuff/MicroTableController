@@ -7,6 +7,33 @@ from ..config import EXPECTED_MACHINE_NAME, EXPECTED_MACHINE_UUID
 
 BAUD = 250000  # fixed baud
 
+
+def list_marlin_ports(time_wait: float = 2.0, machine_name: str = EXPECTED_MACHINE_NAME):
+    """Return a list of serial ports providing a compatible Marlin stage."""
+
+    ports = list(list_ports.comports())
+    matches = []
+    for p in ports:
+        if not p.device:
+            continue
+        try:
+            log(f"Stage: probing {p.device} @ {BAUD}")
+            with serial.Serial(p.device, baudrate=BAUD, timeout=1.0, write_timeout=1.0) as ser:
+                time.sleep(time_wait)
+                ser.reset_input_buffer()
+                ser.write(b"M115\n")
+                time.sleep(0.3)
+                resp = ser.read(4096).decode(errors="ignore").lower()
+                if "firmware_name:marlin" not in resp:
+                    continue
+                if machine_name and machine_name.lower() not in resp:
+                    continue
+                matches.append(p.device)
+        except Exception:
+            continue
+    return matches
+
+
 def find_marlin_port(
     time_wait: float = 2.0,
     machine_name: str = EXPECTED_MACHINE_NAME,
@@ -84,12 +111,17 @@ def find_marlin_port(
 class StageMarlin:
     def __init__(self, port, baud=BAUD, timeout=1.0):
         from ..utils.log import log
+        self._port = port
         self.ser = serial.Serial(port, baudrate=baud, timeout=timeout, write_timeout=timeout)
         log(f"Stage: opened {port} @ {baud}")
         time.sleep(2.0)  # give the board time after auto-reset
         self._drain_input()
         self._send_log("M110 N0")  # reset line numbers
         self.absolute_mode()
+
+    @property
+    def port(self):
+        return self._port
         
     def _drain_input(self):
         try:

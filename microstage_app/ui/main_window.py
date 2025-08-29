@@ -2,8 +2,8 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 import numpy as np
 
-from ..devices.stage_marlin import StageMarlin, find_marlin_port
-from ..devices.camera_toupcam import create_camera
+from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
+from ..devices.camera_toupcam import create_camera, list_cameras
 
 from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
@@ -420,7 +420,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 # legacy flat value
                 lens = Lens(name, float(cfg))
-            self.lenses[name] = lens
+        self.lenses[name] = lens
         cur_name = self.profiles.get('measurement.current_lens', '10x', expected_type=str)
         self.current_lens = self.lenses.get(cur_name)
         if not self.current_lens:
@@ -439,6 +439,12 @@ class MainWindow(QtWidgets.QMainWindow):
             log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'png'")
             fmt = 'png'
         self.capture_format = fmt
+
+        # placeholders for legacy connect/disconnect buttons moved to the menu
+        self.btn_stage_connect = None
+        self.btn_stage_disconnect = None
+        self.btn_cam_connect = None
+        self.btn_cam_disconnect = None
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -520,6 +526,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.toolbar.addWidget(self.measure_button)
 
+        # Menu for device selection
+        devices_menu = self.menuBar().addMenu("Devices")
+        self.act_show_cameras = devices_menu.addAction("Cameras")
+        self.act_show_stages = devices_menu.addAction("Stages")
+        self.act_show_cameras.triggered.connect(self._show_camera_dialog)
+        self.act_show_stages.triggered.connect(self._show_stage_dialog)
+
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
         left = QtWidgets.QVBoxLayout(leftw)
@@ -529,21 +542,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_pos.setTextInteractionFlags(
             QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard
         )
-        self.btn_stage_connect = QtWidgets.QPushButton("Connect Stage")
-        self.btn_stage_disconnect = QtWidgets.QPushButton("Disconnect Stage")
         self.cam_status = QtWidgets.QLabel("Camera: —")
-        self.btn_cam_connect = QtWidgets.QPushButton("Connect Camera")
-        self.btn_cam_disconnect = QtWidgets.QPushButton("Disconnect Camera")
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
         left.addWidget(self.stage_status)
-        left.addWidget(self.btn_stage_connect)
-        left.addWidget(self.btn_stage_disconnect)
-        left.addSpacing(8)
         left.addWidget(self.cam_status)
-        left.addWidget(self.btn_cam_connect)
-        left.addWidget(self.btn_cam_disconnect)
         left.addSpacing(8)
         left.addWidget(self.profile_label)
         left.addWidget(self.profile_combo)
@@ -926,8 +930,6 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(vsplit)
 
         self._reload_profiles()
-        self._update_stage_buttons()
-        self._update_cam_buttons()
         self._update_raster_mode()
 
     def _refresh_lens_combo(self):
@@ -957,10 +959,6 @@ class MainWindow(QtWidgets.QMainWindow):
             w.setEnabled(p4)
 
     def _connect_signals(self):
-        self.btn_stage_connect.clicked.connect(self._connect_stage_async)
-        self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
-        self.btn_cam_connect.clicked.connect(self._connect_camera)
-        self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
@@ -1172,14 +1170,62 @@ class MainWindow(QtWidgets.QMainWindow):
         if cb:
             QtCore.QTimer.singleShot(0, lambda r=res: cb(r))
 
+    def _show_camera_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Cameras")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lst = QtWidgets.QListWidget()
+        lay.addWidget(lst)
+        for dev_id, name in list_cameras():
+            item = QtWidgets.QListWidgetItem(name)
+            item.setData(QtCore.Qt.UserRole, dev_id)
+            if self.camera and getattr(self.camera, "device_id", None) == dev_id:
+                item.setCheckState(QtCore.Qt.Checked)
+            lst.addItem(item)
+        lst.itemDoubleClicked.connect(lambda it: self._on_camera_item_double(it, dlg))
+        dlg.exec()
+
+    def _on_camera_item_double(self, item, dlg):
+        dev_id = item.data(QtCore.Qt.UserRole)
+        if self.camera and getattr(self.camera, "device_id", None) == dev_id:
+            self._disconnect_camera()
+        else:
+            self._disconnect_camera()
+            self._connect_camera(dev_id)
+        dlg.accept()
+
+    def _show_stage_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Stages")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lst = QtWidgets.QListWidget()
+        lay.addWidget(lst)
+        for port in list_marlin_ports():
+            item = QtWidgets.QListWidgetItem(port)
+            item.setData(QtCore.Qt.UserRole, port)
+            if self.stage and getattr(self.stage, "port", None) == port:
+                item.setCheckState(QtCore.Qt.Checked)
+            lst.addItem(item)
+        lst.itemDoubleClicked.connect(lambda it: self._on_stage_item_double(it, dlg))
+        dlg.exec()
+
+    def _on_stage_item_double(self, item, dlg):
+        port = item.data(QtCore.Qt.UserRole)
+        if self.stage and getattr(self.stage, "port", None) == port:
+            self._disconnect_stage()
+        else:
+            self._disconnect_stage()
+            self._connect_stage_async(port)
+        dlg.accept()
+
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
-    def _connect_camera(self):
+    def _connect_camera(self, dev_id=None):
         if self.camera is not None:
             log("UI: camera already connected; skip re-open")
             return
         try:
-            cam = create_camera()
+            cam = create_camera(dev_id)
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
@@ -1197,7 +1243,6 @@ class MainWindow(QtWidgets.QMainWindow):
             log("UI: camera connected")
         except Exception as e:
             log(f"UI: camera connect failed: {e}")
-        self._update_cam_buttons()
 
     def _disconnect_camera(self):
         if not self.camera:
@@ -1214,18 +1259,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_combo.clear()
         self.bin_combo.clear()
         self.depth_combo.clear()
-        self._update_cam_buttons()
 
-    def _connect_stage_async(self):
+    def _connect_stage_async(self, port=None):
         if self.stage is not None:
             log("UI: stage already connected; skip re-probe")
             return
 
         def connect_stage():
-            port = find_marlin_port()
-            if not port:
+            p = port or find_marlin_port()
+            if not p:
                 return None
-            return StageMarlin(port)
+            return StageMarlin(p)
 
         self._conn_thread, self._conn_worker = run_async(connect_stage)
         self._conn_worker.finished.connect(self._on_stage_connect)
@@ -1238,7 +1282,6 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 log("UI: stage not found")
             self.stage_status.setText("Stage: not found")
-            self._update_stage_buttons()
         else:
             self.stage = stage
             info = self.stage.get_info()
@@ -1255,7 +1298,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage_bounds = None
             log("UI: stage connected (async)")
             self._attach_stage_worker()
-            self._update_stage_buttons()
         thread = self._conn_thread
         self._conn_thread = self._conn_worker = None
         if thread and thread != QtCore.QThread.currentThread():
@@ -1283,17 +1325,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_status.setText("Stage: —")
         self.stage_pos.setText("Pos: —")
         self.stage_bounds = None
-        self._update_stage_buttons()
-
-    def _update_stage_buttons(self):
-        connected = self.stage is not None
-        self.btn_stage_connect.setEnabled(not connected)
-        self.btn_stage_disconnect.setEnabled(connected)
-
-    def _update_cam_buttons(self):
-        connected = self.camera is not None
-        self.btn_cam_connect.setEnabled(not connected)
-        self.btn_cam_disconnect.setEnabled(connected)
 
     def _on_stage_position(self, pos):
         if not pos:
