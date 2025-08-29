@@ -1240,6 +1240,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
+            self._update_camera_control_availability()
             log("UI: camera connected")
         except Exception as e:
             log(f"UI: camera connect failed: {e}")
@@ -1259,6 +1260,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_combo.clear()
         self.bin_combo.clear()
         self.depth_combo.clear()
+        self._update_camera_control_availability(None)
 
     def _connect_stage_async(self, port=None):
         if self.stage is not None:
@@ -1582,6 +1584,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.speed_spin.setValue(val)
         self.speed_spin.blockSignals(False)
         self._apply_speed()
+    def _update_camera_control_availability(self, cam=None):
+        cam = cam if cam is not None else self.camera
+        has = lambda attr: cam is not None and hasattr(cam, attr)
+        auto = self.autoexp_chk.isChecked()
+        self.autoexp_chk.setEnabled(has("set_exposure_ms"))
+        self.exp_spin.setEnabled(has("set_exposure_ms") and not auto)
+        self.gain_spin.setEnabled(has("set_gain") and not auto)
+        self.brightness_spin.setEnabled(has("set_brightness"))
+        self.brightness_slider.setEnabled(has("set_brightness"))
+        self.contrast_spin.setEnabled(has("set_contrast"))
+        self.contrast_slider.setEnabled(has("set_contrast"))
+        self.saturation_spin.setEnabled(has("set_saturation"))
+        self.saturation_slider.setEnabled(has("set_saturation"))
+        self.hue_spin.setEnabled(has("set_hue"))
+        self.hue_slider.setEnabled(has("set_hue"))
+        self.gamma_spin.setEnabled(has("set_gamma"))
+        self.gamma_slider.setEnabled(has("set_gamma"))
+        self.raw_chk.setEnabled(has("set_raw_fast_mono"))
+        roi = has("set_center_roi")
+        self.btn_roi_full.setEnabled(roi)
+        self.btn_roi_2048.setEnabled(roi)
+        self.btn_roi_1024.setEnabled(roi)
+        self.btn_roi_512.setEnabled(roi)
 
     def _sync_cam_controls(self):
         if not self.camera:
@@ -1642,6 +1667,7 @@ class MainWindow(QtWidgets.QMainWindow):
             finally:
                 self.exp_spin.blockSignals(False)
                 self.gain_spin.blockSignals(False)
+        self._update_camera_control_availability()
 
     def _apply_gain(self, again=None):
         if not self.camera:
