@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 import time
 import datetime
 from math import isclose
@@ -197,6 +198,7 @@ class RasterRunner:
 
                 do_af = bool(self.cfg.autofocus and AutoFocus)
                 do_capture = bool(self.cfg.capture)
+                do_stack = bool(self.cfg.stack and AutoFocus)
 
                 if do_af:
                     af = AutoFocus(self.stage, self.camera)
@@ -230,5 +232,20 @@ class RasterRunner:
                             fmt=self.fmt,
                             metadata=metadata,
                         )
+                    time.sleep(1)
+
+                if do_stack:
+                    af = AutoFocus(self.stage, self.camera)
+                    stack_dir = os.path.join(
+                        self.directory or self.writer.run_dir,
+                        f"{self.base_name}_r{r:04d}_c{c:04d}_stack",
+                    )
+                    af.focus_stack(
+                        range_mm=self.cfg.stack_range_mm,
+                        step_mm=self.cfg.stack_step_mm,
+                        writer=self.writer,
+                        directory=stack_dir,
+                        lens_name=self.lens_name,
+                    )
                     time.sleep(1)
 
