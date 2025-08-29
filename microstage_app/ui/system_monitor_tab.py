@@ -1,6 +1,9 @@
 from PySide6 import QtWidgets, QtCore
 
+import logging
 import psutil
+
+logger = logging.getLogger(__name__)
 
 try:  # Optional GPU monitoring
     from pynvml import (
@@ -14,9 +17,13 @@ try:  # Optional GPU monitoring
     nvmlInit()
     _NVML_AVAILABLE = True
     _NVML_HANDLE = nvmlDeviceGetHandleByIndex(0)
-except Exception:  # pragma: no cover - library or device missing
+except Exception as exc:  # pragma: no cover - library or device missing
     _NVML_AVAILABLE = False
     _NVML_HANDLE = None
+    logger.info(
+        "GPU statistics unavailable; ensure 'pynvml' is installed and an NVIDIA GPU is present. Error: %s",
+        exc,
+    )
 
 
 class SystemMonitorTab(QtWidgets.QWidget):
@@ -51,7 +58,9 @@ class SystemMonitorTab(QtWidgets.QWidget):
             layout.addWidget(self.gpu_mem_label)
             layout.addWidget(self.gpu_mem_bar)
         else:
-            self.gpu_label = QtWidgets.QLabel("GPU metrics unavailable")
+            self.gpu_label = QtWidgets.QLabel(
+                "GPU metrics unavailable (requires 'pynvml' and an NVIDIA GPU)"
+            )
             layout.addWidget(self.gpu_label)
 
         layout.addStretch(1)
