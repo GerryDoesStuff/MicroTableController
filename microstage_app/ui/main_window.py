@@ -28,6 +28,7 @@ import re
 import time
 import math
 import datetime
+import threading
 
 
 def _load_stage_bounds():
@@ -397,6 +398,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
+        self._level_continue_event = threading.Event()
 
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
@@ -800,7 +802,13 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
         l.addWidget(self.btn_apply_level, row, 0, 1, 2); row += 1
         l.addWidget(self.btn_disable_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 2)
+        l.addWidget(self.level_status, row, 0, 1, 2); row += 1
+        self.level_prompt = QtWidgets.QLabel("")
+        self.level_prompt.setVisible(False)
+        self.btn_level_continue = QtWidgets.QPushButton("Next")
+        self.btn_level_continue.setVisible(False)
+        l.addWidget(self.level_prompt, row, 0, 1, 2); row += 1
+        l.addWidget(self.btn_level_continue, row, 0, 1, 2); row += 1
         a.addWidget(lvl_box)
 
         # Raster controls
@@ -967,6 +975,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start_level.clicked.connect(self._run_leveling)
         self.btn_apply_level.clicked.connect(self._apply_leveling)
         self.btn_disable_level.clicked.connect(self._disable_leveling)
+        self.btn_level_continue.clicked.connect(self._on_level_continue)
         self.level_method.currentTextChanged.connect(self._update_leveling_method)
         self.raster_mode_combo.currentTextChanged.connect(self._update_raster_mode)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
@@ -1925,6 +1934,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
+        self._level_continue_event.set()
+        self.level_prompt.hide()
+        self.btn_level_continue.hide()
         self._update_stop_button()
 
     @QtCore.Slot(object, object)
@@ -1964,25 +1976,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.leveling_enabled = False
         self._set_leveling_status("Disabled")
 
-    @QtCore.Slot(int, int)
-    def _prompt_manual_focus(self, idx: int, total: int):
-        QtWidgets.QMessageBox.information(
-            self,
-            "Leveling",
-            f"Manually focus at point {idx} of {total} then press OK to continue.",
-        )
+    @QtCore.Slot(str)
+    def _set_level_prompt(self, text: str):
+        self.level_prompt.setText(text)
+        self.level_prompt.setVisible(True)
+        self.btn_level_continue.setVisible(True)
 
-    @QtCore.Slot(int, int, bool)
-    def _prompt_move_to_point(self, idx: int, total: int, auto: bool):
-        if auto:
-            msg = (
-                f"Move the stage to point {idx} of {total} then press OK to autofocus."
-            )
-        else:
-            msg = (
-                f"Move the stage to point {idx} of {total}, focus manually, then press OK to continue."
-            )
-        QtWidgets.QMessageBox.information(self, "Leveling", msg)
+    @QtCore.Slot()
+    def _on_level_continue(self):
+        self.btn_level_continue.setVisible(False)
+        self._level_continue_event.set()
 
     def _run_leveling(self):
         if self._leveling:
@@ -2031,14 +2034,19 @@ class MainWindow(QtWidgets.QMainWindow):
                         QtCore.Qt.QueuedConnection,
                         QtCore.Q_ARG(str, f"Select point {idx}/{total}"),
                     )
+                    msg = (
+                        f"Move the stage to point {idx} of {total} then press Next to autofocus."
+                        if auto_mode
+                        else f"Move the stage to point {idx} of {total}, focus manually, then press Next to continue."
+                    )
+                    self._level_continue_event.clear()
                     QtCore.QMetaObject.invokeMethod(
                         self,
-                        "_prompt_move_to_point",
-                        QtCore.Qt.BlockingQueuedConnection,
-                        QtCore.Q_ARG(int, idx),
-                        QtCore.Q_ARG(int, total),
-                        QtCore.Q_ARG(bool, auto_mode),
+                        "_set_level_prompt",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, msg),
                     )
+                    self._level_continue_event.wait()
                     if auto_mode:
                         af = AutoFocus(stage, camera)
                         _ = af.coarse_to_fine(
@@ -2078,13 +2086,17 @@ class MainWindow(QtWidgets.QMainWindow):
                             feed_mm_per_min=feed_z,
                         )
                     else:
+                        self._level_continue_event.clear()
+                        msg = (
+                            f"Manually focus at point {idx} of {total} then press Next to continue."
+                        )
                         QtCore.QMetaObject.invokeMethod(
                             self,
-                            "_prompt_manual_focus",
-                            QtCore.Qt.BlockingQueuedConnection,
-                            QtCore.Q_ARG(int, idx),
-                            QtCore.Q_ARG(int, total),
+                            "_set_level_prompt",
+                            QtCore.Qt.QueuedConnection,
+                            QtCore.Q_ARG(str, msg),
                         )
+                        self._level_continue_event.wait()
                     pos = stage.get_position()
                     if pos:
                         x_meas, y_meas, z = pos
@@ -2357,6 +2369,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._level_thread:
             log("Leveling: stop requested")
             self._level_thread.requestInterruption()
+            self._level_continue_event.set()
         if self._stack_thread:
             log("Focus stack: stop requested")
             self._stack_thread.requestInterruption()
