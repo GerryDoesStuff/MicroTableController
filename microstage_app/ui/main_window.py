@@ -681,6 +681,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lens_combo = QtWidgets.QComboBox()
         self._refresh_lens_combo()
         ctr2.addWidget(self.lens_combo)
+        self.btn_add_lens = QtWidgets.QToolButton()
+        self.btn_add_lens.setText("Add Lens...")
+        ctr2.addWidget(self.btn_add_lens)
         self.btn_clear_screen = QtWidgets.QPushButton("Clear screen")
         ctr2.addWidget(self.btn_clear_screen)
         ctr2.addStretch(1)
@@ -979,6 +982,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
+        self.btn_add_lens.clicked.connect(self._add_lens)
         self.lens_combo.currentIndexChanged.connect(self._on_lens_changed)
         self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
@@ -1095,6 +1099,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles.set('measurement.current_lens', name)
         self.profiles.save()
         self._update_lens_for_resolution()
+
+    def _add_lens(self):
+        name, ok = QtWidgets.QInputDialog.getText(self, "Add Lens", "Lens name:")
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+        lens = self.lenses.get(name)
+        if lens is None:
+            lens = Lens(name, 1.0)
+            self.lenses[name] = lens
+            self.profiles.set(f"measurement.lenses.{name}.um_per_px", 1.0)
+            self.profiles.save()
+        self.current_lens = lens
+        self._refresh_lens_combo()
+        idx = self.lens_combo.findData(name)
+        if idx >= 0:
+            self.lens_combo.setCurrentIndex(idx)
+            self._on_lens_changed(idx)
 
     def _browse_capture_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
