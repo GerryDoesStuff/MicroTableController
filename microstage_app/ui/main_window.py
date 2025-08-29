@@ -814,6 +814,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
         self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
         self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
+        # Coordinate fields for leveling points
+        self.level_x1_spin = QtWidgets.QDoubleSpinBox(); self.level_x1_spin.setDecimals(6); self.level_x1_spin.setRange(-1000.0, 1000.0); self.level_x1_spin.setValue(0.0)
+        self.level_y1_spin = QtWidgets.QDoubleSpinBox(); self.level_y1_spin.setDecimals(6); self.level_y1_spin.setRange(-1000.0, 1000.0); self.level_y1_spin.setValue(0.0)
+        self.btn_level_p1 = QtWidgets.QPushButton("Use pos")
+        self.level_x2_spin = QtWidgets.QDoubleSpinBox(); self.level_x2_spin.setDecimals(6); self.level_x2_spin.setRange(-1000.0, 1000.0); self.level_x2_spin.setValue(0.0)
+        self.level_y2_spin = QtWidgets.QDoubleSpinBox(); self.level_y2_spin.setDecimals(6); self.level_y2_spin.setRange(-1000.0, 1000.0); self.level_y2_spin.setValue(0.0)
+        self.btn_level_p2 = QtWidgets.QPushButton("Use pos")
+        self.level_x3_spin = QtWidgets.QDoubleSpinBox(); self.level_x3_spin.setDecimals(6); self.level_x3_spin.setRange(-1000.0, 1000.0); self.level_x3_spin.setValue(0.0)
+        self.level_y3_spin = QtWidgets.QDoubleSpinBox(); self.level_y3_spin.setDecimals(6); self.level_y3_spin.setRange(-1000.0, 1000.0); self.level_y3_spin.setValue(0.0)
+        self.btn_level_p3 = QtWidgets.QPushButton("Use pos")
         self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
         self.btn_apply_level = QtWidgets.QPushButton("Apply Leveling")
         self.btn_disable_level = QtWidgets.QPushButton("Disable Leveling")
@@ -824,18 +834,21 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
-        l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.btn_apply_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.btn_disable_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 2); row += 1
+        l.addWidget(QtWidgets.QLabel("P1 X:"), row, 0); l.addWidget(self.level_x1_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y1_spin, row, 3); l.addWidget(self.btn_level_p1, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P2 X:"), row, 0); l.addWidget(self.level_x2_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y2_spin, row, 3); l.addWidget(self.btn_level_p2, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P3 X:"), row, 0); l.addWidget(self.level_x3_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y3_spin, row, 3); l.addWidget(self.btn_level_p3, row, 4); row += 1
+        l.addWidget(self.btn_start_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_apply_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_disable_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.level_status, row, 0, 1, 5); row += 1
         self.level_equation = QtWidgets.QLabel("")
-        l.addWidget(self.level_equation, row, 0, 1, 2); row += 1
+        l.addWidget(self.level_equation, row, 0, 1, 5); row += 1
         self.level_prompt = QtWidgets.QLabel("")
         self.level_prompt.setVisible(False)
         self.btn_level_continue = QtWidgets.QPushButton("Next")
         self.btn_level_continue.setVisible(False)
-        l.addWidget(self.level_prompt, row, 0, 1, 2); row += 1
-        l.addWidget(self.btn_level_continue, row, 0, 1, 2); row += 1
+        l.addWidget(self.level_prompt, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_level_continue, row, 0, 1, 5); row += 1
         a.addWidget(lvl_box)
 
         # Raster controls
@@ -1011,6 +1024,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
+        self.btn_level_p1.clicked.connect(lambda: self._set_level_point(1))
+        self.btn_level_p2.clicked.connect(lambda: self._set_level_point(2))
+        self.btn_level_p3.clicked.connect(lambda: self._set_level_point(3))
         self.btn_start_level.clicked.connect(self._run_leveling)
         self.btn_apply_level.clicked.connect(self._apply_leveling)
         self.btn_disable_level.clicked.connect(self._disable_leveling)
@@ -2157,6 +2173,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_level_continue.setVisible(False)
         self._level_continue_event.set()
 
+    def _set_level_point(self, idx: int):
+        if not self.stage_worker:
+            log("Leveling point ignored: stage not connected")
+            QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
+            return
+
+        def cb(pos):
+            if not pos:
+                return
+            try:
+                x, y, _ = pos
+            except Exception:
+                return
+            if idx == 1:
+                self.level_x1_spin.setValue(x)
+                self.level_y1_spin.setValue(y)
+            elif idx == 2:
+                self.level_x2_spin.setValue(x)
+                self.level_y2_spin.setValue(y)
+            elif idx == 3:
+                self.level_x3_spin.setValue(x)
+                self.level_y3_spin.setValue(y)
+
+        self.stage_worker.enqueue(self.stage.get_position, callback=cb)
+
     def _run_leveling(self):
         if self._leveling:
             log("Leveling ignored: already running")
@@ -2186,37 +2227,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_leveling_status("Starting...")
 
         def do_level():
-            bounds = self.stage_bounds or self._stage_bounds_fallback or {
-                "xmin": 0.0,
-                "xmax": 10.0,
-                "ymin": 0.0,
-                "ymax": 10.0,
-            }
-            xmin, xmax = bounds["xmin"], bounds["xmax"]
-            ymin, ymax = bounds["ymin"], bounds["ymax"]
+            x1 = self.level_x1_spin.value()
+            y1 = self.level_y1_spin.value()
+            x2 = self.level_x2_spin.value()
+            y2 = self.level_y2_spin.value()
+            x3 = self.level_x3_spin.value()
+            y3 = self.level_y3_spin.value()
+            xs_vals = [x1, x2, x3]
+            ys_vals = [y1, y2, y3]
+            xmin, xmax = min(xs_vals), max(xs_vals)
+            ymin, ymax = min(ys_vals), max(ys_vals)
             if method == "Three-point":
-                total = 3
+                coords = [(x1, y1), (x2, y2), (x3, y3)]
+                total = len(coords)
                 pts = []
-                for idx in range(1, total + 1):
+                for idx, (x, y) in enumerate(coords, 1):
                     QtCore.QMetaObject.invokeMethod(
                         self,
                         "_set_leveling_status",
                         QtCore.Qt.QueuedConnection,
-                        QtCore.Q_ARG(str, f"Select point {idx}/{total}"),
+                        QtCore.Q_ARG(str, f"Point {idx}/{total}"),
                     )
-                    msg = (
-                        f"Move the stage to point {idx} of {total} then press Next to autofocus."
-                        if auto_mode
-                        else f"Move the stage to point {idx} of {total}, focus manually, then press Next to continue."
-                    )
-                    self._level_continue_event.clear()
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_set_level_prompt",
-                        QtCore.Qt.QueuedConnection,
-                        QtCore.Q_ARG(str, msg),
-                    )
-                    self._level_continue_event.wait()
+                    stage.move_absolute(x=x, y=y, feed_mm_per_min=feed_xy)
+                    stage.wait_for_moves()
                     if auto_mode:
                         af = AutoFocus(stage, camera)
                         _ = af.coarse_to_fine(
@@ -2226,11 +2259,24 @@ class MainWindow(QtWidgets.QMainWindow):
                             fine_step_mm=fine,
                             feed_mm_per_min=feed_z,
                         )
+                    else:
+                        self._level_continue_event.clear()
+                        msg = (
+                            f"Manually focus at point {idx} of {total} then press Next to continue."
+                        )
+                        QtCore.QMetaObject.invokeMethod(
+                            self,
+                            "_set_level_prompt",
+                            QtCore.Qt.QueuedConnection,
+                            QtCore.Q_ARG(str, msg),
+                        )
+                        self._level_continue_event.wait()
                     pos = stage.get_position()
                     if pos:
-                        pts.append((pos[0], pos[1], pos[2]))
+                        x_meas, y_meas, z = pos
                     else:
-                        pts.append((0.0, 0.0, 0.0))
+                        x_meas, y_meas, z = x, y, 0.0
+                    pts.append((x_meas, y_meas, z))
             else:
                 xs = np.linspace(xmin, xmax, cols)
                 ys = np.linspace(ymin, ymax, rows)
