@@ -850,6 +850,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_capture = QtWidgets.QCheckBox("Capture images")
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
+        self.chk_raster_stack = QtWidgets.QCheckBox("Focus stack after capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setToolTip(
@@ -888,8 +889,9 @@ class MainWindow(QtWidgets.QMainWindow):
         r.addWidget(self.rast_y4_spin, 4, 3)
         r.addWidget(self.btn_raster_p4, 4, 4, 1, 2)
 
-        r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
-        r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
+        r.addWidget(self.chk_raster_capture, 5, 0, 1, 2)
+        r.addWidget(self.chk_raster_af, 5, 2, 1, 2)
+        r.addWidget(self.chk_raster_stack, 5, 4, 1, 2)
         r.addWidget(self.btn_run_raster, 6, 0, 1, 3)
         r.addWidget(self.btn_stop, 6, 3, 1, 3)
         r.setRowStretch(7, 1)
@@ -2285,6 +2287,9 @@ class MainWindow(QtWidgets.QMainWindow):
             feed_y_mm_min=self.feedy_spin.value(),
             autofocus=self.chk_raster_af.isChecked(),
             capture=self.chk_raster_capture.isChecked(),
+            stack=self.chk_raster_stack.isChecked(),
+            stack_range_mm=float(self.stack_range.value()),
+            stack_step_mm=float(self.stack_step.value()),
         )
         # common required points
         x1 = self.rast_x1_spin.value()
