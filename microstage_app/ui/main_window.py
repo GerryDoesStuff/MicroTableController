@@ -1202,7 +1202,12 @@ class MainWindow(QtWidgets.QMainWindow):
         lay = QtWidgets.QVBoxLayout(dlg)
         lst = QtWidgets.QListWidget()
         lay.addWidget(lst)
-        for port in list_marlin_ports():
+        ports = list(list_marlin_ports())
+        if self.stage and getattr(self.stage, "port", None):
+            cur = self.stage.port
+            if cur not in ports:
+                ports.insert(0, cur)
+        for port in ports:
             item = QtWidgets.QListWidgetItem(port)
             item.setData(QtCore.Qt.UserRole, port)
             if self.stage and getattr(self.stage, "port", None) == port:

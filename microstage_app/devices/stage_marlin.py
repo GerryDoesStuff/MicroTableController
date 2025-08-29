@@ -29,6 +29,10 @@ def list_marlin_ports(time_wait: float = 2.0, machine_name: str = EXPECTED_MACHI
                 if machine_name and machine_name.lower() not in resp:
                     continue
                 matches.append(p.device)
+        except serial.SerialException as e:
+            if "device or resource busy" in str(e).lower():
+                matches.append(p.device)
+            continue
         except Exception:
             continue
     return matches
