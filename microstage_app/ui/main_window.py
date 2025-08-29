@@ -32,6 +32,10 @@ import datetime
 import threading
 
 
+# Preferred lens display order
+PRESET_LENS_ORDER = ["5x", "10x", "20x", "50x"]
+
+
 def _load_stage_bounds():
     cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
     try:
@@ -938,7 +942,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_lens_combo(self):
         self.lens_combo.blockSignals(True)
         self.lens_combo.clear()
-        for lens in sorted(self.lenses.values(), key=lambda l: l.name):
+
+        # First add lenses in the preferred order if they exist
+        preset = [
+            self.lenses[name] for name in PRESET_LENS_ORDER if name in self.lenses
+        ]
+        # Then append any remaining lenses alphabetically
+        remaining = sorted(
+            [lens for name, lens in self.lenses.items() if name not in PRESET_LENS_ORDER],
+            key=lambda l: l.name,
+        )
+        for lens in preset + remaining:
             self.lens_combo.addItem(
                 f"{lens.name} ({lens.um_per_px:.3f} µm/px)", lens.name
             )
