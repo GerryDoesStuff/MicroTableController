@@ -6,6 +6,11 @@ import ctypes
 import numpy as np
 from ..utils.log import log
 
+try:
+    import cv2
+except Exception:  # pragma: no cover - OpenCV is optional
+    cv2 = None
+
 def _import_toupcam():
     try:
         return importlib.import_module("toupcam")
@@ -20,28 +25,51 @@ def _import_toupcam():
 def list_cameras():
     """Return a list of available camera tuples ``(id, name)``.
 
-    If the Toupcam library or hardware is unavailable a single mock entry is
-    returned so the UI can still present a selectable option.
+    The Toupcam SDK is queried first; if unavailable or no devices are found
+    the list may still include entries for a couple of OpenCV ``VideoCapture``
+    indices (``webcam:0`` etc.).  A mock entry is returned when no real devices
+    are detected.
     """
 
+    cams = []
     try:
         tp = _import_toupcam()
+        devs = tp.Toupcam.EnumV2() or []
+        cams.extend((d.id, d.displayname) for d in devs)
     except Exception:
-        return [("mock", "Mock Camera")]
+        devs = []
 
-    devs = tp.Toupcam.EnumV2() or []
-    if not devs:
-        return [("mock", "Mock Camera")]
-    return [(d.id, d.displayname) for d in devs]
+    if cv2 is not None:
+        for idx in range(2):
+            try:
+                cap = cv2.VideoCapture(idx)
+                if cap.isOpened():
+                    cams.append((f"webcam:{idx}", f"Webcam {idx}"))
+                cap.release()
+            except Exception:
+                pass
+
+    if not cams:
+        cams.append(("mock", "Mock Camera"))
+    return cams
 
 
 def create_camera(dev_id=None):
     """Create and return a camera instance.
 
     ``dev_id`` may be an identifier returned by :func:`list_cameras`.  If
-    omitted the first enumerated device is used.  Passing ``"mock"`` forces the
-    use of the :class:`~microstage_app.devices.camera_mock.MockCamera`.
+    omitted the first enumerated Toupcam device is used.  Passing ``"mock"``
+    forces the use of :class:`camera_mock.MockCamera`.  ``dev_id`` values of the
+    form ``"webcam:N"`` create :class:`camera_webcam.WebcamCamera` instances.
     """
+
+    if isinstance(dev_id, str) and dev_id.startswith("webcam:"):
+        from .camera_webcam import WebcamCamera
+        try:
+            return WebcamCamera(int(dev_id.split(":", 1)[1]))
+        except Exception:
+            from .camera_mock import MockCamera
+            return MockCamera()
 
     try:
         tp = _import_toupcam()

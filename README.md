@@ -13,11 +13,14 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```
    On Linux, OpenCV (`opencv-python`) requires the system library `libGL.so.1`.
    Install it via your package manager, e.g. `sudo apt-get install -y libgl1`,
-   or run the helper script `scripts/install_libgl1.sh`. For headless setups,
-   you may instead install `opencv-python-headless` to avoid the `libGL`
-   dependency.
+ or run the helper script `scripts/install_libgl1.sh`. For headless setups,
+  you may instead install `opencv-python-headless` to avoid the `libGL`
+  dependency.
 3. Install the **ToupTek / Toupcam SDK for Windows**. Copy the `toupcam.dll` (x64) next to `main.py` (or put it in your PATH).
    The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
+   Basic USB webcams are also supported via OpenCV's ``VideoCapture`` and do not
+   require this SDK, though only simple streaming and resolution selection are
+   available.
 4. Connect your **Marlin** stage (Mega2560+RAMPS), power it on.
 5. Run the app:
    ```bash
@@ -27,7 +30,7 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 > No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
 
 ## Features
-- Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID) and ToupCam via SDK enumerate.
+- Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID), ToupCam via SDK enumeration, and probes a couple of OpenCV webcam indices.
 - Live preview + jog controls (XY/Z), home, go-to.
 - Capture primitives: move → settle → snap.
 - Modes: Area (serpentine), Timelapse, Combined.
