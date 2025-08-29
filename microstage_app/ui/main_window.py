@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
 import numpy as np
+import cv2
 
 from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
 from ..devices.camera_toupcam import create_camera, list_cameras
@@ -1390,7 +1391,31 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         frame = self.camera.get_latest_frame()
         if frame is not None:
-            qimg = numpy_to_qimage(frame)
+            processed = frame
+            try:
+                has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
+            except Exception:
+                has_cuda = False
+            if has_cuda:
+                try:
+                    gpu = cv2.cuda_GpuMat()
+                    gpu.upload(frame)
+                    if frame.ndim == 3 and frame.shape[2] == 3:
+                        gpu = cv2.cuda.cvtColor(gpu, cv2.COLOR_BGR2RGB)
+                    processed = gpu.download()
+                except Exception:
+                    processed = (
+                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        if frame.ndim == 3 and frame.shape[2] == 3
+                        else frame
+                    )
+            else:
+                processed = (
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if frame.ndim == 3 and frame.shape[2] == 3
+                    else frame
+                )
+            qimg = numpy_to_qimage(processed)
             self.measure_view.set_image(qimg)
 
         if self.autoexp_chk.isChecked():
