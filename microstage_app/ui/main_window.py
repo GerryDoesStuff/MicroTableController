@@ -1831,21 +1831,20 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_lens_for_resolution(self):
         """Update current lens calibration for active resolution."""
         res_key = self._current_res_key()
-        if not res_key:
-            return
         lens = self.current_lens
-        if res_key in lens.calibrations:
-            lens.um_per_px = lens.calibrations[res_key]
-        elif lens.calibrations:
-            # scale from first known calibration
-            k, v = next(iter(lens.calibrations.items()))
-            try:
-                w0, _ = map(int, k.split("x"))
-                w, _ = map(int, res_key.split("x"))
-                lens.um_per_px = v * (w0 / w)
-            except Exception:
-                lens.um_per_px = v
-        lens.calibrations[res_key] = lens.um_per_px
+        if res_key:
+            if res_key in lens.calibrations:
+                lens.um_per_px = lens.calibrations[res_key]
+            elif lens.calibrations:
+                # scale from first known calibration
+                k, v = next(iter(lens.calibrations.items()))
+                try:
+                    w0, _ = map(int, k.split("x"))
+                    w, _ = map(int, res_key.split("x"))
+                    lens.um_per_px = v * (w0 / w)
+                except Exception:
+                    lens.um_per_px = v
+            lens.calibrations[res_key] = lens.um_per_px
         self._refresh_lens_combo()
         self.measure_view.set_scale_bar(
             self.chk_scale_bar.isChecked(), lens.um_per_px
