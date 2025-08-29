@@ -20,7 +20,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
    Basic USB webcams are also supported via OpenCV's ``VideoCapture`` and do not
    require this SDK, though only simple streaming and resolution selection are
-   available.
+   available. The app probes a handful of ``VideoCapture`` indices (0–3) to
+   discover attached USB cameras. Generic webcam support depends on the
+   ``opencv-python`` package, and any camera controls not exposed by a webcam
+   (e.g. brightness or gain) will appear greyed out in the UI.
 4. Connect your **Marlin** stage (Mega2560+RAMPS), power it on.
 5. Run the app:
    ```bash
@@ -28,6 +31,12 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```
 
 > No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
+
+### Troubleshooting
+
+Certain sliders or checkboxes may be disabled if the connected webcam does not
+advertise those capabilities. Only controls for features reported by the camera
+will be enabled.
 
 ## Features
 - Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID), ToupCam via SDK enumeration, and probes a couple of OpenCV webcam indices.
