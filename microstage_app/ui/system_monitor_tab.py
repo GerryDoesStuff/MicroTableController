@@ -28,6 +28,8 @@ class SystemMonitorTab(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
 
         # CPU widgets
+        self.proc = psutil.Process()
+        self.proc.cpu_percent(None)
         self.cpu_label = QtWidgets.QLabel("CPU Usage: 0%")
         self.cpu_bar = QtWidgets.QProgressBar()
         self.cpu_bar.setRange(0, 100)
@@ -73,7 +75,7 @@ class SystemMonitorTab(QtWidgets.QWidget):
 
     # ------------------------------------------------------------------
     def update_metrics(self) -> None:
-        cpu = psutil.cpu_percent()
+        cpu = self.proc.cpu_percent(None) / psutil.cpu_count()
         self.cpu_bar.setValue(int(cpu))
         self.cpu_label.setText(f"CPU Usage: {cpu:.1f}%")
 
