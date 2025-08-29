@@ -57,6 +57,13 @@ class WriterStub:
         pass
 
 
+def test_raster_config_stack_defaults():
+    cfg = RasterConfig()
+    assert cfg.stack is False
+    assert cfg.stack_range_mm == 0.5
+    assert cfg.stack_step_mm == 0.01
+
+
 def test_raster_thread_stop(capsys):
     stage = StageStub()
     cam = CameraStub()

@@ -22,6 +22,10 @@ class RasterConfig:
     top-left (``x1_mm``, ``y1_mm``), top-right (``x2_mm``, ``y2_mm``), and
     bottom-right (``x3_mm``, ``y3_mm``) corners of the area. The remaining
     corner is inferred from these coordinates.
+
+    When ``stack`` is enabled a small focus stack is captured at each tile,
+    stepping the stage through ``stack_range_mm`` in increments of
+    ``stack_step_mm``.
     """
 
     rows: int = 5
@@ -40,6 +44,9 @@ class RasterConfig:
     feed_y_mm_min: float = 50.0
     autofocus: bool = False
     capture: bool = True
+    stack: bool = False
+    stack_range_mm: float = 0.5
+    stack_step_mm: float = 0.01
 
 class RasterRunner:
     def __init__(
