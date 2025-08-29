@@ -45,12 +45,42 @@ def metric_value(img, metric: FocusMetric):
     else:
         raise ValueError(f"Unsupported image shape: {img.shape}")
 
+    use_cuda = (
+        hasattr(cv2, "cuda")
+        and hasattr(cv2.cuda, "getCudaEnabledDeviceCount")
+        and cv2.cuda.getCudaEnabledDeviceCount() > 0
+    )
+
     if metric == FocusMetric.LAPLACIAN:
-        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        if use_cuda:
+            gpu_mat = cv2.cuda_GpuMat()
+            gpu_mat.upload(gray)
+            # Assume 8-bit input; fallback will handle other types
+            lap_filter = cv2.cuda.createLaplacianFilter(
+                cv2.CV_8UC1, cv2.CV_64F
+            )
+            lap_gpu = lap_filter.apply(gpu_mat)
+            lap = lap_gpu.download()
+        else:
+            lap = cv2.Laplacian(gray, cv2.CV_64F)
         return float(lap.var())
     elif metric == FocusMetric.TENENGRAD:
-        gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-        gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        if use_cuda:
+            gpu_mat = cv2.cuda_GpuMat()
+            gpu_mat.upload(gray)
+            sobel_x = cv2.cuda.createSobelFilter(
+                cv2.CV_8UC1, cv2.CV_64F, 1, 0, ksize=3
+            )
+            sobel_y = cv2.cuda.createSobelFilter(
+                cv2.CV_8UC1, cv2.CV_64F, 0, 1, ksize=3
+            )
+            gx_gpu = sobel_x.apply(gpu_mat)
+            gy_gpu = sobel_y.apply(gpu_mat)
+            gx = gx_gpu.download()
+            gy = gy_gpu.download()
+        else:
+            gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
         return float(np.mean(gx * gx + gy * gy))
     else:
         raise ValueError(metric)
