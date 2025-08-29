@@ -530,15 +530,7 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
-        self.toolbar = self.addToolBar("Main")
-        self.measure_button = QtWidgets.QToolButton()
-        self.measure_button.setText("Measure")
-        _mnu = QtWidgets.QMenu(self.measure_button)
-        self.act_calibrate = _mnu.addAction("Calibrate")
-        self.act_ruler = _mnu.addAction("Ruler")
-        self.measure_button.setMenu(_mnu)
-        self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.toolbar.addWidget(self.measure_button)
+        # removed empty toolbar previously used for measurement actions
 
         # Menu for device selection
         devices_menu = self.menuBar().addMenu("Devices")
@@ -693,6 +685,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_add_lens = QtWidgets.QToolButton()
         self.btn_add_lens.setText("Add Lens...")
         ctr2.addWidget(self.btn_add_lens)
+        self.measure_button = QtWidgets.QToolButton()
+        self.measure_button.setText("Measure")
+        _mnu = QtWidgets.QMenu(self.measure_button)
+        self.act_calibrate = _mnu.addAction("Calibrate")
+        self.act_ruler = _mnu.addAction("Ruler")
+        self.measure_button.setMenu(_mnu)
+        self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        ctr2.addWidget(self.measure_button)
         self.btn_clear_screen = QtWidgets.QPushButton("Clear screen")
         ctr2.addWidget(self.btn_clear_screen)
         ctr2.addStretch(1)
@@ -1031,7 +1031,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
-        self.act_calibrate.triggered.connect(self._start_calibration)
+        self.act_calibrate.triggered.connect(self._calibrate)
         self.act_ruler.triggered.connect(self._start_ruler)
         self.measure_view.calibration_measured.connect(self._on_calibration_done)
 
@@ -2585,7 +2585,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- MEASUREMENT ---------------------------
 
-    def _start_calibration(self):
+    def _calibrate(self):
         self.measure_view.start_calibration()
 
     def _start_ruler(self):
