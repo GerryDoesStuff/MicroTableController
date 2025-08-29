@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import time
+import datetime
 from math import isclose
 from threading import Event
 from typing import Optional
@@ -53,6 +54,7 @@ class RasterRunner:
         fmt="tif",
         position_cb=None,
         lens_name=None,
+        lens_um_per_px: Optional[float] = None,
         scale_bar_um_per_px: Optional[float] = None,
     ):
         self.stage = stage
@@ -65,6 +67,7 @@ class RasterRunner:
         self.fmt = fmt
         self.position_cb = position_cb
         self.lens_name = lens_name
+        self.lens_um_per_px = lens_um_per_px
         self.scale_bar_um_per_px = scale_bar_um_per_px
 
         self.coord_matrix = None
@@ -205,6 +208,12 @@ class RasterRunner:
                             "Camera": self.camera.name(),
                             "Position": pos,
                             "Lens": self.lens_name,
+                            "LensUmPerPx": self.lens_um_per_px,
+                            "Exposure_ms": getattr(self.camera, "get_exposure_ms", lambda: None)(),
+                            "Gain": getattr(self.camera, "get_gain", lambda: None)(),
+                            "Time": datetime.datetime.now().isoformat(),
+                            "Row": r,
+                            "Column": save_c,
                         }
                         self.writer.save_single(
                             img,
