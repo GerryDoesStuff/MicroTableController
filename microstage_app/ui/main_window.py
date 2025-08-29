@@ -419,8 +419,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lenses: dict[str, Lens] = {}
         for name, cfg in lenses_cfg.items():
             if isinstance(cfg, dict):
-                cal = {k: float(v) for k, v in cfg.items()}
-                um = next(iter(cal.values())) if cal else 1.0
+                um = cfg.get('um_per_px', 1.0)
+                cal = cfg.get('calibrations', {}) if isinstance(cfg.get('calibrations'), dict) else {}
+                extras = {
+                    k: v for k, v in cfg.items() if k not in ('um_per_px', 'calibrations')
+                    and isinstance(v, (int, float))
+                }
+                if extras:
+                    cal = dict(cal)
+                    cal.update({k: float(v) for k, v in extras.items()})
                 lens = Lens(name, um, cal)
             else:
                 # legacy flat value
@@ -1097,6 +1104,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.lenses[name] = lens
         self.current_lens = lens
         self.profiles.set('measurement.current_lens', name)
+        self.profiles.set(f'measurement.lenses.{name}.um_per_px', lens.um_per_px)
         self.profiles.save()
         self._update_lens_for_resolution()
 
@@ -2602,7 +2610,11 @@ class MainWindow(QtWidgets.QMainWindow):
             res_key = self._current_res_key() or "default"
             self.current_lens.calibrations[res_key] = um_per_px
             self.profiles.set(
-                f"measurement.lenses.{self.current_lens.name}.{res_key}", um_per_px
+                f"measurement.lenses.{self.current_lens.name}.calibrations.{res_key}",
+                um_per_px,
+            )
+            self.profiles.set(
+                f"measurement.lenses.{self.current_lens.name}.um_per_px", um_per_px
             )
             self.profiles.save()
             self._refresh_lens_combo()
