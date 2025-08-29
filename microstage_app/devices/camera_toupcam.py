@@ -11,6 +11,15 @@ try:
 except Exception:  # pragma: no cover - OpenCV is optional
     cv2 = None
 
+
+def _has_cuda() -> bool:
+    if cv2 is None:
+        return False
+    try:
+        return cv2.cuda.getCudaEnabledDeviceCount() > 0
+    except Exception:
+        return False
+
 def _import_toupcam():
     try:
         return importlib.import_module("toupcam")
@@ -350,8 +359,7 @@ class ToupcamCamera:
 
                 arr = self._arr
                 if self._bits == 24:
-                    bgr = arr[:, : self._w * 3].reshape(self._h, self._w, 3)
-                    img = bgr[..., ::-1].copy()
+                    img = arr[:, : self._w * 3].reshape(self._h, self._w, 3).copy()
                 else:  # 8-bit RAW/mono preview
                     # Keep the grayscale frame instead of expanding to RGB.
                     # Converting to 3-channel was creating extra copies that
@@ -428,8 +436,23 @@ class ToupcamCamera:
         with self._lock:
             return None if self._last is None else self._last.copy()
 
-    def snap(self):
-        return self.get_latest_frame()
+    def snap(self, use_cuda: bool = False):
+        frame = self.get_latest_frame()
+        if frame is None or cv2 is None:
+            return frame
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            if use_cuda and _has_cuda():
+                try:
+                    gm = cv2.cuda_GpuMat()
+                    gm.upload(frame)
+                    gm = cv2.cuda.cvtColor(gm, cv2.COLOR_BGR2RGB)
+                    return gm.download()
+                except Exception:
+                    pass
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        else:
+            # RAW/mono frame; no conversion needed
+            return frame
 
     def get_fps(self) -> float:
         return float(self._fps)

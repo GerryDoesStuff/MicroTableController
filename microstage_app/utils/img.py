@@ -4,6 +4,7 @@ import subprocess
 import numpy as np
 from PySide6 import QtGui
 from PIL import Image, ImageDraw, ImageFont
+import cv2
 
 from .log import log
 
@@ -11,44 +12,17 @@ from .log import log
 VERT_SCALE = 2  # line thickness multiplier
 TEXT_SCALE = 4  # font size multiplier
 
-def numpy_to_qimage(img: np.ndarray) -> QtGui.QImage:
-    if img.ndim == 2:
-        h, w = img.shape
-        qimg = QtGui.QImage(img.data, w, h, w, QtGui.QImage.Format_Grayscale8)
-        return qimg.copy()
-    elif img.ndim == 3 and img.shape[2] == 3:
-        h, w, _ = img.shape
-        qimg = QtGui.QImage(img.data, w, h, 3*w, QtGui.QImage.Format_RGB888)
-        return qimg.copy()
-    else:
-        raise ValueError(f"Unsupported image shape: {img.shape}")
+
+def _has_cuda() -> bool:
+    try:
+        return cv2.cuda.getCudaEnabledDeviceCount() > 0
+    except Exception:
+        return False
 
 
-def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
-    """Draw a scale bar in-place on an RGB image array.
-
-    Parameters
-    ----------
-    img:
-        ``HxWx3`` RGB image data. Grayscale ``HxW`` arrays will be expanded to
-        RGB before drawing.
-    um_per_px:
-        Microns per pixel for the image. Must be positive.
-
-    Returns
-    -------
-    np.ndarray
-        The image with the scale bar overlay. A new array is returned as the
-        underlying conversion through :mod:`PIL` requires a copy.
-    """
-
-    if um_per_px <= 0:
-        return img
-
-    if img.ndim == 2:
-        img = np.repeat(img[:, :, None], 3, axis=2)
-    elif img.ndim != 3 or img.shape[2] != 3:
-        raise ValueError(f"Unsupported image shape: {img.shape}")
+def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
+                        *, draw_line: bool = True) -> np.ndarray:
+    """CPU implementation of the scale bar drawing."""
 
     h, w, _ = img.shape
 
@@ -75,11 +49,12 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
 
     pil = Image.fromarray(img)
     draw = ImageDraw.Draw(pil)
-    draw.line(
-        [(x0, y0), (x0 + length_px, y0)],
-        fill=(255, 255, 255),
-        width=2 * VERT_SCALE,
-    )
+    if draw_line:
+        draw.line(
+            [(x0, y0), (x0 + length_px, y0)],
+            fill=(255, 255, 255),
+            width=2 * VERT_SCALE,
+        )
 
     label = (
         f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
@@ -117,3 +92,81 @@ def draw_scale_bar(img: np.ndarray, um_per_px: float) -> np.ndarray:
     )
 
     return np.array(pil)
+
+def numpy_to_qimage(img: np.ndarray) -> QtGui.QImage:
+    if img.ndim == 2:
+        h, w = img.shape
+        qimg = QtGui.QImage(img.data, w, h, w, QtGui.QImage.Format_Grayscale8)
+        return qimg.copy()
+    elif img.ndim == 3 and img.shape[2] == 3:
+        h, w, _ = img.shape
+        qimg = QtGui.QImage(img.data, w, h, 3*w, QtGui.QImage.Format_RGB888)
+        return qimg.copy()
+    else:
+        raise ValueError(f"Unsupported image shape: {img.shape}")
+
+
+def draw_scale_bar(img, um_per_px: float):
+    """Draw a scale bar on ``img`` using GPU acceleration when available.
+
+    ``img`` may be a :class:`numpy.ndarray` or ``cv2.cuda_GpuMat``. In the GPU
+    path, the line is rendered on the device and text is overlaid after
+    downloading the frame.
+    """
+
+    if um_per_px <= 0:
+        return img if isinstance(img, np.ndarray) else img.download()
+
+    has_cuda = _has_cuda()
+
+    if has_cuda and isinstance(img, cv2.cuda_GpuMat):
+        w, h = img.size()
+        h = int(h)
+        w = int(w)
+
+        # Compute geometry
+        max_um = 0.2 * w * um_per_px
+        exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
+        nice_um = 10 ** exp
+        for m in (5, 2, 1):
+            candidate = m * (10 ** exp)
+            if candidate <= max_um:
+                nice_um = candidate
+                break
+
+        length_px = int(round(nice_um / um_per_px))
+        max_length = w - 40
+        if length_px > max_length:
+            length_px = max_length
+            nice_um = length_px * um_per_px
+
+        margin = 20
+        x0 = int(round(w - margin - length_px))
+        y0 = int(round(h - margin))
+        thickness = 2 * VERT_SCALE
+        y1 = max(0, y0 - thickness)
+        roi = img.rowRange(y1, y0).colRange(x0, x0 + length_px)
+        roi.setTo((255, 255, 255))
+
+        arr = img.download()
+        return _draw_scale_bar_cpu(arr, um_per_px, draw_line=False)
+
+    if isinstance(img, np.ndarray):
+        if img.ndim == 2:
+            if has_cuda:
+                try:
+                    gm = cv2.cuda_GpuMat()
+                    gm.upload(img)
+                    gm = cv2.cuda.cvtColor(gm, cv2.COLOR_GRAY2RGB)
+                    arr = gm.download()
+                except Exception:
+                    arr = np.repeat(img[:, :, None], 3, axis=2)
+            else:
+                arr = np.repeat(img[:, :, None], 3, axis=2)
+        elif img.ndim == 3 and img.shape[2] == 3:
+            arr = img
+        else:
+            raise ValueError(f"Unsupported image shape: {img.shape}")
+        return _draw_scale_bar_cpu(arr, um_per_px)
+
+    raise TypeError("Unsupported image type for draw_scale_bar")
