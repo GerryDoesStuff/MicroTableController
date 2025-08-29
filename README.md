@@ -16,6 +16,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
  or run the helper script `scripts/install_libgl1.sh`. For headless setups,
   you may instead install `opencv-python-headless` to avoid the `libGL`
   dependency.
+
+   Optional GPU acceleration for captures is available when OpenCV is built
+   with CUDA modules. The application automatically detects CUDA support and
+   falls back to CPU processing if the modules are absent.
 3. Install the **ToupTek / Toupcam SDK for Windows**. Copy the `toupcam.dll` (x64) next to `main.py` (or put it in your PATH).
    The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
    Basic USB webcams are also supported via OpenCV's ``VideoCapture`` and do not
@@ -49,6 +53,8 @@ will be enabled.
 - Robustness: hot-plug (to be expanded), watchdogs (to be expanded), structured logs.
 - Scripting: run custom recipes from `microstage_app/scripts/` with a safe API.
 - Validated capture directory/filename fields with optional auto-numbering to prevent overwrites.
+- Optional CUDA acceleration for capture and scale-bar drawing when OpenCV is
+  built with CUDA; falls back to CPU otherwise.
 
 ## Capture directory & file naming
 

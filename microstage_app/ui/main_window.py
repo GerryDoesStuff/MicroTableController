@@ -1938,13 +1938,37 @@ class MainWindow(QtWidgets.QMainWindow):
         def do_capture():
             self.stage.wait_for_moves()
             time.sleep(0.03)
-            img = self.camera.snap()
+            try:
+                has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
+            except Exception:
+                has_cuda = False
+            try:
+                img = self.camera.snap(use_cuda=has_cuda)
+            except TypeError:
+                img = self.camera.snap()
             if img is not None:
-                if self.chk_scale_bar.isChecked():
+                if has_cuda:
                     try:
-                        img = draw_scale_bar(img, self.current_lens.um_per_px)
+                        gpu = cv2.cuda_GpuMat()
+                        gpu.upload(img)
+                        if self.chk_scale_bar.isChecked():
+                            img = draw_scale_bar(gpu, self.current_lens.um_per_px)
+                        else:
+                            img = gpu.download()
                     except Exception as e:
-                        log(f"Scale bar draw error: {e}")
+                        log(f"CUDA capture path failed: {e}; falling back to CPU")
+                        has_cuda = False
+                        if self.chk_scale_bar.isChecked():
+                            try:
+                                img = draw_scale_bar(img, self.current_lens.um_per_px)
+                            except Exception as e:
+                                log(f"Scale bar draw error: {e}")
+                else:
+                    if self.chk_scale_bar.isChecked():
+                        try:
+                            img = draw_scale_bar(img, self.current_lens.um_per_px)
+                        except Exception as e:
+                            log(f"Scale bar draw error: {e}")
                 pos = self.stage.get_position()
                 meta = {
                     "Camera": self.camera.name(),
