@@ -16,19 +16,58 @@ def _import_toupcam():
             log(f"Camera: toupcam import failed: {e1} / {e2}")
             raise
 
-def create_camera():
+
+def list_cameras():
+    """Return a list of available camera tuples ``(id, name)``.
+
+    If the Toupcam library or hardware is unavailable a single mock entry is
+    returned so the UI can still present a selectable option.
+    """
+
+    try:
+        tp = _import_toupcam()
+    except Exception:
+        return [("mock", "Mock Camera")]
+
+    devs = tp.Toupcam.EnumV2() or []
+    if not devs:
+        return [("mock", "Mock Camera")]
+    return [(d.id, d.displayname) for d in devs]
+
+
+def create_camera(dev_id=None):
+    """Create and return a camera instance.
+
+    ``dev_id`` may be an identifier returned by :func:`list_cameras`.  If
+    omitted the first enumerated device is used.  Passing ``"mock"`` forces the
+    use of the :class:`~microstage_app.devices.camera_mock.MockCamera`.
+    """
+
     try:
         tp = _import_toupcam()
     except Exception:
         from .camera_mock import MockCamera
         return MockCamera()
+
+    if dev_id == "mock":
+        from .camera_mock import MockCamera
+        return MockCamera()
+
     devs = tp.Toupcam.EnumV2() or []
     log(f"Camera: EnumV2 found {len(devs)} device(s).")
     if not devs:
         from .camera_mock import MockCamera
         return MockCamera()
-    flags = getattr(getattr(devs[0], "model", None), "flag", 0)
-    return ToupcamCamera(tp, devs[0].id, devs[0].displayname, flags)
+
+    target = devs[0]
+    if dev_id is not None:
+        for d in devs:
+            if d.id == dev_id:
+                target = d
+                break
+
+    flags = getattr(getattr(target, "model", None), "flag", 0)
+    return ToupcamCamera(tp, target.id, target.displayname, flags)
 
 class ToupcamCamera:
     """
@@ -90,6 +129,11 @@ class ToupcamCamera:
 
         self._open()
         self._query_binning_options()
+
+    @property
+    def device_id(self):
+        """Return the underlying SDK device identifier."""
+        return self._id
 
     # ---------------- internal ----------------
 
