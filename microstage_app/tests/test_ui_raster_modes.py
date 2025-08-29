@@ -150,3 +150,20 @@ def test_raster_mode_four_point(make_window):
     assert cfg.y3_mm == pytest.approx(3.0)
     assert cfg.x4_mm == pytest.approx(5.0)
     assert cfg.y4_mm == pytest.approx(3.0)
+
+
+def test_raster_stack_config(make_window):
+    win, captured = make_window
+    win.raster_mode_combo.setCurrentText("2-point")
+    win.rast_x1_spin.setValue(0.0)
+    win.rast_y1_spin.setValue(0.0)
+    win.rast_x2_spin.setValue(1.0)
+    win.rast_y2_spin.setValue(1.0)
+    win.chk_raster_stack.setChecked(True)
+    win.stack_range.setValue(0.7)
+    win.stack_step.setValue(0.02)
+    win._run_raster()
+    cfg = captured['cfg']
+    assert cfg.stack is True
+    assert cfg.stack_range_mm == pytest.approx(0.7)
+    assert cfg.stack_step_mm == pytest.approx(0.02)
