@@ -1010,7 +1010,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
         self.btn_add_lens.clicked.connect(self._add_lens)
-        self.lens_combo.currentIndexChanged.connect(self._on_lens_changed)
+        self.lens_combo.currentIndexChanged[int].connect(self._on_lens_changed)
         self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
