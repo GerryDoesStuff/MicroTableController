@@ -807,6 +807,8 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(self.btn_apply_level, row, 0, 1, 2); row += 1
         l.addWidget(self.btn_disable_level, row, 0, 1, 2); row += 1
         l.addWidget(self.level_status, row, 0, 1, 2); row += 1
+        self.level_equation = QtWidgets.QLabel("")
+        l.addWidget(self.level_equation, row, 0, 1, 2); row += 1
         self.level_prompt = QtWidgets.QLabel("")
         self.level_prompt.setVisible(False)
         self.btn_level_continue = QtWidgets.QPushButton("Next")
@@ -1950,16 +1952,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if err:
             log(f"Leveling error: {err}")
             self._set_leveling_status("Error")
+            self.level_equation.setText("")
             QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
         else:
             self._set_leveling_status("Complete")
             eq = model.equation() if model else ""
             log(f"Leveling model ({model.kind.value}): {eq}")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Leveling",
-                f"Leveling complete.\n{model.kind.value} model: {eq}",
-            )
+            self.level_equation.setText(eq)
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
@@ -1979,6 +1978,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_mgr.areas.clear()
         self.leveling_enabled = False
         self._set_leveling_status("Disabled")
+        self.level_equation.setText("")
 
     @QtCore.Slot(str)
     def _set_level_prompt(self, text: str):
