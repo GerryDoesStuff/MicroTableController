@@ -421,7 +421,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 # legacy flat value
                 lens = Lens(name, float(cfg))
-        self.lenses[name] = lens
+            self.lenses[name] = lens
         cur_name = self.profiles.get('measurement.current_lens', '10x', expected_type=str)
         self.current_lens = self.lenses.get(cur_name)
         if not self.current_lens:
