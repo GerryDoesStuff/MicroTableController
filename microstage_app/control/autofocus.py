@@ -165,6 +165,7 @@ class AutoFocus:
         fmt: str = "png",
         lens_name: Optional[str] = None,
         use_mm: bool = False,
+        fuse_edf: bool = False,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.
 
@@ -213,6 +214,7 @@ class AutoFocus:
         zs = [(-steps + i) * step_mm for i in range(2 * steps + 1)]
         cumulative = 0.0
         metrics = []
+        images = [] if fuse_edf else None
         for i, dz in enumerate(zs):
             move = dz - cumulative
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
@@ -232,6 +234,11 @@ class AutoFocus:
                 if metric:
                     metrics.append(float("-inf"))
                 continue
+            if images is not None:
+                if img.ndim == 3:
+                    images.append(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                else:
+                    images.append(img)
             pos = self.stage.get_position()
             metadata = {
                 "Camera": self.camera.name(),
@@ -258,6 +265,26 @@ class AutoFocus:
         # Return to starting position
         self.stage.move_relative(dz=-cumulative, feed_mm_per_min=feed_mm_per_min)
         self.stage.wait_for_moves()
+
+        if images:
+            from ..analysis.edf import fuse_stack as _edf_fuse_stack
+
+            fused = _edf_fuse_stack(images, use_cuda=True)
+            if fused.ndim == 3:
+                fused = cv2.cvtColor(fused, cv2.COLOR_BGR2RGB)
+            fname = f"{base_name}_edf" if base_name else "fused"
+            metadata = {
+                "Camera": self.camera.name(),
+                "Lens": lens_name,
+            }
+            writer.save_single(
+                fused,
+                directory=directory,
+                filename=fname,
+                auto_number=False,
+                fmt=fmt,
+                metadata=metadata,
+            )
 
         if metric and metrics:
             best_idx = int(np.argmax(metrics))

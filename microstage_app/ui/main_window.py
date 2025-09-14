@@ -654,10 +654,12 @@ class MainWindow(QtWidgets.QMainWindow):
         s = QtWidgets.QGridLayout(stack_box)
         self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
         self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(6); self.stack_step.setRange(0.000001, 1.0); self.stack_step.setSingleStep(0.000001); self.stack_step.setValue(0.01)
+        self.chk_edf = QtWidgets.QCheckBox("EDF Fusion")
         self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
         s.addWidget(QtWidgets.QLabel("Range (mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
         s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
-        s.addWidget(self.btn_focus_stack, 2, 0, 1, 2)
+        s.addWidget(self.chk_edf, 2, 0, 1, 2)
+        s.addWidget(self.btn_focus_stack, 3, 0, 1, 2)
 
         af_box.setMaximumWidth(240)
         stack_box.setMaximumWidth(240)
@@ -2401,6 +2403,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 feed_mm_per_min=feed,
                 fmt=self.capture_format,
                 lens_name=self.current_lens.name,
+                fuse_edf=self.chk_edf.isChecked(),
             )
 
         log(f"Focus stack: range={rng} step={step} dir={stack_dir}")
