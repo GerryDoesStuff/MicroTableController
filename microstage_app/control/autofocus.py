@@ -159,10 +159,12 @@ class AutoFocus:
         writer: ImageWriter,
         *,
         directory: Optional[str] = None,
+        base_name: str = "",
         metric: Optional[FocusMetric] = None,
         feed_mm_per_min: float = 240,
         fmt: str = "png",
         lens_name: Optional[str] = None,
+        use_mm: bool = False,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.
 
@@ -178,6 +180,9 @@ class AutoFocus:
         directory : str, optional
             Directory in which to save images. If ``None``, ``writer.run_dir``
             is used.
+        base_name : str, optional
+            Base name used when saving each frame. If empty, frames are saved
+            using only the depth index or depth value.
         metric : FocusMetric, optional
             If provided, compute the metric for each frame and return the index
             of the sharpest frame.
@@ -187,6 +192,9 @@ class AutoFocus:
             Image format passed to :meth:`ImageWriter.save_single`.
         lens_name : str, optional
             Name of the lens used for capture; included in image metadata.
+        use_mm : bool, optional
+            If ``True``, use the depth value in millimeters when constructing
+            filenames; otherwise use a simple depth index.
 
         Returns
         -------
@@ -230,10 +238,15 @@ class AutoFocus:
                 "Position": pos,
                 "Lens": lens_name,
             }
+            if use_mm:
+                base = f"{dz:.4f}mm"
+            else:
+                base = f"{i:04d}"
+            fname = f"{base_name}_{base}" if base_name else base
             writer.save_single(
                 img,
                 directory=directory,
-                filename=f"{i:04d}",
+                filename=fname,
                 auto_number=False,
                 fmt=fmt,
                 metadata=metadata,
