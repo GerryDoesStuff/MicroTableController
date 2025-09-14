@@ -228,20 +228,22 @@ class AutoFocus:
         cumulative = 0.0
         metrics = []
         images = [] if fuse_edf else None
+
+        get_exp = getattr(self.camera, "get_exposure_ms", None)
+        exposure_s = 0.0
+        if get_exp:
+            try:
+                exposure_s = float(get_exp()) / 1000.0
+            except Exception:
+                exposure_s = 0.0
+
         for i, dz in enumerate(zs):
             move = dz - cumulative
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
             self.stage.wait_for_moves()
             if i == 0:
                 time.sleep(0.5)
-            delay = 0.02
-            get_exp = getattr(self.camera, "get_exposure_ms", None)
-            if get_exp:
-                try:
-                    delay = max(delay, float(get_exp()) / 1000.0)
-                except Exception:
-                    pass
-            time.sleep(delay)
+            time.sleep(exposure_s + 0.25)
             img = self.camera.snap()
             if img is None:
                 if metric:
