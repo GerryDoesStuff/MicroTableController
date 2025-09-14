@@ -209,7 +209,16 @@ class AutoFocus:
             move = dz - cumulative
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
             self.stage.wait_for_moves()
-            time.sleep(0.02)
+            if i == 0:
+                time.sleep(0.5)
+            delay = 0.02
+            get_exp = getattr(self.camera, "get_exposure_ms", None)
+            if get_exp:
+                try:
+                    delay = max(delay, float(get_exp()) / 1000.0)
+                except Exception:
+                    pass
+            time.sleep(delay)
             img = self.camera.snap()
             if img is None:
                 if metric:

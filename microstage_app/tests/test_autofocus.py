@@ -12,6 +12,8 @@ class StageMock:
         self.moves.append((dz, feed_mm_per_min))
     def wait_for_moves(self):
         pass
+    def get_position(self):
+        return (0.0, 0.0, self.z)
 
 class CameraMock:
     def snap(self):
@@ -115,3 +117,30 @@ def test_metric_value_invalid_channels_raise():
     bad = np.zeros((4, 4, 2), dtype=np.uint8)
     with pytest.raises(ValueError):
         af.metric_value(bad, FocusMetric.LAPLACIAN)
+
+
+def test_focus_stack_initial_delay(monkeypatch, tmp_path):
+    stage = StageMock()
+
+    class Cam(CameraMock):
+        def get_exposure_ms(self):
+            return 30
+
+    class WriterMock:
+        def __init__(self, run_dir):
+            self.run_dir = run_dir
+
+        def save_single(self, *args, **kwargs):
+            pass
+
+    cam = Cam()
+    writer = WriterMock(str(tmp_path))
+    af_inst = AutoFocus(stage, cam)
+    sleeps = []
+
+    monkeypatch.setattr(af.time, "sleep", lambda s: sleeps.append(s))
+
+    af_inst.focus_stack(range_mm=0.05, step_mm=0.05, writer=writer)
+
+    assert sleeps[0] == pytest.approx(0.5)
+    assert sleeps[1:] == [pytest.approx(0.03)] * 3
