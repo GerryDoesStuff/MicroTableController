@@ -1114,6 +1114,13 @@ class MainWindow(QtWidgets.QMainWindow):
             bind(getattr(self, f'step{axis}_spin'), f'jog.step.{axis}')
             bind(getattr(self, f'feed{axis}_spin'), f'jog.feed.{axis}')
             bind(getattr(self, f'abs{axis}_spin'), f'jog.abs.{axis}')
+        # autofocus
+        bind(self.af_range, 'autofocus.range_mm')
+        bind(self.af_coarse, 'autofocus.coarse_step_mm')
+        bind(self.af_fine, 'autofocus.fine_step_mm')
+        # focus stacking
+        bind(self.stack_range, 'focus_stack.range_mm')
+        bind(self.stack_step, 'focus_stack.step_mm')
 
     def _on_capture_dir_changed(self, text: str):
         self.capture_dir = text
@@ -2725,9 +2732,6 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.absx_spin, "ui.move.absx"),
             (self.absy_spin, "ui.move.absy"),
             (self.absz_spin, "ui.move.absz"),
-            # autofocus & focus stack
-            (self.af_range, "autofocus.range_mm"),
-            (self.stack_range, "focus_stack.range_mm"),
             # camera settings
             (self.exp_spin, "camera.exposure_ms"),
             (self.autoexp_chk, "camera.auto_exposure"),
