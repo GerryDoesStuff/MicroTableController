@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from .system_monitor_tab import SystemMonitorTab
+from .tooltips import apply_tooltip_context
 
 import numpy as np
 import cv2
@@ -517,6 +518,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_leveling_method()
         # ensure raster UI reflects current mode after loading profiles
         self._update_raster_mode()
+
+        # install right-click tooltip handlers for all inputs/buttons
+        apply_tooltip_context(self)
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)

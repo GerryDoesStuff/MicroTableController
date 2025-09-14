@@ -1,5 +1,7 @@
 from PySide6 import QtWidgets, QtCore
 
+from .tooltips import apply_tooltip_context
+
 import logging
 import psutil
 
@@ -68,6 +70,9 @@ class SystemMonitorTab(QtWidgets.QWidget):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.update_metrics)
+
+        # ensure right-click tooltips for any interactive widgets
+        apply_tooltip_context(self)
 
     # ------------------------------------------------------------------
     def start(self) -> None:
