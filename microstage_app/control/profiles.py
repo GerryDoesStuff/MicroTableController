@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 4,
+    'version': 5,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -59,6 +59,9 @@ DEFAULTS = {
     'focus_stack': {
         'range_mm': 0.5,
         'step_mm': 0.01,
+    },
+    'ui': {
+        'dark_mode': False,
     },
 }
 
