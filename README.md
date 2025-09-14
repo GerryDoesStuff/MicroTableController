@@ -16,12 +16,15 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
   or run the helper script `scripts/install_libgl1.sh`. For headless setups,
   you may instead install `opencv-python-headless` to avoid the `libGL`
   dependency. The system monitor tab uses `psutil`; NVIDIA GPU metrics also
-  require the optional `nvidia-ml-py3` package and appropriate drivers.
+  require the optional `nvidia-ml-py3` package and appropriate drivers. When
+  no GPU is present, the tab simply shows a notice so the app continues to
+  run normally.
 
-   Optional GPU acceleration for captures and autofocus metrics is available
-   when OpenCV is built with CUDA modules. The application automatically
-   detects CUDA support and falls back to CPU processing if the modules are
-   absent.
+   Optional GPU acceleration for captures, autofocus metrics, and scale-bar
+   drawing is available when OpenCV is built with CUDA modules. The
+   application automatically detects CUDA support, falls back to CPU
+   processing if the modules are absent, and logs which path is chosen to aid
+   troubleshooting.
 3. Install the **ToupTek / Toupcam SDK for Windows**. Copy the `toupcam.dll` (x64) next to `main.py` (or put it in your PATH).
    The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
    Basic USB webcams are also supported via OpenCV's ``VideoCapture`` and do not
@@ -56,9 +59,10 @@ will be enabled.
 - Scripting: run custom recipes from `microstage_app/scripts/` with a safe API.
 - Validated capture directory/filename fields with optional auto-numbering to prevent overwrites.
 - Optional CUDA acceleration for capture, autofocus metrics, and scale-bar
-  drawing when OpenCV is built with CUDA; falls back to CPU otherwise.
+  drawing when OpenCV is built with CUDA; falls back to CPU otherwise and
+  logs the active path.
 - System monitor tab displaying CPU load and, when supported, NVIDIA GPU
-  utilization via NVML.
+  utilization via NVML, with a message shown when GPUs are unavailable.
 
 ## Capture directory & file naming
 

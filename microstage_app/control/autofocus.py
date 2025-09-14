@@ -1,12 +1,27 @@
 from enum import Enum
 import math
 import os
-import numpy as np
-import cv2
 import time
+import logging
 from typing import Optional
 
+import numpy as np
+import cv2
+
 from ..io.storage import ImageWriter
+
+logger = logging.getLogger(__name__)
+
+try:
+    _HAS_CUDA = (
+        hasattr(cv2, "cuda")
+        and hasattr(cv2.cuda, "getCudaEnabledDeviceCount")
+        and cv2.cuda.getCudaEnabledDeviceCount() > 0
+    )
+except Exception:
+    _HAS_CUDA = False
+
+logger.info("Autofocus metrics using %s", "CUDA" if _HAS_CUDA else "CPU")
 
 class FocusMetric(str, Enum):
     LAPLACIAN = "LaplacianVar"
@@ -45,14 +60,12 @@ def metric_value(img, metric: FocusMetric):
     else:
         raise ValueError(f"Unsupported image shape: {img.shape}")
 
-    use_cuda = (
-        hasattr(cv2, "cuda")
-        and hasattr(cv2.cuda, "getCudaEnabledDeviceCount")
-        and cv2.cuda.getCudaEnabledDeviceCount() > 0
+    logger.debug(
+        "Computing %s metric on %s", metric, "CUDA" if _HAS_CUDA else "CPU"
     )
 
     if metric == FocusMetric.LAPLACIAN:
-        if use_cuda:
+        if _HAS_CUDA:
             gpu_mat = cv2.cuda_GpuMat()
             gpu_mat.upload(gray)
             # Assume 8-bit input; fallback will handle other types
@@ -65,7 +78,7 @@ def metric_value(img, metric: FocusMetric):
             lap = cv2.Laplacian(gray, cv2.CV_64F)
         return float(lap.var())
     elif metric == FocusMetric.TENENGRAD:
-        if use_cuda:
+        if _HAS_CUDA:
             gpu_mat = cv2.cuda_GpuMat()
             gpu_mat.upload(gray)
             sobel_x = cv2.cuda.createSobelFilter(
