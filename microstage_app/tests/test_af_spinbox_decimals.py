@@ -15,6 +15,8 @@ def qt_app():
 
 def test_af_spinboxes_six_decimals(monkeypatch, qt_app):
     monkeypatch.setattr(mw.MainWindow, "_auto_connect_async", lambda self: None)
+    monkeypatch.setattr(mw.MainWindow, "_update_stage_buttons", lambda self: None, raising=False)
+    monkeypatch.setattr(mw.MainWindow, "_update_cam_buttons", lambda self: None, raising=False)
 
     win = mw.MainWindow()
 
@@ -48,6 +50,17 @@ def test_af_spinboxes_six_decimals(monkeypatch, qt_app):
         box.setValue(0.0005)
         qt_app.processEvents()
         assert box.text() == "0.000500"
+
+    for box in (win.af_range, win.stack_range):
+        assert box.decimals() == 4
+
+        box.setValue(0.1234)
+        qt_app.processEvents()
+        assert box.text() == "0.1234"
+
+        box.setValue(0.5)
+        qt_app.processEvents()
+        assert box.text() == "0.5000"
 
     for box in (win.stepx_spin, win.stepy_spin, win.stepz_spin):
         box.setValue(0.0005)

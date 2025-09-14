@@ -480,9 +480,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # load persisted values; extend _persistent_widgets() to add more fields
         for w, path in self._persistent_widgets():
-            if isinstance(w, QtWidgets.QAbstractSpinBox):
-                val = self.profiles.get(path, w.value(), expected_type=(int, float),
-                                        min_value=w.minimum(), max_value=w.maximum())
+            if isinstance(w, QtWidgets.QDoubleSpinBox):
+                val = self.profiles.get(
+                    path,
+                    w.value(),
+                    expected_type=(int, float),
+                    min_value=w.minimum(),
+                    max_value=w.maximum(),
+                )
+                w.setValue(round(float(val), w.decimals()))
+            elif isinstance(w, QtWidgets.QAbstractSpinBox):
+                val = self.profiles.get(
+                    path,
+                    w.value(),
+                    expected_type=(int, float),
+                    min_value=w.minimum(),
+                    max_value=w.maximum(),
+                )
                 w.setValue(val)
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
@@ -641,7 +655,7 @@ class MainWindow(QtWidgets.QMainWindow):
         af_box = QtWidgets.QGroupBox("Autofocus")
         a = QtWidgets.QGridLayout(af_box)
         self.metric_combo = QtWidgets.QComboBox(); self.metric_combo.addItems([m.value for m in FocusMetric])
-        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setValue(0.5)
+        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setDecimals(4); self.af_range.setValue(0.5)
         self.af_coarse = QtWidgets.QDoubleSpinBox(); self.af_coarse.setDecimals(6); self.af_coarse.setRange(0.000001, 1.0); self.af_coarse.setSingleStep(0.000001); self.af_coarse.setValue(0.01)
         self.af_fine = QtWidgets.QDoubleSpinBox(); self.af_fine.setDecimals(6); self.af_fine.setRange(0.0005, 0.2); self.af_fine.setValue(0.002)
         self.btn_autofocus = QtWidgets.QPushButton("Run Autofocus")
@@ -652,7 +666,7 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
-        self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
+        self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setDecimals(4); self.stack_range.setValue(0.5)
         self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(6); self.stack_step.setRange(0.000001, 1.0); self.stack_step.setSingleStep(0.000001); self.stack_step.setValue(0.01)
         self.chk_edf = QtWidgets.QCheckBox("EDF Fusion")
         self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
@@ -2711,6 +2725,9 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.absx_spin, "ui.move.absx"),
             (self.absy_spin, "ui.move.absy"),
             (self.absz_spin, "ui.move.absz"),
+            # autofocus & focus stack
+            (self.af_range, "autofocus.range_mm"),
+            (self.stack_range, "focus_stack.range_mm"),
             # camera settings
             (self.exp_spin, "camera.exposure_ms"),
             (self.autoexp_chk, "camera.auto_exposure"),
@@ -2740,7 +2757,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
         for w, path in self._persistent_widgets():
-            if isinstance(w, QtWidgets.QAbstractSpinBox):
+            if isinstance(w, QtWidgets.QDoubleSpinBox):
+                val = round(w.value(), w.decimals())
+            elif isinstance(w, QtWidgets.QAbstractSpinBox):
                 val = w.value()
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = w.isChecked()
