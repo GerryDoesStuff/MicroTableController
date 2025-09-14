@@ -1,16 +1,58 @@
 import math
 import subprocess
+import logging
 
 import numpy as np
 from PySide6 import QtGui
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 
-from .log import log
 
 # Scaling factors for the scale bar drawing used across the application
 VERT_SCALE = 2  # line thickness multiplier
 TEXT_SCALE = 4  # font size multiplier
+
+
+_scale_font_cache = None
+logger = logging.getLogger(__name__)
+
+
+def _load_scale_font() -> ImageFont.FreeTypeFont:
+    """Return a PIL font matching the application's QFont.
+
+    The font file is resolved once using ``fc-match`` and the resulting
+    :class:`ImageFont.FreeTypeFont` is cached for reuse.  The size is scaled by
+    :data:`TEXT_SCALE` to mirror :func:`MeasureView.drawForeground`.
+    """
+
+    global _scale_font_cache
+
+    if _scale_font_cache is not None:
+        return _scale_font_cache
+
+    qapp = QtGui.QGuiApplication.instance()
+    if qapp is None:
+        raise RuntimeError("QGuiApplication instance required to load font")
+
+    qfont = qapp.font()
+    ps = qfont.pointSizeF()
+    if ps > 0:
+        base_size = ps
+    else:
+        base_size = qfont.pixelSize()
+
+    font_size = int(round(base_size * TEXT_SCALE))
+
+    family = qfont.family()
+    res = subprocess.run(
+        ["fc-match", "-f", "%{file}\n", family],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    font_path = res.stdout.strip()
+    _scale_font_cache = ImageFont.truetype(font_path, font_size)
+    return _scale_font_cache
 
 
 def _has_cuda() -> bool:
@@ -18,6 +60,10 @@ def _has_cuda() -> bool:
         return cv2.cuda.getCudaEnabledDeviceCount() > 0
     except Exception:
         return False
+
+
+_HAS_CUDA = _has_cuda()
+logger.info("Scale-bar drawing using %s", "CUDA" if _HAS_CUDA else "CPU")
 
 
 def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
@@ -60,27 +106,7 @@ def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
         f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
     )
 
-    base_font = ImageFont.load_default()
-    font_size = base_font.size * TEXT_SCALE
-    font = base_font.font_variant(size=font_size)
-
-    qapp = QtGui.QGuiApplication.instance()
-    font_path = ""
-    if qapp is not None:
-        family = qapp.font().family()
-        try:
-            res = subprocess.run(
-                ["fc-match", "-f", "%{file}\n", family],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            font_path = res.stdout.strip()
-            font = ImageFont.truetype(font_path, font_size)
-        except Exception as e:
-            log(
-                f"WARNING: failed to load scale bar font {font_path or family}: {e}; using default font"
-            )
+    font = _load_scale_font()
 
     bbox = draw.textbbox((0, 0), label, font=font)
     th = bbox[3] - bbox[1]
@@ -117,9 +143,12 @@ def draw_scale_bar(img, um_per_px: float):
     if um_per_px <= 0:
         return img if isinstance(img, np.ndarray) else img.download()
 
-    has_cuda = _has_cuda()
+    logger.debug(
+        "draw_scale_bar using %s path",
+        "CUDA" if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat) else "CPU",
+    )
 
-    if has_cuda and isinstance(img, cv2.cuda_GpuMat):
+    if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat):
         w, h = img.size()
         h = int(h)
         w = int(w)
@@ -153,7 +182,7 @@ def draw_scale_bar(img, um_per_px: float):
 
     if isinstance(img, np.ndarray):
         if img.ndim == 2:
-            if has_cuda:
+            if _HAS_CUDA:
                 try:
                     gm = cv2.cuda_GpuMat()
                     gm.upload(img)

@@ -22,7 +22,7 @@ def qt_app():
     yield app
 
 
-def test_draw_scale_bar_length_and_label(monkeypatch):
+def test_draw_scale_bar_length_and_label(monkeypatch, qt_app):
     img = np.zeros((100, 200, 3), dtype=np.uint8)
     captured = {}
 
@@ -33,15 +33,6 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
         return orig_text(self, xy, text, fill=fill, font=font)
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", fake_text)
-
-    orig_truetype = ImageFont.truetype
-
-    def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)):
-            raise OSError("missing font")
-        return orig_truetype(font, size, *args, **kwargs)
-
-    monkeypatch.setattr(ImageFont, "truetype", fake_truetype)
 
     out = draw_scale_bar(img, 1.0)
 
@@ -57,9 +48,17 @@ def test_draw_scale_bar_length_and_label(monkeypatch):
 
 
 def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
-    monkeypatch.setattr(
-        mw.MainWindow, "_update_raster_controls", lambda self: None, raising=False
-    )
+    class DummyMainWindow(mw.MainWindow):
+        def _update_raster_controls(self):
+            pass
+
+        def _update_stage_buttons(self):
+            pass
+
+        def _update_cam_buttons(self):
+            pass
+
+    monkeypatch.setattr(mw, "MainWindow", DummyMainWindow)
     win = mw.MainWindow()
     win.stage = SimpleNamespace(wait_for_moves=lambda: None, get_position=lambda: (0, 0, 0))
     win.camera = SimpleNamespace(
@@ -83,15 +82,6 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
         return None, SimpleNamespace(finished=DummySignal())
 
     monkeypatch.setattr(mw, "run_async", fake_run_async)
-
-    orig_truetype = ImageFont.truetype
-
-    def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)):
-            raise OSError("missing font")
-        return orig_truetype(font, size, *args, **kwargs)
-
-    monkeypatch.setattr(ImageFont, "truetype", fake_truetype)
 
     win._capture()
     out = saved["img"]
@@ -153,6 +143,8 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
         return orig_truetype(font, size, *args, **kwargs)
 
     monkeypatch.setattr(ImageFont, "truetype", spy_truetype)
+    from microstage_app.utils import img as img_utils
+    img_utils._scale_font_cache = None
 
     out = draw_scale_bar(img, 0.2)
     Image.fromarray(out).save(tmp_path / "scale.png")
@@ -177,8 +169,13 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     x0 = int(round(w - 20 - length_px))
     y0 = int(round(h - 20))
 
-    base_font = ImageFont.load_default()
-    font_size = base_font.size * TEXT_SCALE
+    qfont = qt_app.font()
+    ps = qfont.pointSizeF()
+    if ps > 0:
+        base_size = ps
+    else:
+        base_size = qfont.pixelSize()
+    font_size = int(round(base_size * TEXT_SCALE))
     font = ImageFont.truetype(str(Path(font_path).resolve()), font_size)
     dummy = Image.new("RGB", (1, 1))
     draw = ImageDraw.Draw(dummy)
@@ -197,7 +194,18 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
 
 def test_selecting_lens_updates_scale_bar(monkeypatch, qt_app):
     """Changing the lens selection updates the scale bar calibration."""
-    monkeypatch.setattr(mw.MainWindow, "_auto_connect_async", lambda self: None)
+
+    class DummyMainWindow(mw.MainWindow):
+        def _auto_connect_async(self):
+            pass
+
+        def _update_stage_buttons(self):
+            pass
+
+        def _update_cam_buttons(self):
+            pass
+
+    monkeypatch.setattr(mw, "MainWindow", DummyMainWindow)
     win = mw.MainWindow()
 
     lens_a = Lens("5x", 2.0)

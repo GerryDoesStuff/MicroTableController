@@ -1,12 +1,27 @@
 from enum import Enum
 import math
 import os
-import numpy as np
-import cv2
 import time
+import logging
 from typing import Optional
 
+import numpy as np
+import cv2
+
 from ..io.storage import ImageWriter
+
+logger = logging.getLogger(__name__)
+
+try:
+    _HAS_CUDA = (
+        hasattr(cv2, "cuda")
+        and hasattr(cv2.cuda, "getCudaEnabledDeviceCount")
+        and cv2.cuda.getCudaEnabledDeviceCount() > 0
+    )
+except Exception:
+    _HAS_CUDA = False
+
+logger.info("Autofocus metrics using %s", "CUDA" if _HAS_CUDA else "CPU")
 
 class FocusMetric(str, Enum):
     LAPLACIAN = "LaplacianVar"
@@ -45,14 +60,12 @@ def metric_value(img, metric: FocusMetric):
     else:
         raise ValueError(f"Unsupported image shape: {img.shape}")
 
-    use_cuda = (
-        hasattr(cv2, "cuda")
-        and hasattr(cv2.cuda, "getCudaEnabledDeviceCount")
-        and cv2.cuda.getCudaEnabledDeviceCount() > 0
+    logger.debug(
+        "Computing %s metric on %s", metric, "CUDA" if _HAS_CUDA else "CPU"
     )
 
     if metric == FocusMetric.LAPLACIAN:
-        if use_cuda:
+        if _HAS_CUDA:
             gpu_mat = cv2.cuda_GpuMat()
             gpu_mat.upload(gray)
             # Assume 8-bit input; fallback will handle other types
@@ -65,7 +78,7 @@ def metric_value(img, metric: FocusMetric):
             lap = cv2.Laplacian(gray, cv2.CV_64F)
         return float(lap.var())
     elif metric == FocusMetric.TENENGRAD:
-        if use_cuda:
+        if _HAS_CUDA:
             gpu_mat = cv2.cuda_GpuMat()
             gpu_mat.upload(gray)
             sobel_x = cv2.cuda.createSobelFilter(
@@ -159,10 +172,13 @@ class AutoFocus:
         writer: ImageWriter,
         *,
         directory: Optional[str] = None,
+        base_name: str = "",
         metric: Optional[FocusMetric] = None,
         feed_mm_per_min: float = 240,
         fmt: str = "png",
         lens_name: Optional[str] = None,
+        use_mm: bool = False,
+        fuse_edf: bool = False,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.
 
@@ -178,6 +194,9 @@ class AutoFocus:
         directory : str, optional
             Directory in which to save images. If ``None``, ``writer.run_dir``
             is used.
+        base_name : str, optional
+            Base name used when saving each frame. If empty, frames are saved
+            using only the depth index or depth value.
         metric : FocusMetric, optional
             If provided, compute the metric for each frame and return the index
             of the sharpest frame.
@@ -187,6 +206,9 @@ class AutoFocus:
             Image format passed to :meth:`ImageWriter.save_single`.
         lens_name : str, optional
             Name of the lens used for capture; included in image metadata.
+        use_mm : bool, optional
+            If ``True``, use the depth value in millimeters when constructing
+            filenames; otherwise use a simple depth index.
 
         Returns
         -------
@@ -205,26 +227,48 @@ class AutoFocus:
         zs = [(-steps + i) * step_mm for i in range(2 * steps + 1)]
         cumulative = 0.0
         metrics = []
+        images = [] if fuse_edf else None
+
+        get_exp = getattr(self.camera, "get_exposure_ms", None)
+        exposure_s = 0.0
+        if get_exp:
+            try:
+                exposure_s = float(get_exp()) / 1000.0
+            except Exception:
+                exposure_s = 0.0
+
         for i, dz in enumerate(zs):
             move = dz - cumulative
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
             self.stage.wait_for_moves()
-            time.sleep(0.02)
+            if i == 0:
+                time.sleep(0.5)
+            time.sleep(exposure_s + 0.25)
             img = self.camera.snap()
             if img is None:
                 if metric:
                     metrics.append(float("-inf"))
                 continue
+            if images is not None:
+                if img.ndim == 3:
+                    images.append(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                else:
+                    images.append(img)
             pos = self.stage.get_position()
             metadata = {
                 "Camera": self.camera.name(),
                 "Position": pos,
                 "Lens": lens_name,
             }
+            if use_mm:
+                base = f"{dz:.4f}mm"
+            else:
+                base = f"{i:04d}"
+            fname = f"{base_name}_{base}" if base_name else base
             writer.save_single(
                 img,
                 directory=directory,
-                filename=f"{i:04d}",
+                filename=fname,
                 auto_number=False,
                 fmt=fmt,
                 metadata=metadata,
@@ -236,6 +280,26 @@ class AutoFocus:
         # Return to starting position
         self.stage.move_relative(dz=-cumulative, feed_mm_per_min=feed_mm_per_min)
         self.stage.wait_for_moves()
+
+        if images:
+            from ..analysis.edf import fuse_stack as _edf_fuse_stack
+
+            fused = _edf_fuse_stack(images, use_cuda=True)
+            if fused.ndim == 3:
+                fused = cv2.cvtColor(fused, cv2.COLOR_BGR2RGB)
+            fname = f"{base_name}_edf" if base_name else "fused"
+            metadata = {
+                "Camera": self.camera.name(),
+                "Lens": lens_name,
+            }
+            writer.save_single(
+                fused,
+                directory=directory,
+                filename=fname,
+                auto_number=False,
+                fmt=fmt,
+                metadata=metadata,
+            )
 
         if metric and metrics:
             best_idx = int(np.argmax(metrics))

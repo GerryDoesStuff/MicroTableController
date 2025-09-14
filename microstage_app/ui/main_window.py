@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
 from .system_monitor_tab import SystemMonitorTab
+from .tooltips import apply_tooltip_context
 
 import numpy as np
 import cv2
@@ -366,6 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("MicroStage App v0.1")
         self.resize(1400, 900)
+        self._default_style = QtWidgets.QApplication.instance().style().objectName()
 
         # device handles
         self.stage = None
@@ -417,6 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # profiles
         self.profiles = Profiles.load_or_create()
+        self.dark_mode = self.profiles.get('ui.dark_mode', False, expected_type=bool)
         lenses_cfg = self.profiles.get('measurement.lenses', {}, expected_type=dict)
         self.lenses: dict[str, Lens] = {}
         for name, cfg in lenses_cfg.items():
@@ -476,12 +479,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # UI
         self._build_ui()
+        self._apply_dark_palette(self.act_dark_mode.isChecked())
 
         # load persisted values; extend _persistent_widgets() to add more fields
         for w, path in self._persistent_widgets():
-            if isinstance(w, QtWidgets.QAbstractSpinBox):
-                val = self.profiles.get(path, w.value(), expected_type=(int, float),
-                                        min_value=w.minimum(), max_value=w.maximum())
+            if isinstance(w, QtWidgets.QDoubleSpinBox):
+                val = self.profiles.get(
+                    path,
+                    w.value(),
+                    expected_type=(int, float),
+                    min_value=w.minimum(),
+                    max_value=w.maximum(),
+                )
+                w.setValue(round(float(val), w.decimals()))
+            elif isinstance(w, QtWidgets.QAbstractSpinBox):
+                val = self.profiles.get(
+                    path,
+                    w.value(),
+                    expected_type=(int, float),
+                    min_value=w.minimum(),
+                    max_value=w.maximum(),
+                )
                 w.setValue(val)
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
@@ -518,6 +536,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # ensure raster UI reflects current mode after loading profiles
         self._update_raster_mode()
 
+        # install right-click tooltip handlers for all inputs/buttons
+        apply_tooltip_context(self)
+
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
 
@@ -538,6 +559,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_show_stages = devices_menu.addAction("Stages")
         self.act_show_cameras.triggered.connect(self._show_camera_dialog)
         self.act_show_stages.triggered.connect(self._show_stage_dialog)
+
+        view_menu = self.menuBar().addMenu("View")
+        self.act_dark_mode = view_menu.addAction("Dark Theme")
+        self.act_dark_mode.setCheckable(True)
+        self.act_dark_mode.setChecked(self.dark_mode)
+        self.act_dark_mode.triggered.connect(self._on_toggle_dark_mode)
 
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
@@ -637,7 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
         af_box = QtWidgets.QGroupBox("Autofocus")
         a = QtWidgets.QGridLayout(af_box)
         self.metric_combo = QtWidgets.QComboBox(); self.metric_combo.addItems([m.value for m in FocusMetric])
-        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setValue(0.5)
+        self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setDecimals(4); self.af_range.setValue(0.5)
         self.af_coarse = QtWidgets.QDoubleSpinBox(); self.af_coarse.setDecimals(6); self.af_coarse.setRange(0.000001, 1.0); self.af_coarse.setSingleStep(0.000001); self.af_coarse.setValue(0.01)
         self.af_fine = QtWidgets.QDoubleSpinBox(); self.af_fine.setDecimals(6); self.af_fine.setRange(0.0005, 0.2); self.af_fine.setValue(0.002)
         self.btn_autofocus = QtWidgets.QPushButton("Run Autofocus")
@@ -648,12 +675,14 @@ class MainWindow(QtWidgets.QMainWindow):
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
-        self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setValue(0.5)
+        self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setDecimals(4); self.stack_range.setValue(0.5)
         self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(6); self.stack_step.setRange(0.000001, 1.0); self.stack_step.setSingleStep(0.000001); self.stack_step.setValue(0.01)
+        self.chk_edf = QtWidgets.QCheckBox("EDF Fusion")
         self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
         s.addWidget(QtWidgets.QLabel("Range (mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
         s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
-        s.addWidget(self.btn_focus_stack, 2, 0, 1, 2)
+        s.addWidget(self.chk_edf, 2, 0, 1, 2)
+        s.addWidget(self.btn_focus_stack, 3, 0, 1, 2)
 
         af_box.setMaximumWidth(240)
         stack_box.setMaximumWidth(240)
@@ -967,7 +996,37 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(vsplit)
 
         self._reload_profiles()
+        self._update_stage_buttons()
+        self._update_cam_buttons()
         self._update_raster_mode()
+
+    def _apply_dark_palette(self, enabled: bool):
+        app = QtWidgets.QApplication.instance()
+        if enabled:
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Base, QtGui.QColor(25, 25, 25))
+            palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ToolTipBase, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
+            palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
+            palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
+            palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+            app.setPalette(palette)
+            app.setStyle("Fusion")
+        else:
+            app.setStyle(self._default_style)
+            app.setPalette(app.style().standardPalette())
+
+    def _on_toggle_dark_mode(self, checked: bool):
+        self._apply_dark_palette(checked)
+        self.profiles.set('ui.dark_mode', checked)
+        self.profiles.save()
 
     def _refresh_lens_combo(self):
         self.lens_combo.blockSignals(True)
@@ -1092,6 +1151,13 @@ class MainWindow(QtWidgets.QMainWindow):
             bind(getattr(self, f'step{axis}_spin'), f'jog.step.{axis}')
             bind(getattr(self, f'feed{axis}_spin'), f'jog.feed.{axis}')
             bind(getattr(self, f'abs{axis}_spin'), f'jog.abs.{axis}')
+        # autofocus
+        bind(self.af_range, 'autofocus.range_mm')
+        bind(self.af_coarse, 'autofocus.coarse_step_mm')
+        bind(self.af_fine, 'autofocus.fine_step_mm')
+        # focus stacking
+        bind(self.stack_range, 'focus_stack.range_mm')
+        bind(self.stack_step, 'focus_stack.step_mm')
 
     def _on_capture_dir_changed(self, text: str):
         self.capture_dir = text
@@ -1127,6 +1193,13 @@ class MainWindow(QtWidgets.QMainWindow):
             lens = Lens(name, 1.0)
             self.lenses[name] = lens
         self.current_lens = lens
+        # Update the live preview scale bar immediately so that both the
+        # on-screen view and any subsequent captures use the latest
+        # calibration. This also refreshes cached scale values used when
+        # drawing the scale bar on captured images.
+        self.measure_view.set_scale_bar(
+            self.chk_scale_bar.isChecked(), lens.um_per_px
+        )
         self.profiles.set('measurement.current_lens', name)
         self.profiles.set(f'measurement.lenses.{name}.um_per_px', lens.um_per_px)
         self.profiles.save()
@@ -2371,7 +2444,8 @@ class MainWindow(QtWidgets.QMainWindow):
         rng = float(self.stack_range.value())
         feed = self.feedz_spin.value()
         writer = ImageWriter(self.capture_dir)
-        stack_dir = writer.run_dir
+        stack_dir = os.path.join(self.capture_dir, self.capture_name)
+        os.makedirs(stack_dir, exist_ok=True)
         self._last_stack_dir = stack_dir
         self.btn_focus_stack.setEnabled(False)
 
@@ -2382,10 +2456,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 step,
                 writer,
                 directory=stack_dir,
+                base_name=self.capture_name,
                 metric=FocusMetric.LAPLACIAN,
                 feed_mm_per_min=feed,
                 fmt=self.capture_format,
                 lens_name=self.current_lens.name,
+                fuse_edf=self.chk_edf.isChecked(),
             )
 
         log(f"Focus stack: range={rng} step={step} dir={stack_dir}")
@@ -2721,8 +2797,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------- CLOSE ---------------------------
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+        self.profiles.set('ui.dark_mode', self.act_dark_mode.isChecked())
         for w, path in self._persistent_widgets():
-            if isinstance(w, QtWidgets.QAbstractSpinBox):
+            if isinstance(w, QtWidgets.QDoubleSpinBox):
+                val = round(w.value(), w.decimals())
+            elif isinstance(w, QtWidgets.QAbstractSpinBox):
                 val = w.value()
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = w.isChecked()
