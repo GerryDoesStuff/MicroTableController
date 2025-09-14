@@ -26,11 +26,15 @@ def test_ui_settings_persist(monkeypatch, tmp_path, qt_app):
     monkeypatch.setattr(mw.ImageWriter, "__init__", fake_init)
 
     monkeypatch.setattr(mw.MainWindow, "_auto_connect_async", lambda self: None)
+    monkeypatch.setattr(mw.MainWindow, "_update_stage_buttons", lambda self: None, raising=False)
+    monkeypatch.setattr(mw.MainWindow, "_update_cam_buttons", lambda self: None, raising=False)
 
     win1 = mw.MainWindow()
     win1.stepx_spin.setValue(1.234)
     win1.feedy_spin.setValue(45.6)
     win1.absz_spin.setValue(7.89)
+    win1.af_range.setValue(0.2345)
+    win1.stack_range.setValue(0.5432)
     qt_app.processEvents()
     win1.preview_timer.stop(); win1.fps_timer.stop(); win1.close()
 
@@ -38,5 +42,9 @@ def test_ui_settings_persist(monkeypatch, tmp_path, qt_app):
     assert win2.stepx_spin.value() == pytest.approx(1.234)
     assert win2.feedy_spin.value() == pytest.approx(45.6)
     assert win2.absz_spin.value() == pytest.approx(7.89)
+    assert win2.af_range.value() == pytest.approx(0.2345)
+    assert win2.stack_range.value() == pytest.approx(0.5432)
+    assert win2.af_range.text() == "0.2345"
+    assert win2.stack_range.text() == "0.5432"
     win2.preview_timer.stop(); win2.fps_timer.stop(); win2.close()
 
