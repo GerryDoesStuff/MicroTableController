@@ -1,9 +1,13 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
-import numpy as np
+from .system_monitor_tab import SystemMonitorTab
+from .tooltips import apply_tooltip_context
 
-from ..devices.stage_marlin import StageMarlin, find_marlin_port
-from ..devices.camera_toupcam import create_camera
+import numpy as np
+import cv2
+
+from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
+from ..devices.camera_toupcam import create_camera, list_cameras
 
 from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
@@ -27,6 +31,12 @@ import os
 import re
 import time
 import math
+import datetime
+import threading
+
+
+# Preferred lens display order
+PRESET_LENS_ORDER = ["5x", "10x", "20x", "50x"]
 
 
 def _load_stage_bounds():
@@ -396,6 +406,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
+        self._level_continue_event = threading.Event()
 
         # image writer (per-run folder)
         self.image_writer = ImageWriter()
@@ -411,8 +422,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lenses: dict[str, Lens] = {}
         for name, cfg in lenses_cfg.items():
             if isinstance(cfg, dict):
-                cal = {k: float(v) for k, v in cfg.items()}
-                um = next(iter(cal.values())) if cal else 1.0
+                um = cfg.get('um_per_px', 1.0)
+                cal = cfg.get('calibrations', {}) if isinstance(cfg.get('calibrations'), dict) else {}
+                extras = {
+                    k: v for k, v in cfg.items() if k not in ('um_per_px', 'calibrations')
+                    and isinstance(v, (int, float))
+                }
+                if extras:
+                    cal = dict(cal)
+                    cal.update({k: float(v) for k, v in extras.items()})
                 lens = Lens(name, um, cal)
             else:
                 # legacy flat value
@@ -436,6 +454,12 @@ class MainWindow(QtWidgets.QMainWindow):
             log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'png'")
             fmt = 'png'
         self.capture_format = fmt
+
+        # placeholders for legacy connect/disconnect buttons moved to the menu
+        self.btn_stage_connect = None
+        self.btn_stage_disconnect = None
+        self.btn_cam_connect = None
+        self.btn_cam_disconnect = None
 
         # timers
         self.preview_timer = QtCore.QTimer(self)
@@ -492,6 +516,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_signals()
         self._init_persistent_fields()
         self._update_leveling_method()
+        # ensure raster UI reflects current mode after loading profiles
+        self._update_raster_mode()
+
+        # install right-click tooltip handlers for all inputs/buttons
+        apply_tooltip_context(self)
 
         # mirror logs to the in-app log pane
         LOG.message.connect(self._append_log)
@@ -505,15 +534,14 @@ class MainWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
-        self.toolbar = self.addToolBar("Main")
-        self.measure_button = QtWidgets.QToolButton()
-        self.measure_button.setText("Measure")
-        _mnu = QtWidgets.QMenu(self.measure_button)
-        self.act_calibrate = _mnu.addAction("Calibrate")
-        self.act_ruler = _mnu.addAction("Ruler")
-        self.measure_button.setMenu(_mnu)
-        self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.toolbar.addWidget(self.measure_button)
+        # removed empty toolbar previously used for measurement actions
+
+        # Menu for device selection
+        devices_menu = self.menuBar().addMenu("Devices")
+        self.act_show_cameras = devices_menu.addAction("Cameras")
+        self.act_show_stages = devices_menu.addAction("Stages")
+        self.act_show_cameras.triggered.connect(self._show_camera_dialog)
+        self.act_show_stages.triggered.connect(self._show_stage_dialog)
 
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
@@ -524,24 +552,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_pos.setTextInteractionFlags(
             QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard
         )
-        self.btn_stage_connect = QtWidgets.QPushButton("Connect Stage")
-        self.btn_stage_disconnect = QtWidgets.QPushButton("Disconnect Stage")
         self.cam_status = QtWidgets.QLabel("Camera: —")
-        self.btn_cam_connect = QtWidgets.QPushButton("Connect Camera")
-        self.btn_cam_disconnect = QtWidgets.QPushButton("Disconnect Camera")
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
+        self.profile_label = QtWidgets.QLabel("Profile:")
         left.addWidget(self.stage_status)
-        left.addWidget(self.btn_stage_connect)
-        left.addWidget(self.btn_stage_disconnect)
-        left.addSpacing(8)
         left.addWidget(self.cam_status)
-        left.addWidget(self.btn_cam_connect)
-        left.addWidget(self.btn_cam_disconnect)
         left.addSpacing(8)
-        left.addWidget(QtWidgets.QLabel("Profile:"))
+        left.addWidget(self.profile_label)
         left.addWidget(self.profile_combo)
         left.addWidget(self.btn_reload_profiles)
+        self.profile_label.hide()
+        self.profile_combo.hide()
+        self.btn_reload_profiles.hide()
         # Homing controls
         home_box = QtWidgets.QGroupBox("Homing")
         hl = QtWidgets.QVBoxLayout(home_box)
@@ -663,6 +686,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lens_combo = QtWidgets.QComboBox()
         self._refresh_lens_combo()
         ctr2.addWidget(self.lens_combo)
+        self.btn_add_lens = QtWidgets.QToolButton()
+        self.btn_add_lens.setText("Add Lens...")
+        ctr2.addWidget(self.btn_add_lens)
+        self.measure_button = QtWidgets.QToolButton()
+        self.measure_button.setText("Measure")
+        _mnu = QtWidgets.QMenu(self.measure_button)
+        self.act_calibrate = _mnu.addAction("Calibrate")
+        self.act_ruler = _mnu.addAction("Ruler")
+        self.measure_button.setMenu(_mnu)
+        self.measure_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        ctr2.addWidget(self.measure_button)
         self.btn_clear_screen = QtWidgets.QPushButton("Clear screen")
         ctr2.addWidget(self.btn_clear_screen)
         ctr2.addStretch(1)
@@ -784,6 +818,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
         self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
         self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
+        # Coordinate fields for leveling points
+        self.level_x1_spin = QtWidgets.QDoubleSpinBox(); self.level_x1_spin.setDecimals(6); self.level_x1_spin.setRange(-1000.0, 1000.0); self.level_x1_spin.setValue(0.0)
+        self.level_y1_spin = QtWidgets.QDoubleSpinBox(); self.level_y1_spin.setDecimals(6); self.level_y1_spin.setRange(-1000.0, 1000.0); self.level_y1_spin.setValue(0.0)
+        self.btn_level_p1 = QtWidgets.QPushButton("Use pos")
+        self.level_x2_spin = QtWidgets.QDoubleSpinBox(); self.level_x2_spin.setDecimals(6); self.level_x2_spin.setRange(-1000.0, 1000.0); self.level_x2_spin.setValue(0.0)
+        self.level_y2_spin = QtWidgets.QDoubleSpinBox(); self.level_y2_spin.setDecimals(6); self.level_y2_spin.setRange(-1000.0, 1000.0); self.level_y2_spin.setValue(0.0)
+        self.btn_level_p2 = QtWidgets.QPushButton("Use pos")
+        self.level_x3_spin = QtWidgets.QDoubleSpinBox(); self.level_x3_spin.setDecimals(6); self.level_x3_spin.setRange(-1000.0, 1000.0); self.level_x3_spin.setValue(0.0)
+        self.level_y3_spin = QtWidgets.QDoubleSpinBox(); self.level_y3_spin.setDecimals(6); self.level_y3_spin.setRange(-1000.0, 1000.0); self.level_y3_spin.setValue(0.0)
+        self.btn_level_p3 = QtWidgets.QPushButton("Use pos")
         self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
         self.btn_apply_level = QtWidgets.QPushButton("Apply Leveling")
         self.btn_disable_level = QtWidgets.QPushButton("Disable Leveling")
@@ -794,10 +838,21 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
         l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
-        l.addWidget(self.btn_start_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.btn_apply_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.btn_disable_level, row, 0, 1, 2); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 2)
+        l.addWidget(QtWidgets.QLabel("P1 X:"), row, 0); l.addWidget(self.level_x1_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y1_spin, row, 3); l.addWidget(self.btn_level_p1, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P2 X:"), row, 0); l.addWidget(self.level_x2_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y2_spin, row, 3); l.addWidget(self.btn_level_p2, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P3 X:"), row, 0); l.addWidget(self.level_x3_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y3_spin, row, 3); l.addWidget(self.btn_level_p3, row, 4); row += 1
+        l.addWidget(self.btn_start_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_apply_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_disable_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.level_status, row, 0, 1, 5); row += 1
+        self.level_equation = QtWidgets.QLabel("")
+        l.addWidget(self.level_equation, row, 0, 1, 5); row += 1
+        self.level_prompt = QtWidgets.QLabel("")
+        self.level_prompt.setVisible(False)
+        self.btn_level_continue = QtWidgets.QPushButton("Next")
+        self.btn_level_continue.setVisible(False)
+        l.addWidget(self.level_prompt, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_level_continue, row, 0, 1, 5); row += 1
         a.addWidget(lvl_box)
 
         # Raster controls
@@ -829,6 +884,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_raster_capture = QtWidgets.QCheckBox("Capture images")
         self.chk_raster_capture.setChecked(True)
         self.chk_raster_af = QtWidgets.QCheckBox("Autofocus before capture")
+        self.chk_raster_stack = QtWidgets.QCheckBox("Focus stack after capture")
         self.btn_run_raster = QtWidgets.QPushButton("Run Raster")
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setToolTip(
@@ -867,8 +923,9 @@ class MainWindow(QtWidgets.QMainWindow):
         r.addWidget(self.rast_y4_spin, 4, 3)
         r.addWidget(self.btn_raster_p4, 4, 4, 1, 2)
 
-        r.addWidget(self.chk_raster_capture, 5, 0, 1, 3)
-        r.addWidget(self.chk_raster_af, 5, 3, 1, 3)
+        r.addWidget(self.chk_raster_capture, 5, 0, 1, 2)
+        r.addWidget(self.chk_raster_af, 5, 2, 1, 2)
+        r.addWidget(self.chk_raster_stack, 5, 4, 1, 2)
         r.addWidget(self.btn_run_raster, 6, 0, 1, 3)
         r.addWidget(self.btn_stop, 6, 3, 1, 3)
         r.setRowStretch(7, 1)
@@ -885,6 +942,11 @@ class MainWindow(QtWidgets.QMainWindow):
         s.addWidget(self.btn_run_example_script)
         s.addStretch(1)
         rightw.addTab(scripts, "Scripts")
+
+        # ---- System monitor tab
+        self.system_tab = SystemMonitorTab()
+        rightw.addTab(self.system_tab, "System")
+        self.system_tab.start()
 
         # log pane
         self.log_view = QtWidgets.QPlainTextEdit()
@@ -916,7 +978,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _refresh_lens_combo(self):
         self.lens_combo.blockSignals(True)
         self.lens_combo.clear()
-        for lens in sorted(self.lenses.values(), key=lambda l: l.name):
+
+        # First add lenses in the preferred order if they exist
+        preset = [
+            self.lenses[name] for name in PRESET_LENS_ORDER if name in self.lenses
+        ]
+        # Then append any remaining lenses alphabetically
+        remaining = sorted(
+            [lens for name, lens in self.lenses.items() if name not in PRESET_LENS_ORDER],
+            key=lambda l: l.name,
+        )
+        for lens in preset + remaining:
             self.lens_combo.addItem(
                 f"{lens.name} ({lens.um_per_px:.3f} µm/px)", lens.name
             )
@@ -940,14 +1012,12 @@ class MainWindow(QtWidgets.QMainWindow):
             w.setEnabled(p4)
 
     def _connect_signals(self):
-        self.btn_stage_connect.clicked.connect(self._connect_stage_async)
-        self.btn_stage_disconnect.clicked.connect(self._disconnect_stage)
-        self.btn_cam_connect.clicked.connect(self._connect_camera)
-        self.btn_cam_disconnect.clicked.connect(self._disconnect_camera)
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
-        self.lens_combo.currentIndexChanged.connect(self._on_lens_changed)
+        self.btn_add_lens.clicked.connect(self._add_lens)
+        # ensure index is emitted as int for lens change
+        self.lens_combo.currentIndexChanged[int].connect(self._on_lens_changed)
         self.btn_clear_screen.clicked.connect(self.measure_view.clear_overlays)
         self.btn_home_all.clicked.connect(self._home_all)
         self.btn_home_x.clicked.connect(lambda: self._home_axis('x'))
@@ -961,9 +1031,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_jog_button(self.btn_zp, self.stepz_spin, self.feedz_spin, sz=1)
         self.btn_move_to_coords.clicked.connect(self._move_to_coords)
         self.btn_autofocus.clicked.connect(self._run_autofocus)
+        self.btn_level_p1.clicked.connect(lambda: self._set_level_point(1))
+        self.btn_level_p2.clicked.connect(lambda: self._set_level_point(2))
+        self.btn_level_p3.clicked.connect(lambda: self._set_level_point(3))
         self.btn_start_level.clicked.connect(self._run_leveling)
         self.btn_apply_level.clicked.connect(self._apply_leveling)
         self.btn_disable_level.clicked.connect(self._disable_leveling)
+        self.btn_level_continue.clicked.connect(self._on_level_continue)
         self.level_method.currentTextChanged.connect(self._update_leveling_method)
         self.raster_mode_combo.currentTextChanged.connect(self._update_raster_mode)
         self.btn_focus_stack.clicked.connect(self._run_focus_stack)
@@ -980,7 +1054,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
-        self.act_calibrate.triggered.connect(self._start_calibration)
+        self.act_calibrate.triggered.connect(self._calibrate)
         self.act_ruler.triggered.connect(self._start_ruler)
         self.measure_view.calibration_measured.connect(self._on_calibration_done)
 
@@ -1060,8 +1134,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self.lenses[name] = lens
         self.current_lens = lens
         self.profiles.set('measurement.current_lens', name)
+        self.profiles.set(f'measurement.lenses.{name}.um_per_px', lens.um_per_px)
         self.profiles.save()
         self._update_lens_for_resolution()
+
+    def _add_lens(self):
+        name, ok = QtWidgets.QInputDialog.getText(self, "Add Lens", "Lens name:")
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+        lens = self.lenses.get(name)
+        if lens is None:
+            lens = Lens(name, 1.0)
+            self.lenses[name] = lens
+            self.profiles.set(f"measurement.lenses.{name}.um_per_px", 1.0)
+            self.profiles.save()
+        self.current_lens = lens
+        self._refresh_lens_combo()
+        idx = self.lens_combo.findData(name)
+        if idx >= 0:
+            self.lens_combo.setCurrentIndex(idx)
+            self._on_lens_changed(idx)
 
     def _browse_capture_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
@@ -1154,14 +1249,67 @@ class MainWindow(QtWidgets.QMainWindow):
         if cb:
             QtCore.QTimer.singleShot(0, lambda r=res: cb(r))
 
+    def _show_camera_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Cameras")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lst = QtWidgets.QListWidget()
+        lay.addWidget(lst)
+        for dev_id, name in list_cameras():
+            item = QtWidgets.QListWidgetItem(name)
+            item.setData(QtCore.Qt.UserRole, dev_id)
+            if self.camera and getattr(self.camera, "device_id", None) == dev_id:
+                item.setCheckState(QtCore.Qt.Checked)
+            lst.addItem(item)
+        lst.itemDoubleClicked.connect(lambda it: self._on_camera_item_double(it, dlg))
+        dlg.exec()
+
+    def _on_camera_item_double(self, item, dlg):
+        dev_id = item.data(QtCore.Qt.UserRole)
+        if self.camera and getattr(self.camera, "device_id", None) == dev_id:
+            self._disconnect_camera()
+        else:
+            self._disconnect_camera()
+            self._connect_camera(dev_id)
+        dlg.accept()
+
+    def _show_stage_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Stages")
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lst = QtWidgets.QListWidget()
+        lay.addWidget(lst)
+        ports = list(list_marlin_ports())
+        if self.stage and getattr(self.stage, "port", None):
+            cur = self.stage.port
+            if cur not in ports:
+                ports.insert(0, cur)
+        for port in ports:
+            item = QtWidgets.QListWidgetItem(port)
+            item.setData(QtCore.Qt.UserRole, port)
+            if self.stage and getattr(self.stage, "port", None) == port:
+                item.setCheckState(QtCore.Qt.Checked)
+            lst.addItem(item)
+        lst.itemDoubleClicked.connect(lambda it: self._on_stage_item_double(it, dlg))
+        dlg.exec()
+
+    def _on_stage_item_double(self, item, dlg):
+        port = item.data(QtCore.Qt.UserRole)
+        if self.stage and getattr(self.stage, "port", None) == port:
+            self._disconnect_stage()
+        else:
+            self._disconnect_stage()
+            self._connect_stage_async(port)
+        dlg.accept()
+
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
-    def _connect_camera(self):
+    def _connect_camera(self, dev_id=None):
         if self.camera is not None:
             log("UI: camera already connected; skip re-open")
             return
         try:
-            cam = create_camera()
+            cam = create_camera(dev_id)
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
@@ -1176,10 +1324,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
+            self._update_camera_control_availability()
             log("UI: camera connected")
         except Exception as e:
             log(f"UI: camera connect failed: {e}")
-        self._update_cam_buttons()
 
     def _disconnect_camera(self):
         if not self.camera:
@@ -1196,18 +1344,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_combo.clear()
         self.bin_combo.clear()
         self.depth_combo.clear()
-        self._update_cam_buttons()
+        self._update_camera_control_availability(None)
 
-    def _connect_stage_async(self):
+    def _connect_stage_async(self, port=None):
         if self.stage is not None:
             log("UI: stage already connected; skip re-probe")
             return
 
         def connect_stage():
-            port = find_marlin_port()
-            if not port:
+            p = port or find_marlin_port()
+            if not p:
                 return None
-            return StageMarlin(port)
+            return StageMarlin(p)
 
         self._conn_thread, self._conn_worker = run_async(connect_stage)
         self._conn_worker.finished.connect(self._on_stage_connect)
@@ -1220,7 +1368,6 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 log("UI: stage not found")
             self.stage_status.setText("Stage: not found")
-            self._update_stage_buttons()
         else:
             self.stage = stage
             info = self.stage.get_info()
@@ -1237,7 +1384,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage_bounds = None
             log("UI: stage connected (async)")
             self._attach_stage_worker()
-            self._update_stage_buttons()
         thread = self._conn_thread
         self._conn_thread = self._conn_worker = None
         if thread and thread != QtCore.QThread.currentThread():
@@ -1265,17 +1411,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_status.setText("Stage: —")
         self.stage_pos.setText("Pos: —")
         self.stage_bounds = None
-        self._update_stage_buttons()
-
-    def _update_stage_buttons(self):
-        connected = self.stage is not None
-        self.btn_stage_connect.setEnabled(not connected)
-        self.btn_stage_disconnect.setEnabled(connected)
-
-    def _update_cam_buttons(self):
-        connected = self.camera is not None
-        self.btn_cam_connect.setEnabled(not connected)
-        self.btn_cam_disconnect.setEnabled(connected)
 
     def _on_stage_position(self, pos):
         if not pos:
@@ -1332,7 +1467,31 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         frame = self.camera.get_latest_frame()
         if frame is not None:
-            qimg = numpy_to_qimage(frame)
+            processed = frame
+            try:
+                has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
+            except Exception:
+                has_cuda = False
+            if has_cuda:
+                try:
+                    gpu = cv2.cuda_GpuMat()
+                    gpu.upload(frame)
+                    if frame.ndim == 3 and frame.shape[2] == 3:
+                        gpu = cv2.cuda.cvtColor(gpu, cv2.COLOR_BGR2RGB)
+                    processed = gpu.download()
+                except Exception:
+                    processed = (
+                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        if frame.ndim == 3 and frame.shape[2] == 3
+                        else frame
+                    )
+            else:
+                processed = (
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if frame.ndim == 3 and frame.shape[2] == 3
+                    else frame
+                )
+            qimg = numpy_to_qimage(processed)
             self.measure_view.set_image(qimg)
 
         if self.autoexp_chk.isChecked():
@@ -1533,6 +1692,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.speed_spin.setValue(val)
         self.speed_spin.blockSignals(False)
         self._apply_speed()
+    def _update_camera_control_availability(self, cam=None):
+        cam = cam if cam is not None else self.camera
+        has = lambda attr: cam is not None and hasattr(cam, attr)
+        auto = self.autoexp_chk.isChecked()
+        self.autoexp_chk.setEnabled(has("set_exposure_ms"))
+        self.exp_spin.setEnabled(has("set_exposure_ms") and not auto)
+        self.gain_spin.setEnabled(has("set_gain") and not auto)
+        self.brightness_spin.setEnabled(has("set_brightness"))
+        self.brightness_slider.setEnabled(has("set_brightness"))
+        self.contrast_spin.setEnabled(has("set_contrast"))
+        self.contrast_slider.setEnabled(has("set_contrast"))
+        self.saturation_spin.setEnabled(has("set_saturation"))
+        self.saturation_slider.setEnabled(has("set_saturation"))
+        self.hue_spin.setEnabled(has("set_hue"))
+        self.hue_slider.setEnabled(has("set_hue"))
+        self.gamma_spin.setEnabled(has("set_gamma"))
+        self.gamma_slider.setEnabled(has("set_gamma"))
+        self.raw_chk.setEnabled(has("set_raw_fast_mono"))
+        roi = has("set_center_roi")
+        self.btn_roi_full.setEnabled(roi)
+        self.btn_roi_2048.setEnabled(roi)
+        self.btn_roi_1024.setEnabled(roi)
+        self.btn_roi_512.setEnabled(roi)
 
     def _sync_cam_controls(self):
         if not self.camera:
@@ -1593,6 +1775,7 @@ class MainWindow(QtWidgets.QMainWindow):
             finally:
                 self.exp_spin.blockSignals(False)
                 self.gain_spin.blockSignals(False)
+        self._update_camera_control_availability()
 
     def _apply_gain(self, again=None):
         if not self.camera:
@@ -1671,21 +1854,20 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_lens_for_resolution(self):
         """Update current lens calibration for active resolution."""
         res_key = self._current_res_key()
-        if not res_key:
-            return
         lens = self.current_lens
-        if res_key in lens.calibrations:
-            lens.um_per_px = lens.calibrations[res_key]
-        elif lens.calibrations:
-            # scale from first known calibration
-            k, v = next(iter(lens.calibrations.items()))
-            try:
-                w0, _ = map(int, k.split("x"))
-                w, _ = map(int, res_key.split("x"))
-                lens.um_per_px = v * (w0 / w)
-            except Exception:
-                lens.um_per_px = v
-        lens.calibrations[res_key] = lens.um_per_px
+        if res_key:
+            if res_key in lens.calibrations:
+                lens.um_per_px = lens.calibrations[res_key]
+            elif lens.calibrations:
+                # scale from first known calibration
+                k, v = next(iter(lens.calibrations.items()))
+                try:
+                    w0, _ = map(int, k.split("x"))
+                    w, _ = map(int, res_key.split("x"))
+                    lens.um_per_px = v * (w0 / w)
+                except Exception:
+                    lens.um_per_px = v
+            lens.calibrations[res_key] = lens.um_per_px
         self._refresh_lens_combo()
         self.measure_view.set_scale_bar(
             self.chk_scale_bar.isChecked(), lens.um_per_px
@@ -1831,18 +2013,46 @@ class MainWindow(QtWidgets.QMainWindow):
         def do_capture():
             self.stage.wait_for_moves()
             time.sleep(0.03)
-            img = self.camera.snap()
+            try:
+                has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
+            except Exception:
+                has_cuda = False
+            try:
+                img = self.camera.snap(use_cuda=has_cuda)
+            except TypeError:
+                img = self.camera.snap()
             if img is not None:
-                if self.chk_scale_bar.isChecked():
+                if has_cuda:
                     try:
-                        img = draw_scale_bar(img, self.current_lens.um_per_px)
+                        gpu = cv2.cuda_GpuMat()
+                        gpu.upload(img)
+                        if self.chk_scale_bar.isChecked():
+                            img = draw_scale_bar(gpu, self.current_lens.um_per_px)
+                        else:
+                            img = gpu.download()
                     except Exception as e:
-                        log(f"Scale bar draw error: {e}")
+                        log(f"CUDA capture path failed: {e}; falling back to CPU")
+                        has_cuda = False
+                        if self.chk_scale_bar.isChecked():
+                            try:
+                                img = draw_scale_bar(img, self.current_lens.um_per_px)
+                            except Exception as e:
+                                log(f"Scale bar draw error: {e}")
+                else:
+                    if self.chk_scale_bar.isChecked():
+                        try:
+                            img = draw_scale_bar(img, self.current_lens.um_per_px)
+                        except Exception as e:
+                            log(f"Scale bar draw error: {e}")
                 pos = self.stage.get_position()
                 meta = {
                     "Camera": self.camera.name(),
                     "Position": pos,
                     "Lens": self.current_lens.name,
+                    "LensUmPerPx": self.current_lens.um_per_px,
+                    "Exposure_ms": getattr(self.camera, "get_exposure_ms", lambda: None)(),
+                    "Gain": getattr(self.camera, "get_gain", lambda: None)(),
+                    "Time": datetime.datetime.now().isoformat(),
                 }
                 self.image_writer.save_single(
                     img,
@@ -1918,6 +2128,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._level_thread = None
         self._level_worker = None
         self._leveling = False
+        self._level_continue_event.set()
+        self.level_prompt.hide()
+        self.btn_level_continue.hide()
         self._update_stop_button()
 
     @QtCore.Slot(object, object)
@@ -1927,16 +2140,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if err:
             log(f"Leveling error: {err}")
             self._set_leveling_status("Error")
+            self.level_equation.setText("")
             QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
         else:
             self._set_leveling_status("Complete")
             eq = model.equation() if model else ""
             log(f"Leveling model ({model.kind.value}): {eq}")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Leveling",
-                f"Leveling complete.\n{model.kind.value} model: {eq}",
-            )
+            self.level_equation.setText(eq)
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
@@ -1956,26 +2166,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_mgr.areas.clear()
         self.leveling_enabled = False
         self._set_leveling_status("Disabled")
+        self.level_equation.setText("")
 
-    @QtCore.Slot(int, int)
-    def _prompt_manual_focus(self, idx: int, total: int):
-        QtWidgets.QMessageBox.information(
-            self,
-            "Leveling",
-            f"Manually focus at point {idx} of {total} then press OK to continue.",
-        )
+    @QtCore.Slot(str)
+    def _set_level_prompt(self, text: str):
+        self.level_prompt.setText(text)
+        self.level_prompt.setVisible(True)
+        self.btn_level_continue.setVisible(True)
 
-    @QtCore.Slot(int, int, bool)
-    def _prompt_move_to_point(self, idx: int, total: int, auto: bool):
-        if auto:
-            msg = (
-                f"Move the stage to point {idx} of {total} then press OK to autofocus."
-            )
-        else:
-            msg = (
-                f"Move the stage to point {idx} of {total}, focus manually, then press OK to continue."
-            )
-        QtWidgets.QMessageBox.information(self, "Leveling", msg)
+    @QtCore.Slot()
+    def _on_level_continue(self):
+        self.btn_level_continue.setVisible(False)
+        self._level_continue_event.set()
+
+    def _set_level_point(self, idx: int):
+        if not self.stage_worker:
+            log("Leveling point ignored: stage not connected")
+            QtWidgets.QMessageBox.warning(self, "Stage", "Stage not connected.")
+            return
+
+        def cb(pos):
+            if not pos:
+                return
+            try:
+                x, y, _ = pos
+            except Exception:
+                return
+            if idx == 1:
+                self.level_x1_spin.setValue(x)
+                self.level_y1_spin.setValue(y)
+            elif idx == 2:
+                self.level_x2_spin.setValue(x)
+                self.level_y2_spin.setValue(y)
+            elif idx == 3:
+                self.level_x3_spin.setValue(x)
+                self.level_y3_spin.setValue(y)
+
+        self.stage_worker.enqueue(self.stage.get_position, callback=cb)
 
     def _run_leveling(self):
         if self._leveling:
@@ -2006,32 +2233,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_leveling_status("Starting...")
 
         def do_level():
-            bounds = self.stage_bounds or self._stage_bounds_fallback or {
-                "xmin": 0.0,
-                "xmax": 10.0,
-                "ymin": 0.0,
-                "ymax": 10.0,
-            }
-            xmin, xmax = bounds["xmin"], bounds["xmax"]
-            ymin, ymax = bounds["ymin"], bounds["ymax"]
+            x1 = self.level_x1_spin.value()
+            y1 = self.level_y1_spin.value()
+            x2 = self.level_x2_spin.value()
+            y2 = self.level_y2_spin.value()
+            x3 = self.level_x3_spin.value()
+            y3 = self.level_y3_spin.value()
+            xs_vals = [x1, x2, x3]
+            ys_vals = [y1, y2, y3]
+            xmin, xmax = min(xs_vals), max(xs_vals)
+            ymin, ymax = min(ys_vals), max(ys_vals)
             if method == "Three-point":
-                total = 3
+                coords = [(x1, y1), (x2, y2), (x3, y3)]
+                total = len(coords)
                 pts = []
-                for idx in range(1, total + 1):
+                for idx, (x, y) in enumerate(coords, 1):
                     QtCore.QMetaObject.invokeMethod(
                         self,
                         "_set_leveling_status",
                         QtCore.Qt.QueuedConnection,
-                        QtCore.Q_ARG(str, f"Select point {idx}/{total}"),
+                        QtCore.Q_ARG(str, f"Point {idx}/{total}"),
                     )
-                    QtCore.QMetaObject.invokeMethod(
-                        self,
-                        "_prompt_move_to_point",
-                        QtCore.Qt.BlockingQueuedConnection,
-                        QtCore.Q_ARG(int, idx),
-                        QtCore.Q_ARG(int, total),
-                        QtCore.Q_ARG(bool, auto_mode),
-                    )
+                    stage.move_absolute(x=x, y=y, feed_mm_per_min=feed_xy)
+                    stage.wait_for_moves()
                     if auto_mode:
                         af = AutoFocus(stage, camera)
                         _ = af.coarse_to_fine(
@@ -2041,11 +2265,24 @@ class MainWindow(QtWidgets.QMainWindow):
                             fine_step_mm=fine,
                             feed_mm_per_min=feed_z,
                         )
+                    else:
+                        self._level_continue_event.clear()
+                        msg = (
+                            f"Manually focus at point {idx} of {total} then press Next to continue."
+                        )
+                        QtCore.QMetaObject.invokeMethod(
+                            self,
+                            "_set_level_prompt",
+                            QtCore.Qt.QueuedConnection,
+                            QtCore.Q_ARG(str, msg),
+                        )
+                        self._level_continue_event.wait()
                     pos = stage.get_position()
                     if pos:
-                        pts.append((pos[0], pos[1], pos[2]))
+                        x_meas, y_meas, z = pos
                     else:
-                        pts.append((0.0, 0.0, 0.0))
+                        x_meas, y_meas, z = x, y, 0.0
+                    pts.append((x_meas, y_meas, z))
             else:
                 xs = np.linspace(xmin, xmax, cols)
                 ys = np.linspace(ymin, ymax, rows)
@@ -2071,13 +2308,17 @@ class MainWindow(QtWidgets.QMainWindow):
                             feed_mm_per_min=feed_z,
                         )
                     else:
+                        self._level_continue_event.clear()
+                        msg = (
+                            f"Manually focus at point {idx} of {total} then press Next to continue."
+                        )
                         QtCore.QMetaObject.invokeMethod(
                             self,
-                            "_prompt_manual_focus",
-                            QtCore.Qt.BlockingQueuedConnection,
-                            QtCore.Q_ARG(int, idx),
-                            QtCore.Q_ARG(int, total),
+                            "_set_level_prompt",
+                            QtCore.Qt.QueuedConnection,
+                            QtCore.Q_ARG(str, msg),
                         )
+                        self._level_continue_event.wait()
                     pos = stage.get_position()
                     if pos:
                         x_meas, y_meas, z = pos
@@ -2205,6 +2446,9 @@ class MainWindow(QtWidgets.QMainWindow):
             feed_y_mm_min=self.feedy_spin.value(),
             autofocus=self.chk_raster_af.isChecked(),
             capture=self.chk_raster_capture.isChecked(),
+            stack=self.chk_raster_stack.isChecked(),
+            stack_range_mm=float(self.stack_range.value()),
+            stack_step_mm=float(self.stack_step.value()),
         )
         # common required points
         x1 = self.rast_x1_spin.value()
@@ -2322,6 +2566,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage.get_position, callback=self._on_stage_position
             ),
             lens_name=self.current_lens.name,
+            lens_um_per_px=self.current_lens.um_per_px,
             scale_bar_um_per_px=self.current_lens.um_per_px if self.chk_scale_bar.isChecked() else None,
         )
         self._raster_runner = runner
@@ -2349,6 +2594,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._level_thread:
             log("Leveling: stop requested")
             self._level_thread.requestInterruption()
+            self._level_continue_event.set()
         if self._stack_thread:
             log("Focus stack: stop requested")
             self._stack_thread.requestInterruption()
@@ -2392,7 +2638,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- MEASUREMENT ---------------------------
 
-    def _start_calibration(self):
+    def _calibrate(self):
         self.measure_view.start_calibration()
 
     def _start_ruler(self):
@@ -2423,7 +2669,11 @@ class MainWindow(QtWidgets.QMainWindow):
             res_key = self._current_res_key() or "default"
             self.current_lens.calibrations[res_key] = um_per_px
             self.profiles.set(
-                f"measurement.lenses.{self.current_lens.name}.{res_key}", um_per_px
+                f"measurement.lenses.{self.current_lens.name}.calibrations.{res_key}",
+                um_per_px,
+            )
+            self.profiles.set(
+                f"measurement.lenses.{self.current_lens.name}.um_per_px", um_per_px
             )
             self.profiles.save()
             self._refresh_lens_combo()
@@ -2506,5 +2756,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.camera.stop_stream()
                 except Exception:
                     pass
+            if hasattr(self, "system_tab"):
+                self.system_tab.stop()
         finally:
             return super().closeEvent(e)

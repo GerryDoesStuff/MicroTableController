@@ -94,6 +94,23 @@ def test_raster_mode_control_enablement(make_window, qt_app):
     assert win.rast_x4_spin.isEnabled()
     assert win.rast_y4_spin.isEnabled()
     assert win.btn_raster_p4.isEnabled()
+    
+@pytest.mark.parametrize(
+    "mode,p3_en,p4_en",
+    [
+        ("2-point", False, False),
+        ("3-point", True, False),
+        ("4-point", True, True),
+    ],
+)
+def test_raster_mode_control_enablement(make_window, qt_app, mode, p3_en, p4_en):
+    win, _ = make_window
+    win.raster_mode_combo.setCurrentText(mode)
+    qt_app.processEvents()
+    for w in (win.rast_x3_spin, win.rast_y3_spin, win.btn_raster_p3):
+        assert w.isEnabled() is p3_en
+    for w in (win.rast_x4_spin, win.rast_y4_spin, win.btn_raster_p4):
+        assert w.isEnabled() is p4_en
 
 def test_raster_mode_two_point(make_window):
     win, captured = make_window
@@ -163,3 +180,20 @@ def test_raster_mode_four_point(make_window):
     assert cfg.y3_mm == pytest.approx(3.0)
     assert cfg.x4_mm == pytest.approx(5.0)
     assert cfg.y4_mm == pytest.approx(3.0)
+
+
+def test_raster_stack_config(make_window):
+    win, captured = make_window
+    win.raster_mode_combo.setCurrentText("2-point")
+    win.rast_x1_spin.setValue(0.0)
+    win.rast_y1_spin.setValue(0.0)
+    win.rast_x2_spin.setValue(1.0)
+    win.rast_y2_spin.setValue(1.0)
+    win.chk_raster_stack.setChecked(True)
+    win.stack_range.setValue(0.7)
+    win.stack_step.setValue(0.02)
+    win._run_raster()
+    cfg = captured['cfg']
+    assert cfg.stack is True
+    assert cfg.stack_range_mm == pytest.approx(0.7)
+    assert cfg.stack_step_mm == pytest.approx(0.02)

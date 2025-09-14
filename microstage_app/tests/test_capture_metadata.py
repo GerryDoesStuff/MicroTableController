@@ -42,7 +42,12 @@ def test_default_capture_preserves_metadata(monkeypatch, tmp_path, qt_app):
 
     win = mw.MainWindow()
     win.stage = SimpleNamespace(wait_for_moves=lambda: None, get_position=lambda: (1, 2, 3))
-    win.camera = SimpleNamespace(snap=lambda: np.zeros((5, 5, 3), dtype=np.uint8), name=lambda: "MockCam")
+    win.camera = SimpleNamespace(
+        snap=lambda: np.zeros((5, 5, 3), dtype=np.uint8),
+        name=lambda: "MockCam",
+        get_exposure_ms=lambda: 12.3,
+        get_gain=lambda: 1.5,
+    )
     win.capture_dir = str(tmp_path)
     win.capture_name = "meta_test"
     win.auto_number = False
@@ -56,5 +61,9 @@ def test_default_capture_preserves_metadata(monkeypatch, tmp_path, qt_app):
     assert img.info.get("Camera") == "MockCam"
     assert img.info.get("Lens") == "LensMock"
     assert img.info.get("Position") == "(1, 2, 3)"
+    assert img.info.get("Exposure_ms") == "12.3"
+    assert img.info.get("Gain") == "1.5"
+    assert img.info.get("LensUmPerPx") == "1.0"
+    assert "Time" in img.info
 
     win.preview_timer.stop(); win.fps_timer.stop(); win.close()

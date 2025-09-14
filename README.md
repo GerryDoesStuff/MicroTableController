@@ -13,11 +13,23 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```
    On Linux, OpenCV (`opencv-python`) requires the system library `libGL.so.1`.
    Install it via your package manager, e.g. `sudo apt-get install -y libgl1`,
-   or run the helper script `scripts/install_libgl1.sh`. For headless setups,
-   you may instead install `opencv-python-headless` to avoid the `libGL`
-   dependency.
+  or run the helper script `scripts/install_libgl1.sh`. For headless setups,
+  you may instead install `opencv-python-headless` to avoid the `libGL`
+  dependency. The system monitor tab uses `psutil`; NVIDIA GPU metrics also
+  require the optional `nvidia-ml-py3` package and appropriate drivers.
+
+   Optional GPU acceleration for captures and autofocus metrics is available
+   when OpenCV is built with CUDA modules. The application automatically
+   detects CUDA support and falls back to CPU processing if the modules are
+   absent.
 3. Install the **ToupTek / Toupcam SDK for Windows**. Copy the `toupcam.dll` (x64) next to `main.py` (or put it in your PATH).
    The SDK usually ships `toupcam.py` and examples; this app will auto-import if present.
+   Basic USB webcams are also supported via OpenCV's ``VideoCapture`` and do not
+   require this SDK, though only simple streaming and resolution selection are
+   available. The app probes a handful of ``VideoCapture`` indices (0–3) to
+   discover attached USB cameras. Generic webcam support depends on the
+   ``opencv-python`` package, and any camera controls not exposed by a webcam
+   (e.g. brightness or gain) will appear greyed out in the UI.
 4. Connect your **Marlin** stage (Mega2560+RAMPS), power it on.
 5. Run the app:
    ```bash
@@ -26,8 +38,14 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 
 > No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
 
+### Troubleshooting
+
+Certain sliders or checkboxes may be disabled if the connected webcam does not
+advertise those capabilities. Only controls for features reported by the camera
+will be enabled.
+
 ## Features
-- Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID) and ToupCam via SDK enumerate.
+- Device discovery: auto-detects Marlin via `M115` (verifying custom machine name and optional UUID), ToupCam via SDK enumeration, and probes a couple of OpenCV webcam indices.
 - Live preview + jog controls (XY/Z), home, go-to.
 - Capture primitives: move → settle → snap.
 - Modes: Area (serpentine), Timelapse, Combined.
@@ -37,6 +55,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 - Robustness: hot-plug (to be expanded), watchdogs (to be expanded), structured logs.
 - Scripting: run custom recipes from `microstage_app/scripts/` with a safe API.
 - Validated capture directory/filename fields with optional auto-numbering to prevent overwrites.
+- Optional CUDA acceleration for capture, autofocus metrics, and scale-bar
+  drawing when OpenCV is built with CUDA; falls back to CPU otherwise.
+- System monitor tab displaying CPU load and, when supported, NVIDIA GPU
+  utilization via NVML.
 
 ## Capture directory & file naming
 

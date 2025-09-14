@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import os
 import time
+import datetime
 from math import isclose
 from threading import Event
 from typing import Optional
@@ -21,6 +23,10 @@ class RasterConfig:
     top-left (``x1_mm``, ``y1_mm``), top-right (``x2_mm``, ``y2_mm``), and
     bottom-right (``x3_mm``, ``y3_mm``) corners of the area. The remaining
     corner is inferred from these coordinates.
+
+    When ``stack`` is enabled a small focus stack is captured at each tile,
+    stepping the stage through ``stack_range_mm`` in increments of
+    ``stack_step_mm``.
     """
 
     rows: int = 5
@@ -39,6 +45,9 @@ class RasterConfig:
     feed_y_mm_min: float = 50.0
     autofocus: bool = False
     capture: bool = True
+    stack: bool = False
+    stack_range_mm: float = 0.5
+    stack_step_mm: float = 0.01
 
 class RasterRunner:
     def __init__(
@@ -53,6 +62,7 @@ class RasterRunner:
         fmt="tif",
         position_cb=None,
         lens_name=None,
+        lens_um_per_px: Optional[float] = None,
         scale_bar_um_per_px: Optional[float] = None,
     ):
         self.stage = stage
@@ -65,6 +75,7 @@ class RasterRunner:
         self.fmt = fmt
         self.position_cb = position_cb
         self.lens_name = lens_name
+        self.lens_um_per_px = lens_um_per_px
         self.scale_bar_um_per_px = scale_bar_um_per_px
 
         self.coord_matrix = None
@@ -187,6 +198,7 @@ class RasterRunner:
 
                 do_af = bool(self.cfg.autofocus and AutoFocus)
                 do_capture = bool(self.cfg.capture)
+                do_stack = bool(self.cfg.stack and AutoFocus)
 
                 if do_af:
                     af = AutoFocus(self.stage, self.camera)
@@ -205,6 +217,12 @@ class RasterRunner:
                             "Camera": self.camera.name(),
                             "Position": pos,
                             "Lens": self.lens_name,
+                            "LensUmPerPx": self.lens_um_per_px,
+                            "Exposure_ms": getattr(self.camera, "get_exposure_ms", lambda: None)(),
+                            "Gain": getattr(self.camera, "get_gain", lambda: None)(),
+                            "Time": datetime.datetime.now().isoformat(),
+                            "Row": r,
+                            "Column": save_c,
                         }
                         self.writer.save_single(
                             img,
@@ -214,5 +232,20 @@ class RasterRunner:
                             fmt=self.fmt,
                             metadata=metadata,
                         )
+                    time.sleep(1)
+
+                if do_stack:
+                    af = AutoFocus(self.stage, self.camera)
+                    stack_dir = os.path.join(
+                        self.directory or self.writer.run_dir,
+                        f"{self.base_name}_r{r:04d}_c{c:04d}_stack",
+                    )
+                    af.focus_stack(
+                        range_mm=self.cfg.stack_range_mm,
+                        step_mm=self.cfg.stack_step_mm,
+                        writer=self.writer,
+                        directory=stack_dir,
+                        lens_name=self.lens_name,
+                    )
                     time.sleep(1)
 

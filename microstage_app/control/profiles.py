@@ -36,10 +36,10 @@ DEFAULTS = {
     },
     'measurement': {
         'lenses': {
-            '5x': 1.0,
-            '10x': 1.0,
-            '20x': 1.0,
-            '50x': 1.0,
+            '5x': {'um_per_px': 1.0, 'calibrations': {}},
+            '10x': {'um_per_px': 1.0, 'calibrations': {}},
+            '20x': {'um_per_px': 1.0, 'calibrations': {}},
+            '50x': {'um_per_px': 1.0, 'calibrations': {}},
         }
     },
     # persistent capture settings
@@ -91,6 +91,33 @@ class Profiles:
                 meas.setdefault('lenses', {})
                 meas['lenses']['10x'] = meas.pop('pixel_size')
                 changed = True
+            # migrate legacy lens entries (floats or flat dicts)
+            lenses = meas.get('lenses', {}) if isinstance(meas, dict) else {}
+            if isinstance(lenses, dict):
+                for lname, cfg in list(lenses.items()):
+                    if isinstance(cfg, (int, float)):
+                        lenses[lname] = {
+                            'um_per_px': float(cfg),
+                            'calibrations': {},
+                        }
+                        changed = True
+                    elif isinstance(cfg, dict):
+                        um = cfg.get('um_per_px')
+                        cal = cfg.get('calibrations') if isinstance(cfg.get('calibrations'), dict) else {}
+                        extras = {
+                            k: v for k, v in cfg.items() if k not in ('um_per_px', 'calibrations')
+                            and isinstance(v, (int, float))
+                        }
+                        if um is None:
+                            um = next(iter(extras.values()), 1.0)
+                            changed = True
+                        if extras:
+                            cal.update(extras)
+                            changed = True
+                        lenses[lname] = {
+                            'um_per_px': float(um),
+                            'calibrations': cal,
+                        }
             data['version'] = cls.VERSION
             changed = True
         return changed

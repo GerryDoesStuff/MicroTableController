@@ -1,4 +1,3 @@
-import os
 import threading
 from types import SimpleNamespace
 
@@ -44,6 +43,7 @@ class CameraMock:
 class WriterMock:
     def __init__(self):
         self.saved = []
+        self.run_dir = "run_dir"
     def save_single(
         self,
         img,
@@ -86,6 +86,7 @@ def test_raster_traversal_modes(mode, serpentine):
     # expected moves and filenames
     expected_moves = []
     expected_files = []
+    expected_meta = []
     current_x, current_y = coord_matrix[0][0]
     for r in range(cfg.rows):
         forward = (r % 2 == 0) or (not serpentine)
@@ -98,9 +99,12 @@ def test_raster_traversal_modes(mode, serpentine):
                 expected_moves.append((dx, dy, 0.0))
             current_x, current_y = target_x, target_y
             expected_files.append(f"foo_r{r:04d}_c{c:04d}")
+            expected_meta.append((r, c))
 
     assert stage.moves == expected_moves
     assert [f[2] for f in writer.saved] == expected_files
+    assert [m[5]["Row"] for m in writer.saved] == [r for r, _ in expected_meta]
+    assert [m[5]["Column"] for m in writer.saved] == [c for _, c in expected_meta]
 
 
 def test_raster_capture_disabled():
@@ -207,6 +211,88 @@ def test_raster_operation_order(monkeypatch, autofocus, capture, expected):
         events = events[1:]
 
     assert events == expected
+
+
+def test_raster_focus_stack_order(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1, autofocus=True, capture=True, stack=True)
+
+    events = []
+
+    class DummyAF:
+        def __init__(self, stage, camera):
+            pass
+
+        def coarse_to_fine(self, metric=None, **kwargs):
+            events.append("autofocus")
+
+        def focus_stack(
+            self,
+            range_mm=None,
+            step_mm=None,
+            writer=None,
+            directory=None,
+            lens_name=None,
+        ):
+            events.append("focus_stack")
+
+    monkeypatch.setattr(raster, "AutoFocus", DummyAF)
+
+    def fake_snap():
+        events.append("capture")
+        return object()
+
+    monkeypatch.setattr(cam, "snap", fake_snap)
+
+    def fake_sleep(delay):
+        events.append(("sleep", delay))
+
+    monkeypatch.setattr(raster.time, "sleep", fake_sleep)
+
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+
+    if events and events[0] == ("sleep", 0.03):
+        events = events[1:]
+
+    ops = [e for e in events if not isinstance(e, tuple)]
+    assert ops == ["autofocus", "capture", "focus_stack"]
+    assert events[-2:] == ["focus_stack", ("sleep", 1)]
+
+
+def test_raster_no_stack(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(rows=1, cols=1, autofocus=True, capture=True, stack=False)
+
+    events = []
+
+    class DummyAF:
+        def __init__(self, stage, camera):
+            pass
+
+        def coarse_to_fine(self, metric=None, **kwargs):
+            events.append("autofocus")
+
+        def focus_stack(self, *args, **kwargs):
+            events.append("focus_stack")
+
+    monkeypatch.setattr(raster, "AutoFocus", DummyAF)
+
+    def fake_snap():
+        events.append("capture")
+        return object()
+
+    monkeypatch.setattr(cam, "snap", fake_snap)
+    monkeypatch.setattr(raster.time, "sleep", lambda s: None)
+
+    runner = RasterRunner(stage, cam, writer, cfg)
+    runner.run()
+
+    assert "focus_stack" not in events
 
 
 def test_raster_cancels_with_event(monkeypatch):
@@ -328,7 +414,7 @@ def test_raster_capture_contains_scale_bar(monkeypatch):
     orig_truetype = ImageFont.truetype
 
     def fake_truetype(font, size=10, *args, **kwargs):
-        if isinstance(font, (str, bytes)) and os.path.basename(font) == "DejaVuSans.ttf":
+        if isinstance(font, (str, bytes)):
             raise OSError("missing font")
         return orig_truetype(font, size, *args, **kwargs)
 

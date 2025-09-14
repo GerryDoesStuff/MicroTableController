@@ -6,6 +6,20 @@ import ctypes
 import numpy as np
 from ..utils.log import log
 
+try:
+    import cv2
+except Exception:  # pragma: no cover - OpenCV is optional
+    cv2 = None
+
+
+def _has_cuda() -> bool:
+    if cv2 is None:
+        return False
+    try:
+        return cv2.cuda.getCudaEnabledDeviceCount() > 0
+    except Exception:
+        return False
+
 def _import_toupcam():
     try:
         return importlib.import_module("toupcam")
@@ -16,19 +30,81 @@ def _import_toupcam():
             log(f"Camera: toupcam import failed: {e1} / {e2}")
             raise
 
-def create_camera():
+
+def list_cameras():
+    """Return a list of available camera tuples ``(id, name)``.
+
+    The Toupcam SDK is queried first; if unavailable or no devices are found
+    the list may still include entries for a couple of OpenCV ``VideoCapture``
+    indices (``webcam:0`` etc.).  A mock entry is returned when no real devices
+    are detected.
+    """
+
+    cams = []
+    try:
+        tp = _import_toupcam()
+        devs = tp.Toupcam.EnumV2() or []
+        cams.extend((d.id, d.displayname) for d in devs)
+    except Exception:
+        devs = []
+
+    if cv2 is not None:
+        for idx in range(2):
+            try:
+                cap = cv2.VideoCapture(idx)
+                if cap.isOpened():
+                    cams.append((f"webcam:{idx}", f"Webcam {idx}"))
+                cap.release()
+            except Exception:
+                pass
+
+    if not cams:
+        cams.append(("mock", "Mock Camera"))
+    return cams
+
+
+def create_camera(dev_id=None):
+    """Create and return a camera instance.
+
+    ``dev_id`` may be an identifier returned by :func:`list_cameras`.  If
+    omitted the first enumerated Toupcam device is used.  Passing ``"mock"``
+    forces the use of :class:`camera_mock.MockCamera`.  ``dev_id`` values of the
+    form ``"webcam:N"`` create :class:`camera_webcam.WebcamCamera` instances.
+    """
+
+    if isinstance(dev_id, str) and dev_id.startswith("webcam:"):
+        from .camera_webcam import WebcamCamera
+        try:
+            return WebcamCamera(int(dev_id.split(":", 1)[1]))
+        except Exception:
+            from .camera_mock import MockCamera
+            return MockCamera()
+
     try:
         tp = _import_toupcam()
     except Exception:
         from .camera_mock import MockCamera
         return MockCamera()
+
+    if dev_id == "mock":
+        from .camera_mock import MockCamera
+        return MockCamera()
+
     devs = tp.Toupcam.EnumV2() or []
     log(f"Camera: EnumV2 found {len(devs)} device(s).")
     if not devs:
         from .camera_mock import MockCamera
         return MockCamera()
-    flags = getattr(getattr(devs[0], "model", None), "flag", 0)
-    return ToupcamCamera(tp, devs[0].id, devs[0].displayname, flags)
+
+    target = devs[0]
+    if dev_id is not None:
+        for d in devs:
+            if d.id == dev_id:
+                target = d
+                break
+
+    flags = getattr(getattr(target, "model", None), "flag", 0)
+    return ToupcamCamera(tp, target.id, target.displayname, flags)
 
 class ToupcamCamera:
     """
@@ -90,6 +166,11 @@ class ToupcamCamera:
 
         self._open()
         self._query_binning_options()
+
+    @property
+    def device_id(self):
+        """Return the underlying SDK device identifier."""
+        return self._id
 
     # ---------------- internal ----------------
 
@@ -278,8 +359,7 @@ class ToupcamCamera:
 
                 arr = self._arr
                 if self._bits == 24:
-                    bgr = arr[:, : self._w * 3].reshape(self._h, self._w, 3)
-                    img = bgr[..., ::-1].copy()
+                    img = arr[:, : self._w * 3].reshape(self._h, self._w, 3).copy()
                 else:  # 8-bit RAW/mono preview
                     # Keep the grayscale frame instead of expanding to RGB.
                     # Converting to 3-channel was creating extra copies that
@@ -356,8 +436,23 @@ class ToupcamCamera:
         with self._lock:
             return None if self._last is None else self._last.copy()
 
-    def snap(self):
-        return self.get_latest_frame()
+    def snap(self, use_cuda: bool = False):
+        frame = self.get_latest_frame()
+        if frame is None or cv2 is None:
+            return frame
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            if use_cuda and _has_cuda():
+                try:
+                    gm = cv2.cuda_GpuMat()
+                    gm.upload(frame)
+                    gm = cv2.cuda.cvtColor(gm, cv2.COLOR_BGR2RGB)
+                    return gm.download()
+                except Exception:
+                    pass
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        else:
+            # RAW/mono frame; no conversion needed
+            return frame
 
     def get_fps(self) -> float:
         return float(self._fps)
