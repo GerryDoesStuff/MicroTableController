@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 3,
+    'version': 4,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -49,6 +49,16 @@ DEFAULTS = {
         'step': {'x': 0.1, 'y': 0.1, 'z': 0.1},
         'feed': {'x': 50.0, 'y': 50.0, 'z': 50.0},
         'abs': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+    },
+    # autofocus and focus stack settings
+    'autofocus': {
+        'range_mm': 0.5,
+        'coarse_step_mm': 0.01,
+        'fine_step_mm': 0.002,
+    },
+    'focus_stack': {
+        'range_mm': 0.5,
+        'step_mm': 0.01,
     },
 }
 
