@@ -1133,6 +1133,13 @@ class MainWindow(QtWidgets.QMainWindow):
             lens = Lens(name, 1.0)
             self.lenses[name] = lens
         self.current_lens = lens
+        # Update the live preview scale bar immediately so that both the
+        # on-screen view and any subsequent captures use the latest
+        # calibration. This also refreshes cached scale values used when
+        # drawing the scale bar on captured images.
+        self.measure_view.set_scale_bar(
+            self.chk_scale_bar.isChecked(), lens.um_per_px
+        )
         self.profiles.set('measurement.current_lens', name)
         self.profiles.set(f'measurement.lenses.{name}.um_per_px', lens.um_per_px)
         self.profiles.save()
