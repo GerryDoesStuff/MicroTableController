@@ -971,6 +971,8 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(vsplit)
 
         self._reload_profiles()
+        self._update_stage_buttons()
+        self._update_cam_buttons()
         self._update_raster_mode()
 
     def _refresh_lens_combo(self):
