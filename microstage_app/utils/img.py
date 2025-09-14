@@ -1,5 +1,6 @@
 import math
 import subprocess
+import logging
 
 import numpy as np
 from PySide6 import QtGui
@@ -13,6 +14,7 @@ TEXT_SCALE = 4  # font size multiplier
 
 
 _scale_font_cache = None
+logger = logging.getLogger(__name__)
 
 
 def _load_scale_font() -> ImageFont.FreeTypeFont:
@@ -58,6 +60,10 @@ def _has_cuda() -> bool:
         return cv2.cuda.getCudaEnabledDeviceCount() > 0
     except Exception:
         return False
+
+
+_HAS_CUDA = _has_cuda()
+logger.info("Scale-bar drawing using %s", "CUDA" if _HAS_CUDA else "CPU")
 
 
 def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
@@ -137,9 +143,12 @@ def draw_scale_bar(img, um_per_px: float):
     if um_per_px <= 0:
         return img if isinstance(img, np.ndarray) else img.download()
 
-    has_cuda = _has_cuda()
+    logger.debug(
+        "draw_scale_bar using %s path",
+        "CUDA" if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat) else "CPU",
+    )
 
-    if has_cuda and isinstance(img, cv2.cuda_GpuMat):
+    if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat):
         w, h = img.size()
         h = int(h)
         w = int(w)
@@ -173,7 +182,7 @@ def draw_scale_bar(img, um_per_px: float):
 
     if isinstance(img, np.ndarray):
         if img.ndim == 2:
-            if has_cuda:
+            if _HAS_CUDA:
                 try:
                     gm = cv2.cuda_GpuMat()
                     gm.upload(img)
