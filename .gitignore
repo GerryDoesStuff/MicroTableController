@@ -10,3 +10,5 @@ profiles.yaml
 # Hardware libraries
 toupcam.dll
 toupcam.lib
+microstage_edf.py
+microstage_edf_2.py
