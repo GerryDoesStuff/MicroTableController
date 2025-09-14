@@ -2377,7 +2377,8 @@ class MainWindow(QtWidgets.QMainWindow):
         rng = float(self.stack_range.value())
         feed = self.feedz_spin.value()
         writer = ImageWriter(self.capture_dir)
-        stack_dir = writer.run_dir
+        stack_dir = os.path.join(self.capture_dir, self.capture_name)
+        os.makedirs(stack_dir, exist_ok=True)
         self._last_stack_dir = stack_dir
         self.btn_focus_stack.setEnabled(False)
 
@@ -2388,6 +2389,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 step,
                 writer,
                 directory=stack_dir,
+                base_name=self.capture_name,
                 metric=FocusMetric.LAPLACIAN,
                 feed_mm_per_min=feed,
                 fmt=self.capture_format,
