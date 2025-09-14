@@ -367,6 +367,7 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("MicroStage App v0.1")
         self.resize(1400, 900)
+        self._default_style = QtWidgets.QApplication.instance().style().objectName()
 
         # device handles
         self.stage = None
@@ -418,6 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # profiles
         self.profiles = Profiles.load_or_create()
+        self.dark_mode = self.profiles.get('ui.dark_mode', False, expected_type=bool)
         lenses_cfg = self.profiles.get('measurement.lenses', {}, expected_type=dict)
         self.lenses: dict[str, Lens] = {}
         for name, cfg in lenses_cfg.items():
@@ -477,6 +479,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # UI
         self._build_ui()
+        self._apply_dark_palette(self.act_dark_mode.isChecked())
 
         # load persisted values; extend _persistent_widgets() to add more fields
         for w, path in self._persistent_widgets():
@@ -556,6 +559,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_show_stages = devices_menu.addAction("Stages")
         self.act_show_cameras.triggered.connect(self._show_camera_dialog)
         self.act_show_stages.triggered.connect(self._show_stage_dialog)
+
+        view_menu = self.menuBar().addMenu("View")
+        self.act_dark_mode = view_menu.addAction("Dark Theme")
+        self.act_dark_mode.setCheckable(True)
+        self.act_dark_mode.setChecked(self.dark_mode)
+        self.act_dark_mode.triggered.connect(self._on_toggle_dark_mode)
 
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
@@ -990,6 +999,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_stage_buttons()
         self._update_cam_buttons()
         self._update_raster_mode()
+
+    def _apply_dark_palette(self, enabled: bool):
+        app = QtWidgets.QApplication.instance()
+        if enabled:
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Base, QtGui.QColor(25, 25, 25))
+            palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ToolTipBase, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+            palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
+            palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
+            palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
+            palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+            app.setPalette(palette)
+            app.setStyle("Fusion")
+        else:
+            app.setStyle(self._default_style)
+            app.setPalette(app.style().standardPalette())
+
+    def _on_toggle_dark_mode(self, checked: bool):
+        self._apply_dark_palette(checked)
+        self.profiles.set('ui.dark_mode', checked)
+        self.profiles.save()
 
     def _refresh_lens_combo(self):
         self.lens_combo.blockSignals(True)
@@ -2760,6 +2797,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # --------------------------- CLOSE ---------------------------
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+        self.profiles.set('ui.dark_mode', self.act_dark_mode.isChecked())
         for w, path in self._persistent_widgets():
             if isinstance(w, QtWidgets.QDoubleSpinBox):
                 val = round(w.value(), w.decimals())
