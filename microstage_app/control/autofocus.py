@@ -185,8 +185,9 @@ class AutoFocus:
         Parameters
         ----------
         range_mm : float
-            Total sweep range in millimeters. The stage will move equally in
-            positive and negative directions around the starting position.
+            Half of the sweep distance in millimeters. The stage will move from
+            ``-range_mm`` to ``+range_mm`` relative to the starting position,
+            covering a total span of ``2 * range_mm``.
         step_mm : float
             Step size in millimeters for each captured frame.
         writer : ImageWriter
