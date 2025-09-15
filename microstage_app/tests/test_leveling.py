@@ -83,12 +83,13 @@ def test_three_point_level_autofocus_called(monkeypatch):
 
     class DummyAF:
         calls = 0
+        kwargs = []
 
         def __init__(self, stage, camera):
             DummyAF.calls += 1
 
-        def coarse_to_fine(self, metric=None):
-            pass
+        def coarse_to_fine(self, metric=None, **kwargs):
+            DummyAF.kwargs.append({"metric": metric, **kwargs})
 
     monkeypatch.setattr(leveling, "AutoFocus", DummyAF)
 
@@ -98,8 +99,31 @@ def test_three_point_level_autofocus_called(monkeypatch):
     stage = DummyStage(plane)
     cam = DummyCamera()
     pts = [(0, 0), (1, 0), (0, 1)]
-    model = three_point_level(stage, cam, pts, LevelingMode.LINEAR)
+    expected_metric = (
+        getattr(leveling.FocusMetric, "LAPLACIAN", None)
+        if getattr(leveling, "FocusMetric", None) is not None
+        else None
+    )
+    model = three_point_level(
+        stage,
+        cam,
+        pts,
+        LevelingMode.LINEAR,
+        autofocus_range_mm=0.75,
+        autofocus_coarse_step_mm=0.02,
+        autofocus_fine_step_mm=0.003,
+        autofocus_feed_mm_per_min=123.0,
+    )
     assert DummyAF.calls == len(pts)
+    assert len(DummyAF.kwargs) == len(pts)
+    for kwargs in DummyAF.kwargs:
+        assert kwargs == {
+            "metric": expected_metric,
+            "z_range_mm": 0.75,
+            "coarse_step_mm": 0.02,
+            "fine_step_mm": 0.003,
+            "feed_mm_per_min": 123.0,
+        }
     assert np.isclose(model.predict(2, 3), plane(2, 3))
 
 
@@ -126,12 +150,13 @@ def test_grid_level_linear_autofocus(monkeypatch):
 
     class DummyAF:
         calls = 0
+        kwargs = []
 
         def __init__(self, stage, camera):
             DummyAF.calls += 1
 
-        def coarse_to_fine(self, metric=None):
-            pass
+        def coarse_to_fine(self, metric=None, **kwargs):
+            DummyAF.kwargs.append({"metric": metric, **kwargs})
 
     monkeypatch.setattr(leveling, "AutoFocus", DummyAF)
 
@@ -141,8 +166,33 @@ def test_grid_level_linear_autofocus(monkeypatch):
     stage = DummyStage(plane)
     cam = DummyCamera()
     rect = (0.0, 0.0, 1.0, 1.0)
-    model = grid_level(stage, cam, rect, rows=2, cols=2, mode=LevelingMode.LINEAR)
+    expected_metric = (
+        getattr(leveling.FocusMetric, "LAPLACIAN", None)
+        if getattr(leveling, "FocusMetric", None) is not None
+        else None
+    )
+    model = grid_level(
+        stage,
+        cam,
+        rect,
+        rows=2,
+        cols=2,
+        mode=LevelingMode.LINEAR,
+        autofocus_range_mm=0.9,
+        autofocus_coarse_step_mm=0.05,
+        autofocus_fine_step_mm=0.004,
+        autofocus_feed_mm_per_min=321.0,
+    )
     assert DummyAF.calls == 4
+    assert len(DummyAF.kwargs) == 4
+    for kwargs in DummyAF.kwargs:
+        assert kwargs == {
+            "metric": expected_metric,
+            "z_range_mm": 0.9,
+            "coarse_step_mm": 0.05,
+            "fine_step_mm": 0.004,
+            "feed_mm_per_min": 321.0,
+        }
     assert np.isclose(model.predict(2, 3), plane(2, 3))
 
 
@@ -155,7 +205,7 @@ def test_grid_level_manual_records_z(monkeypatch):
         def __init__(self, stage, camera):
             DummyAF.calls += 1
 
-        def coarse_to_fine(self, metric=None):
+        def coarse_to_fine(self, metric=None, **kwargs):
             pass
 
     monkeypatch.setattr(leveling, "AutoFocus", DummyAF)

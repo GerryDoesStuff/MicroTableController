@@ -27,6 +27,11 @@ def three_point_level(
     points: Sequence[Tuple[float, float]],
     mode: LevelingMode = LevelingMode.LINEAR,
     stop_event: Event | None = None,
+    *,
+    autofocus_range_mm: float = 0.5,
+    autofocus_coarse_step_mm: float = 0.01,
+    autofocus_fine_step_mm: float = 0.002,
+    autofocus_feed_mm_per_min: float | None = None,
 ) -> SurfaceModel:
     """Fit a focus surface from measurements at multiple XY points.
 
@@ -44,6 +49,15 @@ def three_point_level(
     stop_event : threading.Event, optional
         Event used to signal cancellation. If set, probing stops and a
         ``RuntimeError`` is raised.
+    autofocus_range_mm : float, optional
+        Sweep range in millimetres used for autofocus coarse search.
+    autofocus_coarse_step_mm : float, optional
+        Step size in millimetres for the coarse sweep during autofocus.
+    autofocus_fine_step_mm : float, optional
+        Step size in millimetres for the fine sweep during autofocus.
+    autofocus_feed_mm_per_min : float, optional
+        Feed rate in millimetres per minute used for autofocus moves. When
+        ``None`` the stage default is used.
 
     Returns
     -------
@@ -82,7 +96,16 @@ def three_point_level(
         if AutoFocus and camera is not None:  # pragma: no branch
             try:
                 af = AutoFocus(stage, camera)
-                af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+                metric = FocusMetric.LAPLACIAN if FocusMetric is not None else None
+                af_kwargs = {
+                    "metric": metric,
+                    "z_range_mm": autofocus_range_mm,
+                    "coarse_step_mm": autofocus_coarse_step_mm,
+                    "fine_step_mm": autofocus_fine_step_mm,
+                }
+                if autofocus_feed_mm_per_min is not None:
+                    af_kwargs["feed_mm_per_min"] = autofocus_feed_mm_per_min
+                af.coarse_to_fine(**af_kwargs)
                 stage.wait_for_moves()
             except Exception:
                 pass
@@ -130,6 +153,11 @@ def _probe_point(
     y: float,
     autofocus: bool,
     stop_event: Event | None = None,
+    *,
+    autofocus_range_mm: float = 0.5,
+    autofocus_coarse_step_mm: float = 0.01,
+    autofocus_fine_step_mm: float = 0.002,
+    autofocus_feed_mm_per_min: float | None = None,
 ) -> Tuple[float, float, float]:
     """Move to ``(x, y)`` and record the current Z position.
 
@@ -146,6 +174,15 @@ def _probe_point(
     stop_event : threading.Event, optional
         Event used to signal cancellation. When set, a ``RuntimeError``
         is raised.
+    autofocus_range_mm : float, optional
+        Sweep range in millimetres used for autofocus coarse search.
+    autofocus_coarse_step_mm : float, optional
+        Step size in millimetres for the coarse sweep during autofocus.
+    autofocus_fine_step_mm : float, optional
+        Step size in millimetres for the fine sweep during autofocus.
+    autofocus_feed_mm_per_min : float, optional
+        Feed rate in millimetres per minute used for autofocus moves. When
+        ``None`` the stage default is used.
 
     Returns
     -------
@@ -171,7 +208,16 @@ def _probe_point(
         if AutoFocus and camera is not None:  # pragma: no branch
             try:
                 af = AutoFocus(stage, camera)
-                af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+                metric = FocusMetric.LAPLACIAN if FocusMetric is not None else None
+                af_kwargs = {
+                    "metric": metric,
+                    "z_range_mm": autofocus_range_mm,
+                    "coarse_step_mm": autofocus_coarse_step_mm,
+                    "fine_step_mm": autofocus_fine_step_mm,
+                }
+                if autofocus_feed_mm_per_min is not None:
+                    af_kwargs["feed_mm_per_min"] = autofocus_feed_mm_per_min
+                af.coarse_to_fine(**af_kwargs)
                 stage.wait_for_moves()
             except Exception:
                 pass
@@ -196,6 +242,11 @@ def grid_level(
     mode: LevelingMode = LevelingMode.LINEAR,
     autofocus: bool = True,
     stop_event: Event | None = None,
+    *,
+    autofocus_range_mm: float = 0.5,
+    autofocus_coarse_step_mm: float = 0.01,
+    autofocus_fine_step_mm: float = 0.002,
+    autofocus_feed_mm_per_min: float | None = None,
 ) -> SurfaceModel:
     """Fit a surface model by probing a grid of points.
 
@@ -219,6 +270,15 @@ def grid_level(
     stop_event : threading.Event, optional
         Event used to signal cancellation. If set, a ``RuntimeError`` is
         raised.
+    autofocus_range_mm : float, optional
+        Sweep range in millimetres used for autofocus coarse search.
+    autofocus_coarse_step_mm : float, optional
+        Step size in millimetres for the coarse sweep during autofocus.
+    autofocus_fine_step_mm : float, optional
+        Step size in millimetres for the fine sweep during autofocus.
+    autofocus_feed_mm_per_min : float, optional
+        Feed rate in millimetres per minute used for autofocus moves. When
+        ``None`` the stage default is used.
 
     Returns
     -------
@@ -236,7 +296,20 @@ def grid_level(
     for x, y in _grid_coords(rect, rows, cols):
         if stop_event and stop_event.is_set():
             raise RuntimeError("operation cancelled")
-        samples.append(_probe_point(stage, camera, x, y, autofocus, stop_event))
+        samples.append(
+            _probe_point(
+                stage,
+                camera,
+                x,
+                y,
+                autofocus,
+                stop_event,
+                autofocus_range_mm=autofocus_range_mm,
+                autofocus_coarse_step_mm=autofocus_coarse_step_mm,
+                autofocus_fine_step_mm=autofocus_fine_step_mm,
+                autofocus_feed_mm_per_min=autofocus_feed_mm_per_min,
+            )
+        )
 
     model = SurfaceModel(kind=SurfaceKind(mode.value))
     model.fit(samples)
