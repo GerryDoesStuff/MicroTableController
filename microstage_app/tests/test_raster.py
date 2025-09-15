@@ -128,13 +128,20 @@ def test_raster_autofocus(monkeypatch):
         def __init__(self, stage, camera):
             pass
         def coarse_to_fine(self, metric=None, **kwargs):
-            called.append(metric)
+            called.append((metric, dict(kwargs)))
             return 0.0
 
     monkeypatch.setattr(raster, "AutoFocus", DummyAF)
     runner = RasterRunner(stage, cam, writer, cfg)
     runner.run()
     assert len(called) == cfg.rows * cfg.cols
+    for metric, kwargs in called:
+        assert metric == raster.FocusMetric.LAPLACIAN
+        assert kwargs == {
+            "z_range_mm": cfg.af_range_mm,
+            "coarse_step_mm": cfg.af_coarse_step_mm,
+            "fine_step_mm": cfg.af_fine_step_mm,
+        }
 
 
 def test_raster_initial_move():

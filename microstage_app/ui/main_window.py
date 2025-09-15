@@ -2592,6 +2592,9 @@ class MainWindow(QtWidgets.QMainWindow):
             stack=self.chk_raster_stack.isChecked(),
             stack_range_mm=float(self.stack_range.value()),
             stack_step_mm=float(self.stack_step.value()),
+            af_range_mm=float(self.af_range.value()),
+            af_coarse_step_mm=float(self.af_coarse.value()),
+            af_fine_step_mm=float(self.af_fine.value()),
         )
         # common required points
         x1 = self.rast_x1_spin.value()
