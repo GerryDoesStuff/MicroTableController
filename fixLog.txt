@@ -1,11 +1,4 @@
 Add right-click-invoked tooltips to all fields and buttons. Continue adding them to all newly created fields and buttons.
-Focus stack should wait 0.5 seconds after reaching the first stack image position before taking an image. Otherwise the camera does not have enough time to update and the resulting forst image is incorrectly exposed.
-Focus stack folder should have the image name taken from the user input image name field. The images should have the user provided name as well with the focus stack depth added as an appendix.
-Scale bar size should be updated upon lens selection, not only when the scale bar box is unchecked and checked again.
 Scale bar text font for acquired images differs from the preview image font. Use the preview image font for acquired images as well.
-Implement EDF (Extended Depth of Field) fusion from a Z-stack. Use the microstage_edf.py script as an example and overhaul the whole Z-stack section to incorporate the changes.
 GPU usage is still not displayed. It seems like the GPU is not being utilized at all since the app is consuming about 33% of an intel core i7-9700K CPU. I dread to think how bad it's gonna be on lesser machines.
-Focus stack range and autofocus range have a digit limit of two after the decimal point. Make it at least four.
 Values in autofocus and focus stack are not persistent.
-The wait time between focus stack photos should be the exposure time + 250 ms instead of the currently assigned wait time.
-Add a dark theme.
