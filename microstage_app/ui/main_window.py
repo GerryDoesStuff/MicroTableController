@@ -2273,19 +2273,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_stop_button()
 
     @QtCore.Slot(object, object)
-    def _on_leveling_done(self, model, err):
+    def _on_leveling_done(self, area, err):
         self._set_movement_controls_enabled(True)
         self.btn_start_level.setEnabled(True)
         if err:
             log(f"Leveling error: {err}")
             self._set_leveling_status("Error")
-            self.level_equation.setText("")
             QtWidgets.QMessageBox.critical(self, "Leveling", str(err))
+            return
+
+        self._set_leveling_status("Complete")
+        if area:
+            self.focus_mgr.areas.clear()
+            self.focus_mgr.add_area(area)
+            model = getattr(area, "model", None)
+            if model:
+                eq = model.equation()
+                log(f"Leveling model ({model.kind.value}): {eq}")
+                self.level_equation.setText(eq)
+            else:
+                log("Leveling complete but model data was unavailable")
+                self.level_equation.setText("")
         else:
-            self._set_leveling_status("Complete")
-            eq = model.equation() if model else ""
-            log(f"Leveling model ({model.kind.value}): {eq}")
-            self.level_equation.setText(eq)
+            log("Leveling complete but no area was returned; existing data retained")
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
@@ -2302,10 +2312,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot()
     def _disable_leveling(self):
-        self.focus_mgr.areas.clear()
         self.leveling_enabled = False
         self._set_leveling_status("Disabled")
-        self.level_equation.setText("")
 
     @QtCore.Slot(str)
     def _set_level_prompt(self, text: str):
@@ -2532,9 +2540,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 polygon,
                 model,
             )
-            self.focus_mgr.areas.clear()
-            self.focus_mgr.add_area(area)
-            return model
+            return area
         # Allow manual stage movement while leveling so users can position
         # the stage if needed. Previously movement controls were disabled
         # here which prevented manual adjustments during the leveling
