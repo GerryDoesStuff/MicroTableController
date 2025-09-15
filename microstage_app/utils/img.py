@@ -3,7 +3,7 @@ import subprocess
 import logging
 
 import numpy as np
-from PySide6 import QtGui
+from PySide6 import QtGui, QtWidgets
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 
@@ -14,15 +14,69 @@ TEXT_SCALE = 4  # font size multiplier
 
 
 _scale_font_cache = None
+_font_error_reported = False
 logger = logging.getLogger(__name__)
 
 
-def _load_scale_font() -> ImageFont.FreeTypeFont:
+def _show_font_error_dialog(message: str) -> None:
+    """Display a user-visible error when fonts cannot be loaded."""
+
+    global _font_error_reported
+
+    if _font_error_reported:
+        return
+
+    qapp = QtGui.QGuiApplication.instance()
+    if qapp is None:
+        return
+
+    try:
+        QtWidgets.QMessageBox.warning(None, "Scale Bar Font Error", message)
+    except Exception as exc:  # pragma: no cover - GUI availability dependent
+        logger.debug("Unable to display font error dialog: %s", exc)
+    finally:
+        _font_error_reported = True
+
+
+def _load_default_scale_font(reason: str, font_size: int) -> ImageFont.ImageFont:
+    """Load a bundled or Pillow default font and log the fallback reason."""
+
+    for candidate in ("DejaVuSans.ttf",):
+        try:
+            font = ImageFont.truetype(candidate, font_size)
+        except OSError:
+            continue
+        logger.warning(
+            "%s; using bundled font '%s' for scale bar text.",
+            reason,
+            candidate,
+        )
+        return font
+
+    try:
+        font = ImageFont.load_default()
+    except Exception as exc:  # pragma: no cover - Pillow default rarely fails
+        logger.error("%s; unable to load Pillow default font: %s", reason, exc)
+        _show_font_error_dialog(
+            "MicroStage was unable to load any font for the scale bar overlay. "
+            "The text labels will not be displayed."
+        )
+        raise RuntimeError("No usable font available for scale bar") from exc
+
+    logger.warning(
+        "%s; using Pillow default bitmap font for scale bar text.",
+        reason,
+    )
+    return font
+
+
+def _load_scale_font() -> ImageFont.ImageFont:
     """Return a PIL font matching the application's QFont.
 
-    The font file is resolved once using ``fc-match`` and the resulting
-    :class:`ImageFont.FreeTypeFont` is cached for reuse.  The size is scaled by
-    :data:`TEXT_SCALE` to mirror :func:`MeasureView.drawForeground`.
+    The font file is resolved once using ``fc-match`` and the resulting font is
+    cached for reuse.  When the lookup fails, a bundled or Pillow default font
+    is used so the scale bar overlay can still render text.  The size is scaled
+    by :data:`TEXT_SCALE` to mirror :func:`MeasureView.drawForeground`.
     """
 
     global _scale_font_cache
@@ -44,14 +98,52 @@ def _load_scale_font() -> ImageFont.FreeTypeFont:
     font_size = int(round(base_size * TEXT_SCALE))
 
     family = qfont.family()
-    res = subprocess.run(
-        ["fc-match", "-f", "%{file}\n", family],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    font_path = res.stdout.strip()
-    _scale_font_cache = ImageFont.truetype(font_path, font_size)
+    font: ImageFont.ImageFont
+
+    try:
+        res = subprocess.run(
+            ["fc-match", "-f", "%{file}\n", family],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        font = _load_default_scale_font(
+            "System font lookup utility 'fc-match' is not available: "
+            f"{exc}",
+            font_size,
+        )
+        logger.debug("fc-match not found while resolving '%s': %s", family, exc)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip() if exc.stderr else ""
+        if stderr:
+            logger.debug(
+                "fc-match error while resolving '%s': %s", family, stderr
+            )
+        reason = (
+            f"System font lookup failed for '{family}' (exit code {exc.returncode})"
+        )
+        if stderr:
+            reason = f"{reason}: {stderr}"
+        font = _load_default_scale_font(reason, font_size)
+    else:
+        font_path = res.stdout.strip()
+        if not font_path:
+            font = _load_default_scale_font(
+                f"System font lookup returned an empty path for '{family}'",
+                font_size,
+            )
+        else:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+            except OSError as exc:
+                font = _load_default_scale_font(
+                    f"Failed to load system font '{font_path}': {exc}",
+                    font_size,
+                )
+                logger.debug("Unable to load font '%s': %s", font_path, exc)
+
+    _scale_font_cache = font
     return _scale_font_cache
 
 
@@ -106,16 +198,24 @@ def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
         f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
     )
 
-    font = _load_scale_font()
+    try:
+        font = _load_scale_font()
+    except RuntimeError as exc:
+        logger.error("Scale bar font unavailable; skipping text overlay: %s", exc)
+        font = None
+    except Exception:  # pragma: no cover - defensive logging
+        logger.exception("Unexpected error while loading scale bar font; skipping text overlay")
+        font = None
 
-    bbox = draw.textbbox((0, 0), label, font=font)
-    th = bbox[3] - bbox[1]
-    draw.text(
-        (x0, y0 - (7 * TEXT_SCALE) - th),
-        label,
-        fill=(255, 255, 255),
-        font=font,
-    )
+    if font is not None:
+        bbox = draw.textbbox((0, 0), label, font=font)
+        th = bbox[3] - bbox[1]
+        draw.text(
+            (x0, y0 - (7 * TEXT_SCALE) - th),
+            label,
+            fill=(255, 255, 255),
+            font=font,
+        )
 
     return np.array(pil)
 
