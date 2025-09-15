@@ -3,7 +3,7 @@ import math
 import os
 import time
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import numpy as np
 import cv2
@@ -179,6 +179,7 @@ class AutoFocus:
         lens_name: Optional[str] = None,
         use_mm: bool = False,
         fuse_edf: bool = False,
+        delete_stack: bool = False,
     ) -> Optional[int]:
         """Sweep Z over ``range_mm`` in ``step_mm`` increments and capture frames.
 
@@ -210,6 +211,12 @@ class AutoFocus:
         use_mm : bool, optional
             If ``True``, use the depth value in millimeters when constructing
             filenames; otherwise use a simple depth index.
+        fuse_edf : bool, optional
+            If ``True``, fuse the captured stack using EDF and save the fused
+            image alongside the stack frames.
+        delete_stack : bool, optional
+            When ``True`` and EDF fusion is performed, delete the individual
+            stack frame files after saving the fused image.
 
         Returns
         -------
@@ -229,6 +236,17 @@ class AutoFocus:
         cumulative = 0.0
         metrics = []
         images = [] if fuse_edf else None
+        fmt_lower = (fmt or "bmp").lower()
+        ext_map = {
+            "bmp": "bmp",
+            "tif": "tif",
+            "tiff": "tif",
+            "png": "png",
+            "jpg": "jpg",
+            "jpeg": "jpg",
+        }
+        file_ext = ext_map.get(fmt_lower, "bmp")
+        stack_files: Optional[List[str]] = [] if delete_stack else None
 
         get_exp = getattr(self.camera, "get_exposure_ms", None)
         exposure_s = 0.0
@@ -266,6 +284,8 @@ class AutoFocus:
             else:
                 base = f"{i:04d}"
             fname = f"{base_name}_{base}" if base_name else base
+            if stack_files is not None:
+                stack_files.append(os.path.join(directory, f"{fname}.{file_ext}"))
             writer.save_single(
                 img,
                 directory=directory,
@@ -301,6 +321,16 @@ class AutoFocus:
                 fmt=fmt,
                 metadata=metadata,
             )
+            if stack_files:
+                for frame_path in stack_files:
+                    try:
+                        os.remove(frame_path)
+                    except FileNotFoundError:
+                        continue
+                    except Exception:
+                        logger.warning(
+                            "Failed to delete focus stack frame %s", frame_path, exc_info=True
+                        )
 
         if metric and metrics:
             best_idx = int(np.argmax(metrics))

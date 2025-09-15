@@ -686,11 +686,14 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(6); self.stack_step.setRange(0.000001, 1.0); self.stack_step.setSingleStep(0.000001); self.stack_step.setValue(0.01)
         self.chk_edf = QtWidgets.QCheckBox("EDF Fusion")
+        self.chk_delete_stack = QtWidgets.QCheckBox("Delete stack images")
+        self.chk_delete_stack.setEnabled(False)
         self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
         s.addWidget(QtWidgets.QLabel("Half-range (±mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
         s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
         s.addWidget(self.chk_edf, 2, 0, 1, 2)
-        s.addWidget(self.btn_focus_stack, 3, 0, 1, 2)
+        s.addWidget(self.chk_delete_stack, 3, 0, 1, 2)
+        s.addWidget(self.btn_focus_stack, 4, 0, 1, 2)
 
         af_box.setMaximumWidth(240)
         stack_box.setMaximumWidth(240)
@@ -1076,6 +1079,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
         self.chk_scale_bar.toggled.connect(self._on_scale_bar_toggled)
+        self.chk_edf.toggled.connect(self._on_edf_toggled)
         self.btn_add_lens.clicked.connect(self._add_lens)
         # ensure index is emitted as int for lens change
         self.lens_combo.currentIndexChanged[int].connect(self._on_lens_changed)
@@ -1114,6 +1118,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.autonumber_chk.toggled.connect(self._on_autonumber_toggled)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
+
+        self._on_edf_toggled(self.chk_edf.isChecked())
 
         self.act_calibrate.triggered.connect(self._calibrate)
         self.act_ruler.triggered.connect(self._start_ruler)
@@ -1191,6 +1197,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.measure_view.set_scale_bar(checked, self.current_lens.um_per_px)
         self.profiles.set('ui.scale_bar', checked)
         self.profiles.save()
+
+    def _on_edf_toggled(self, checked: bool):
+        self.chk_delete_stack.setEnabled(checked)
+        if not checked:
+            self.chk_delete_stack.setChecked(False)
 
     def _on_lens_changed(self, index: int):
         name = self.lens_combo.itemData(index)
@@ -2523,6 +2534,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 fmt=self.capture_format,
                 lens_name=self.current_lens.name,
                 fuse_edf=self.chk_edf.isChecked(),
+                delete_stack=self.chk_delete_stack.isChecked(),
             )
 
         log(f"Focus stack: half-range={rng} step={step} dir={stack_dir}")
