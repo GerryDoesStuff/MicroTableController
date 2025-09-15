@@ -1391,7 +1391,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sync_cam_controls()
             self.preview_timer.start()
             self.fps_timer.start()
-            self._update_camera_control_availability()
+            self._update_cam_buttons()
             log("UI: camera connected")
         except Exception as e:
             log(f"UI: camera connect failed: {e}")
@@ -1411,7 +1411,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_combo.clear()
         self.bin_combo.clear()
         self.depth_combo.clear()
-        self._update_camera_control_availability(None)
+        self._update_cam_buttons()
 
     def _connect_stage_async(self, port=None):
         if self.stage is not None:
@@ -1810,7 +1810,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_stop_button()
 
     def _update_cam_buttons(self):
-        pass
+        connected = self.camera is not None
+        controls = [
+            self.btn_capture,
+            self.chk_reticle,
+            self.chk_scale_bar,
+            self.measure_button,
+            self.btn_clear_screen,
+            self.capture_dir_edit,
+            self.btn_browse_dir,
+            self.capture_name_edit,
+            self.autonumber_chk,
+            self.format_combo,
+            self.depth_combo,
+            self.raw_chk,
+            self.bin_combo,
+            self.res_combo,
+            self.btn_roi_full,
+            self.btn_roi_2048,
+            self.btn_roi_1024,
+            self.btn_roi_512,
+            self.speed_spin,
+        ]
+        for w in controls:
+            w.setEnabled(connected)
+        self._update_camera_control_availability(self.camera if connected else None)
 
     def _sync_cam_controls(self):
         if not self.camera:
