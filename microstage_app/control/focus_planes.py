@@ -119,6 +119,7 @@ class Area:
 @dataclass
 class FocusPlaneManager:
     areas: List[Area] = field(default_factory=list)
+    z_bias: float = 0.0
 
     def select_area(self, x, y) -> Optional[Area]:
         candidates = [a for a in self.areas if a.contains(x, y)]
@@ -129,7 +130,7 @@ class FocusPlaneManager:
     def z_offset(self, x, y, z_ref=0.0) -> float:
         a = self.select_area(x, y)
         if a is None: return 0.0
-        return float(a.model.predict(x, y) - z_ref)
+        return float(a.model.predict(x, y) + self.z_bias - z_ref)
 
     def add_area(self, area: Area):
         self.areas.append(area)

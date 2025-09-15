@@ -1,5 +1,7 @@
 from PySide6 import QtWidgets, QtCore, QtGui
 
+from typing import Optional
+
 from .system_monitor_tab import SystemMonitorTab
 from .tooltips import apply_tooltip_context
 
@@ -416,6 +418,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_mgr = FocusPlaneManager()
         # flag indicating whether leveling corrections are applied
         self.leveling_enabled = False
+        # track the most recent absolute Z target requested by the user or hardware
+        self._last_requested_z: Optional[float] = None
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -1278,6 +1282,45 @@ class MainWindow(QtWidgets.QMainWindow):
         feed = feed_spin.value()
         self._jog(step * sx, step * sy, step * sz, feed, wait_ok=True, callback=self._repeat_jog)
 
+    def _apply_focus_bias_for_target(self, x: float, y: float, z_target: float):
+        area = None
+        if self.focus_mgr.areas:
+            area = self.focus_mgr.select_area(x, y)
+            if area is None:
+                area = max(self.focus_mgr.areas, key=lambda a: a.priority)
+        if area and getattr(area, "model", None):
+            predicted = float(area.model.predict(x, y))
+            has_z_changed = (
+                self._last_requested_z is None
+                or not math.isclose(z_target, self._last_requested_z, rel_tol=1e-9, abs_tol=1e-9)
+            )
+            new_bias = float(z_target - predicted)
+            if has_z_changed and math.isfinite(new_bias):
+                if not math.isclose(new_bias, self.focus_mgr.z_bias, rel_tol=1e-9, abs_tol=1e-9):
+                    log(
+                        f"Adjusting leveling bias to {new_bias:+.6f} "
+                        f"(target={z_target:.6f}, predicted={predicted:.6f})"
+                    )
+                    self.focus_mgr.z_bias = new_bias
+        self._update_level_equation_label(area)
+
+    def _update_level_equation_label(self, area=None):
+        bias = getattr(self.focus_mgr, "z_bias", 0.0)
+        bias_text = f"{bias:+.6f} mm"
+        if area is None and self.focus_mgr.areas:
+            area = max(self.focus_mgr.areas, key=lambda a: a.priority)
+        model = getattr(area, "model", None) if area else None
+        if model:
+            eq_text = model.equation()
+            if eq_text.startswith("z = "):
+                eq_text = eq_text[4:]
+            eq_text = eq_text.strip()
+            self.level_equation.setText(f"z = {eq_text} {bias_text} (bias)")
+        elif self.focus_mgr.areas:
+            self.level_equation.setText(f"Leveling bias: {bias_text}")
+        else:
+            self.level_equation.setText(f"Bias: {bias_text}")
+
     def _move_to_coords(self):
         if not self.stage_worker:
             log("Move ignored: stage not connected")
@@ -1285,9 +1328,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         x = self.absx_spin.value()
         y = self.absy_spin.value()
-        z = self.absz_spin.value()
+        z_target = self.absz_spin.value()
+        self._apply_focus_bias_for_target(x, y, z_target)
+        self._last_requested_z = z_target
+        z = z_target
         if self.leveling_enabled:
-            z += self.focus_mgr.z_offset(x, y, z)
+            z += self.focus_mgr.z_offset(x, y, z_target)
         feed = max(self.feedx_spin.value(), self.feedy_spin.value(), self.feedz_spin.value())
         log(f"Move to: x={x} y={y} z={z} F={feed}")
         self.stage_worker.enqueue(self.stage.move_absolute, x, y, z, feed, True)
@@ -1514,6 +1560,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_pos["y"] = y
         if z is not None:
             self._last_pos["z"] = z
+            self._last_requested_z = z
         # merge hardware-reported bounds with fallback from config
         b = self.stage_bounds or {}
         fb = getattr(self, "_stage_bounds_fallback", None)
@@ -2078,8 +2125,10 @@ class MainWindow(QtWidgets.QMainWindow):
             z0 = self._last_pos["z"] or 0.0
             x = x0 + dx
             y = y0 + dy
-            z = z0 + dz
-            z += self.focus_mgr.z_offset(x, y, z)
+            z_target = z0 + dz
+            self._apply_focus_bias_for_target(x, y, z_target)
+            self._last_requested_z = z_target
+            z = z_target + self.focus_mgr.z_offset(x, y, z_target)
             self.stage_worker.enqueue(
                 self.stage.move_absolute,
                 x,
@@ -2090,6 +2139,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 callback=callback,
             )
         else:
+            if dz:
+                x0 = self._last_pos["x"] or 0.0
+                y0 = self._last_pos["y"] or 0.0
+                z0 = self._last_pos["z"] or 0.0
+                z_target = z0 + dz
+                self._apply_focus_bias_for_target(x0 + dx, y0 + dy, z_target)
+                self._last_requested_z = z_target
             self.stage_worker.enqueue(
                 self.stage.move_relative,
                 dx,
@@ -2285,17 +2341,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_leveling_status("Complete")
         if area:
             self.focus_mgr.areas.clear()
+            self.focus_mgr.z_bias = 0.0
             self.focus_mgr.add_area(area)
             model = getattr(area, "model", None)
             if model:
                 eq = model.equation()
                 log(f"Leveling model ({model.kind.value}): {eq}")
-                self.level_equation.setText(eq)
             else:
                 log("Leveling complete but model data was unavailable")
-                self.level_equation.setText("")
+            self._update_level_equation_label(area)
         else:
             log("Leveling complete but no area was returned; existing data retained")
+            self._update_level_equation_label()
 
     @QtCore.Slot(str)
     def _set_leveling_status(self, text: str):
@@ -2306,6 +2363,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.focus_mgr.areas:
             self.leveling_enabled = True
             self._set_leveling_status("Enabled")
+            self._update_level_equation_label()
         else:
             QtWidgets.QMessageBox.warning(
                 self, "Leveling", "No leveling data to apply.")
@@ -2314,6 +2372,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _disable_leveling(self):
         self.leveling_enabled = False
         self._set_leveling_status("Disabled")
+        self._update_level_equation_label()
 
     @QtCore.Slot(str)
     def _set_level_prompt(self, text: str):
