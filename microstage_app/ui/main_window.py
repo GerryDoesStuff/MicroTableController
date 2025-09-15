@@ -665,21 +665,29 @@ class MainWindow(QtWidgets.QMainWindow):
         a = QtWidgets.QGridLayout(af_box)
         self.metric_combo = QtWidgets.QComboBox(); self.metric_combo.addItems([m.value for m in FocusMetric])
         self.af_range = QtWidgets.QDoubleSpinBox(); self.af_range.setRange(0.01, 5.0); self.af_range.setDecimals(4); self.af_range.setValue(0.5)
+        self.af_range.setToolTip(
+            "Half of the autofocus sweep distance; the stage moves from -value to +value"
+            " around the starting Z position."
+        )
         self.af_coarse = QtWidgets.QDoubleSpinBox(); self.af_coarse.setDecimals(6); self.af_coarse.setRange(0.000001, 1.0); self.af_coarse.setSingleStep(0.000001); self.af_coarse.setValue(0.01)
         self.af_fine = QtWidgets.QDoubleSpinBox(); self.af_fine.setDecimals(6); self.af_fine.setRange(0.0005, 0.2); self.af_fine.setValue(0.002)
         self.btn_autofocus = QtWidgets.QPushButton("Run Autofocus")
         a.addWidget(QtWidgets.QLabel("Metric:"), 0, 0); a.addWidget(self.metric_combo, 0, 1)
-        a.addWidget(QtWidgets.QLabel("Range (mm):"), 1, 0); a.addWidget(self.af_range, 1, 1)
+        a.addWidget(QtWidgets.QLabel("Half-range (±mm):"), 1, 0); a.addWidget(self.af_range, 1, 1)
         a.addWidget(QtWidgets.QLabel("Coarse step (mm):"), 2, 0); a.addWidget(self.af_coarse, 2, 1)
         a.addWidget(QtWidgets.QLabel("Fine step (mm):"), 3, 0); a.addWidget(self.af_fine, 3, 1)
         a.addWidget(self.btn_autofocus, 4, 0, 1, 2)
         stack_box = QtWidgets.QGroupBox("Focus Stack")
         s = QtWidgets.QGridLayout(stack_box)
         self.stack_range = QtWidgets.QDoubleSpinBox(); self.stack_range.setRange(0.01, 5.0); self.stack_range.setDecimals(4); self.stack_range.setValue(0.5)
+        self.stack_range.setToolTip(
+            "Half of the focus-stack sweep; captures span from -value to +value"
+            " relative to the start position."
+        )
         self.stack_step = QtWidgets.QDoubleSpinBox(); self.stack_step.setDecimals(6); self.stack_step.setRange(0.000001, 1.0); self.stack_step.setSingleStep(0.000001); self.stack_step.setValue(0.01)
         self.chk_edf = QtWidgets.QCheckBox("EDF Fusion")
         self.btn_focus_stack = QtWidgets.QPushButton("Run Focus Stack")
-        s.addWidget(QtWidgets.QLabel("Range (mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
+        s.addWidget(QtWidgets.QLabel("Half-range (±mm):"), 0, 0); s.addWidget(self.stack_range, 0, 1)
         s.addWidget(QtWidgets.QLabel("Step (mm):"), 1, 0); s.addWidget(self.stack_step, 1, 1)
         s.addWidget(self.chk_edf, 2, 0, 1, 2)
         s.addWidget(self.btn_focus_stack, 3, 0, 1, 2)
@@ -2517,7 +2525,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 fuse_edf=self.chk_edf.isChecked(),
             )
 
-        log(f"Focus stack: range={rng} step={step} dir={stack_dir}")
+        log(f"Focus stack: half-range={rng} step={step} dir={stack_dir}")
         t, w = run_async(do_stack)
         self._stack_thread, self._stack_worker = t, w
         self._stack_thread.finished.connect(self._cleanup_focus_stack_thread)
