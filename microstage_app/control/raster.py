@@ -48,6 +48,9 @@ class RasterConfig:
     stack: bool = False
     stack_range_mm: float = 0.5
     stack_step_mm: float = 0.01
+    af_range_mm: float = 0.5
+    af_coarse_step_mm: float = 0.01
+    af_fine_step_mm: float = 0.002
 
 class RasterRunner:
     def __init__(
@@ -202,7 +205,12 @@ class RasterRunner:
 
                 if do_af:
                     af = AutoFocus(self.stage, self.camera)
-                    af.coarse_to_fine(metric=FocusMetric.LAPLACIAN)
+                    af.coarse_to_fine(
+                        metric=FocusMetric.LAPLACIAN,
+                        z_range_mm=self.cfg.af_range_mm,
+                        coarse_step_mm=self.cfg.af_coarse_step_mm,
+                        fine_step_mm=self.cfg.af_fine_step_mm,
+                    )
                     time.sleep(1)
 
                 if do_capture:
