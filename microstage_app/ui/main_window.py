@@ -1448,9 +1448,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.stage_bounds = self.stage.get_bounds()
             except Exception as e:
                 log(f"Stage: failed to get bounds: {e}")
-                self.stage_bounds = None
+            self.stage_bounds = None
             log("UI: stage connected (async)")
             self._attach_stage_worker()
+        self._update_stage_buttons()
         thread = self._conn_thread
         self._conn_thread = self._conn_worker = None
         if thread and thread != QtCore.QThread.currentThread():
@@ -1478,6 +1479,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_status.setText("Stage: —")
         self.stage_pos.setText("Pos: —")
         self.stage_bounds = None
+        self._update_stage_buttons()
 
     def _on_stage_position(self, pos):
         if not pos:
@@ -1782,6 +1784,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_roi_2048.setEnabled(roi)
         self.btn_roi_1024.setEnabled(roi)
         self.btn_roi_512.setEnabled(roi)
+
+    def _update_stage_buttons(self):
+        connected = self.stage is not None and self.stage_worker is not None
+        self._set_movement_controls_enabled(connected)
+        controls = [
+            self.btn_autofocus,
+            self.btn_focus_stack,
+            self.btn_raster_p1,
+            self.btn_raster_p2,
+            self.btn_raster_p3,
+            self.btn_raster_p4,
+            self.btn_run_raster,
+            self.btn_level_p1,
+            self.btn_level_p2,
+            self.btn_level_p3,
+            self.btn_start_level,
+            self.btn_apply_level,
+            self.btn_disable_level,
+            self.btn_level_continue,
+            self.btn_run_example_script,
+        ]
+        for w in controls:
+            w.setEnabled(connected)
+        self._update_stop_button()
+
+    def _update_cam_buttons(self):
+        pass
 
     def _sync_cam_controls(self):
         if not self.camera:
