@@ -2318,6 +2318,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_level_continue.setVisible(False)
         self._level_continue_event.set()
 
+    def _stage_workspace_polygon(self):
+        """Return a polygon covering the full XY travel of the stage."""
+
+        bounds = {}
+
+        stage_bounds = getattr(self, "stage_bounds", None)
+        if stage_bounds:
+            for key in ("xmin", "xmax", "ymin", "ymax"):
+                val = stage_bounds.get(key)
+                if val is not None:
+                    bounds[key] = float(val)
+
+        fallback = getattr(self, "_stage_bounds_fallback", None)
+        if fallback:
+            for key in ("xmin", "xmax", "ymin", "ymax"):
+                if key in bounds:
+                    continue
+                val = fallback.get(key)
+                if val is not None:
+                    bounds[key] = float(val)
+
+        stage = getattr(self, "stage", None)
+        if stage is not None:
+            try:
+                live = stage.get_bounds()
+            except Exception as exc:
+                log(f"Stage: failed to query bounds for workspace polygon: {exc}")
+            else:
+                if live:
+                    for key in ("xmin", "xmax", "ymin", "ymax"):
+                        val = live.get(key)
+                        if val is not None:
+                            bounds[key] = float(val)
+
+        required = ("xmin", "xmax", "ymin", "ymax")
+        if any(key not in bounds for key in required):
+            return None
+
+        xmin = bounds["xmin"]
+        xmax = bounds["xmax"]
+        ymin = bounds["ymin"]
+        ymax = bounds["ymax"]
+
+        return [
+            (xmin, ymin),
+            (xmax, ymin),
+            (xmax, ymax),
+            (xmin, ymax),
+        ]
+
     def _set_level_point(self, idx: int):
         if not self.stage_worker:
             log("Leveling point ignored: stage not connected")
@@ -2466,9 +2516,20 @@ class MainWindow(QtWidgets.QMainWindow):
                     pts.append((x_meas, y_meas, z))
             model = SurfaceModel(kind)
             model.fit(pts)
+            polygon = self._stage_workspace_polygon()
+            if polygon is None:
+                log(
+                    "Leveling: stage bounds unavailable; using probed area bounding box"
+                )
+                polygon = [
+                    (xmin, ymin),
+                    (xmax, ymin),
+                    (xmax, ymax),
+                    (xmin, ymax),
+                ]
             area = Area(
                 "bed",
-                [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)],
+                polygon,
                 model,
             )
             self.focus_mgr.areas.clear()
