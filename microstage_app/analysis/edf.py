@@ -3,7 +3,7 @@ from typing import List
 import numpy as np
 
 try:
-    import microstage_edf_gpu as _edf_impl
+    from . import microstage_edf_gpu as _edf_impl
 except Exception as exc:  # pragma: no cover - handled at runtime
     _edf_impl = None
     _edf_import_error = exc
@@ -28,7 +28,7 @@ def fuse_stack(images: List[np.ndarray], use_cuda: bool = True) -> np.ndarray:
         The fused image as an unsigned 8-bit array in BGR order.
     """
     if _edf_impl is None:  # pragma: no cover - import failure at runtime
-        raise ImportError("microstage_edf_gpu could not be imported") from _edf_import_error
+        raise ImportError("analysis.microstage_edf_gpu could not be imported") from _edf_import_error
 
     fused, _ = _edf_impl.fuse_stack(
         images,
