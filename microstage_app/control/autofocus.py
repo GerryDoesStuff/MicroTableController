@@ -3,7 +3,7 @@ import math
 import os
 import time
 import logging
-from typing import Optional, List
+from typing import Callable, List, Optional
 
 import numpy as np
 import cv2
@@ -99,9 +99,16 @@ def metric_value(img, metric: FocusMetric):
         raise ValueError(metric)
 
 class AutoFocus:
-    def __init__(self, stage, camera):
+    def __init__(
+        self,
+        stage,
+        camera,
+        *,
+        position_cb: Optional[Callable[[], None]] = None,
+    ):
         self.stage = stage
         self.camera = camera
+        self._position_cb = position_cb
 
     def coarse_to_fine(
         self,
@@ -110,7 +117,9 @@ class AutoFocus:
         coarse_step_mm=0.01,
         fine_step_mm=0.002,
         feed_mm_per_min=240,
+        position_cb: Optional[Callable[[], None]] = None,
     ):
+        callback = position_cb if position_cb is not None else self._position_cb
         if coarse_step_mm <= 0 or fine_step_mm <= 0:
             raise ValueError("coarse_step_mm and fine_step_mm must be > 0")
         samples = []
@@ -122,6 +131,8 @@ class AutoFocus:
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
             cumulative = dz
             self.stage.wait_for_moves()
+            if callback:
+                callback()
             time.sleep(0.03)
             img = self.camera.snap()
             if img is None:
@@ -133,6 +144,8 @@ class AutoFocus:
         # Go to coarse best position
         self.stage.move_relative(dz=(best_dz - cumulative), feed_mm_per_min=feed_mm_per_min)
         self.stage.wait_for_moves()
+        if callback:
+            callback()
 
         # Fine sweep around coarse best
         fine_range = 0.1 * z_range_mm
@@ -144,6 +157,8 @@ class AutoFocus:
             move = offset - cumulative
             self.stage.move_relative(dz=move, feed_mm_per_min=feed_mm_per_min)
             self.stage.wait_for_moves()
+            if callback:
+                callback()
             time.sleep(0.02)
             img = self.camera.snap()
             if img is None:
@@ -155,6 +170,8 @@ class AutoFocus:
             # Return to coarse best if no fine samples were collected
             self.stage.move_relative(dz=-cumulative, feed_mm_per_min=feed_mm_per_min)
             self.stage.wait_for_moves()
+            if callback:
+                callback()
             return best_dz
 
         best_fine_dz, _ = max(fine_samples, key=lambda t: t[1])
@@ -163,6 +180,8 @@ class AutoFocus:
             dz=(best_fine_dz - (best_dz + cumulative)), feed_mm_per_min=feed_mm_per_min
         )
         self.stage.wait_for_moves()
+        if callback:
+            callback()
         return best_fine_dz
 
     def focus_stack(
