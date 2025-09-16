@@ -2289,6 +2289,10 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self, "Autofocus", f"Best Z offset (relative): {best:.6f} mm"
             )
+            if self.stage_worker:
+                self.stage_worker.enqueue(
+                    self.stage.get_position, callback=self._on_stage_position
+                )
 
     @QtCore.Slot()
     def _cleanup_autofocus_thread(self):
