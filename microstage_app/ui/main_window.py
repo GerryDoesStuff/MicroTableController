@@ -783,10 +783,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Right: tabs
         rightw = QtWidgets.QTabWidget()
+        rightw.setMaximumWidth(350)  # tweak as needed
+        rightw.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
 
         # ---- Camera tab (performance controls)
         camtab = QtWidgets.QWidget()
         c = QtWidgets.QGridLayout(camtab)
+        c.setColumnStretch(1, 1)
+        c.setColumnStretch(2, 0)
         row = 0
         self.exp_spin = QtWidgets.QDoubleSpinBox(); self.exp_spin.setRange(0.01, 10000.0); self.exp_spin.setValue(10.0)
         self.exp_spin.setSuffix(" ms")
@@ -853,6 +859,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Leveling controls
         lvl_box = QtWidgets.QGroupBox("Leveling")
         l = QtWidgets.QGridLayout(lvl_box)
+        l.setColumnStretch(1, 1)
+        l.setColumnStretch(3, 1)
+        l.setColumnStretch(4, 0)
         self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
         self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
         self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
@@ -898,6 +907,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Raster controls
         rast_box = QtWidgets.QGroupBox("Raster")
         r = QtWidgets.QGridLayout(rast_box)
+        r.setColumnStretch(1, 1)
+        r.setColumnStretch(3, 1)
+        r.setColumnStretch(4, 0)
+        r.setColumnStretch(5, 0)
         self.rows_spin = QtWidgets.QSpinBox(); self.rows_spin.setRange(1, 1000); self.rows_spin.setValue(5)
         self.cols_spin = QtWidgets.QSpinBox(); self.cols_spin.setRange(1, 1000); self.cols_spin.setValue(5)
 
