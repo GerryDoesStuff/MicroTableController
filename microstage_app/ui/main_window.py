@@ -418,7 +418,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_mgr = FocusPlaneManager()
         # flag indicating whether leveling corrections are applied
         self.leveling_enabled = False
-        # track the most recent absolute Z target requested by the user or hardware
+        # track the most recent absolute Z target requested by the user
         self._last_requested_z: Optional[float] = None
 
         # profiles
@@ -1573,7 +1573,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_pos["y"] = y
         if z is not None:
             self._last_pos["z"] = z
-            self._last_requested_z = z
         # merge hardware-reported bounds with fallback from config
         b = self.stage_bounds or {}
         fb = getattr(self, "_stage_bounds_fallback", None)
