@@ -19,6 +19,7 @@ class ImageWriter:
         img_rgb,
         directory=None,
         filename="capture",
+        auto_prefix=False,
         auto_number=False,
         fmt="bmp",
         metadata=None,
@@ -33,6 +34,9 @@ class ImageWriter:
             Destination directory. Defaults to ``self.run_dir``.
         filename : str
             Base filename without extension.
+        auto_prefix : bool
+            If ``True``, prepend a ``YYYYMMDDHHMMSS_`` timestamp to ``filename``
+            before saving.
         auto_number : bool
             If ``True``, append ``_n`` to ``filename`` where ``n`` increments
             to avoid overwriting existing files.
@@ -55,15 +59,19 @@ class ImageWriter:
             "jpeg": "jpg",
         }.get(fmt, "bmp")
 
+        base_name = filename
+        if auto_prefix:
+            base_name = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{base_name}"
+
         if auto_number:
             n = 1
             while True:
-                path = os.path.join(directory, f"{filename}_{n}.{ext}")
+                path = os.path.join(directory, f"{base_name}_{n}.{ext}")
                 if not os.path.exists(path):
                     break
                 n += 1
         else:
-            path = os.path.join(directory, f"{filename}.{ext}")
+            path = os.path.join(directory, f"{base_name}.{ext}")
 
         if ext == "tif":
             self._save_tiff(path, img_rgb, metadata)

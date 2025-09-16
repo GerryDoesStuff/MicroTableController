@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 5,
+    'version': 6,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -43,7 +43,13 @@ DEFAULTS = {
         }
     },
     # persistent capture settings
-    'capture': {'dir': '', 'name': 'capture', 'auto_number': False, 'format': 'png'},
+    'capture': {
+        'dir': '',
+        'name': 'capture',
+        'auto_prefix': False,
+        'auto_number': False,
+        'format': 'png',
+    },
     # jog UI persistence
     'jog': {
         'step': {'x': 0.1, 'y': 0.1, 'z': 0.1},

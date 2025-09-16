@@ -11,10 +11,12 @@ def test_profiles_migration(monkeypatch, tmp_path):
     assert p.data['version'] == Profiles.VERSION
     assert p.data['camera']['gain'] == 2.0
     assert p.data['camera']['exposure_ms'] == DEFAULTS['camera']['exposure_ms']
+    assert p.data['capture']['auto_prefix'] is False
     assert p.data['measurement']['lenses']['10x']['um_per_px'] == 1.23
     assert p.data['measurement']['lenses']['10x']['calibrations'] == {}
     saved = yaml.safe_load(pfile.read_text())
     assert saved['version'] == Profiles.VERSION
     assert 'capture' in saved
+    assert saved['capture']['auto_prefix'] is False
     assert saved['measurement']['lenses']['10x']['um_per_px'] == 1.23
     assert saved['measurement']['lenses']['10x']['calibrations'] == {}
