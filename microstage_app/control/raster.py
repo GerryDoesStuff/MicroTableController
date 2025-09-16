@@ -61,6 +61,7 @@ class RasterRunner:
         cfg: RasterConfig,
         directory=None,
         base_name="tile",
+        auto_prefix=False,
         auto_number=False,
         fmt="tif",
         position_cb=None,
@@ -74,6 +75,7 @@ class RasterRunner:
         self.cfg = cfg
         self.directory = directory
         self.base_name = base_name
+        self.auto_prefix = auto_prefix
         self.auto_number = auto_number
         self.fmt = fmt
         self.position_cb = position_cb
@@ -236,6 +238,7 @@ class RasterRunner:
                             img,
                             directory=self.directory,
                             filename=fname,
+                            auto_prefix=self.auto_prefix,
                             auto_number=self.auto_number,
                             fmt=self.fmt,
                             metadata=metadata,

@@ -454,6 +454,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                         expected_type=str)
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture", expected_type=str)
+        self.auto_prefix = self.profiles.get('capture.auto_prefix', False, expected_type=bool)
         self.auto_number = self.profiles.get('capture.auto_number', False, expected_type=bool)
         fmt = self.profiles.get('capture.format', 'png', expected_type=str)
         if fmt.lower() not in {"bmp", "tif", "png", "jpg"}:
@@ -772,6 +773,14 @@ class MainWindow(QtWidgets.QMainWindow):
             "the same name exists to avoid overwriting. Setting persists."
         )
         ctr4.addWidget(self.autonumber_chk)
+        self.autoprefix_chk = QtWidgets.QCheckBox("Auto-prefix (yyyymmddhhmmss_)")
+        self.autoprefix_chk.setChecked(self.auto_prefix)
+        self.autoprefix_chk.setToolTip(
+            "When enabled, prepend a timestamp such as 20240101010101_ to the "
+            "base filename for every capture. Auto-numbering still applies "
+            "after the prefix when enabled."
+        )
+        ctr4.addWidget(self.autoprefix_chk)
         ctr4.addWidget(QtWidgets.QLabel("Format:"))
         self.format_combo = QtWidgets.QComboBox()
         self.format_combo.addItems(["BMP", "TIF", "PNG", "JPG"])
@@ -1133,6 +1142,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
         self.autonumber_chk.toggled.connect(self._on_autonumber_toggled)
+        self.autoprefix_chk.toggled.connect(self._on_autoprefix_toggled)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
@@ -1203,6 +1213,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_autonumber_toggled(self, checked: bool):
         self.auto_number = checked
         self.profiles.set('capture.auto_number', checked)
+        self.profiles.save()
+
+    def _on_autoprefix_toggled(self, checked: bool):
+        self.auto_prefix = checked
+        self.profiles.set('capture.auto_prefix', checked)
         self.profiles.save()
 
     def _on_format_changed(self, text: str):
@@ -1899,6 +1914,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_browse_dir,
             self.capture_name_edit,
             self.autonumber_chk,
+            self.autoprefix_chk,
             self.format_combo,
             self.depth_combo,
             self.raw_chk,
@@ -2181,6 +2197,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         directory = self.capture_dir
         name = self.capture_name
+        auto_prefix = self.auto_prefix
         auto_num = self.auto_number
 
         # validate directory
@@ -2265,6 +2282,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     img,
                     directory=directory,
                     filename=name,
+                    auto_prefix=auto_prefix,
                     auto_number=auto_num,
                     fmt=self.capture_format,
                     metadata=meta,
@@ -2822,6 +2840,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         directory = self.capture_dir
         name = self.capture_name
+        auto_prefix = self.auto_prefix
         auto_num = self.auto_number
         fmt = self.capture_format
 
@@ -2854,6 +2873,7 @@ class MainWindow(QtWidgets.QMainWindow):
             cfg,
             directory=directory,
             base_name=name,
+            auto_prefix=auto_prefix,
             auto_number=auto_num,
             fmt=fmt,
             position_cb=lambda pos: self.stage_worker.enqueue(

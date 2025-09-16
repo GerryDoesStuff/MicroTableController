@@ -69,12 +69,16 @@ will be enabled.
 The capture panel lets you choose an output folder and base filename. The fields
 are validated: the directory must be writable (it will be created if missing) and
 the name cannot contain characters such as `\\ / : * ? \" < > |`. The directory,
-base name, and auto-number option are all remembered between runs. Captures
+base name, auto-prefix, and auto-number options are all remembered between runs. Captures
 default to PNG to retain embedded metadata, with BMP, TIFF and JPEG also
 available.
 
 Enabling **Auto-number (_n)** appends an incrementing suffix when a file with the
 same name already exists, preventing accidental overwrites.
+
+Enable **Auto-prefix (yyyymmddhhmmss_)** to prepend a timestamp such as
+`20240101123045_` to each capture. When both toggles are active the timestamp
+comes first, followed by the auto-number suffix (e.g. `20240101123045_sample_1.tif`).
 
 Example usage:
 
@@ -97,7 +101,8 @@ Saved fields include:
 - **Camera**: exposure time (`exposure_ms`), gain (1.0–4.0x), and binning.
 - **Scan presets**: default area region (`x1_mm`, `y1_mm`, `x2_mm`,
   `y2_mm`, `rows`, `cols`).
-- **Capture**: last used directory, base filename, auto-number toggle, and
+- **Capture**: last used directory, base filename, auto-prefix toggle,
+  auto-number toggle, and
   file format.
 - **Jog panel**: step sizes, feed rates, and absolute positions for each axis.
 

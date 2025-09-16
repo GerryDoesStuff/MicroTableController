@@ -1,8 +1,12 @@
+import datetime
+import json
+
 import numpy as np
-from microstage_app.io.storage import ImageWriter
 import tifffile
 from PIL import Image
-import json
+
+import microstage_app.io.storage as storage
+from microstage_app.io.storage import ImageWriter
 
 
 def test_save_single_custom_dir_and_name(tmp_path):
@@ -22,6 +26,56 @@ def test_save_single_autonumber(tmp_path):
     assert not (out_dir / "foo.bmp").exists()
     assert (out_dir / "foo_1.bmp").exists()
     assert (out_dir / "foo_2.bmp").exists()
+
+
+def test_save_single_auto_prefix(monkeypatch, tmp_path):
+    writer = ImageWriter(base_dir=str(tmp_path / "runs"))
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    out_dir = tmp_path / "prefix"
+    timestamp = datetime.datetime(2024, 2, 3, 4, 5, 6)
+
+    class FixedDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return timestamp
+
+    monkeypatch.setattr(storage.datetime, "datetime", FixedDateTime)
+
+    writer.save_single(img, directory=str(out_dir), filename="foo", auto_prefix=True)
+    expected = out_dir / "20240203040506_foo.bmp"
+    assert expected.exists()
+
+
+def test_save_single_auto_prefix_with_autonumber(monkeypatch, tmp_path):
+    writer = ImageWriter(base_dir=str(tmp_path / "runs"))
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    out_dir = tmp_path / "prefix_auto"
+    timestamp = datetime.datetime(2024, 5, 6, 7, 8, 9)
+
+    class FixedDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return timestamp
+
+    monkeypatch.setattr(storage.datetime, "datetime", FixedDateTime)
+
+    writer.save_single(
+        img,
+        directory=str(out_dir),
+        filename="foo",
+        auto_prefix=True,
+        auto_number=True,
+    )
+    writer.save_single(
+        img,
+        directory=str(out_dir),
+        filename="foo",
+        auto_prefix=True,
+        auto_number=True,
+    )
+    assert not (out_dir / "20240506070809_foo.bmp").exists()
+    assert (out_dir / "20240506070809_foo_1.bmp").exists()
+    assert (out_dir / "20240506070809_foo_2.bmp").exists()
 
 
 def test_save_png(tmp_path):
