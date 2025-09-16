@@ -2318,7 +2318,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_autofocus.setEnabled(False)
 
         def do_af():
-            af = AutoFocus(self.stage, self.camera)
+            af = AutoFocus(
+                self.stage,
+                self.camera,
+                position_cb=lambda: self.stage_worker.enqueue(
+                    self.stage.get_position, callback=self._on_stage_position
+                ),
+            )
             best_z = af.coarse_to_fine(
                 metric=metric,
                 z_range_mm=float(self.af_range.value()),
