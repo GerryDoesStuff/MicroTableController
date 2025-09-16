@@ -704,6 +704,54 @@ class MainWindow(QtWidgets.QMainWindow):
         af_stack_row.addWidget(stack_box)
         left.addLayout(af_stack_row)
 
+        # Leveling controls
+        lvl_box = QtWidgets.QGroupBox("Leveling")
+        l = QtWidgets.QGridLayout(lvl_box)
+        l.setColumnStretch(1, 1)
+        l.setColumnStretch(3, 1)
+        l.setColumnStretch(4, 0)
+        self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
+        self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
+        self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
+        self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
+        self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
+        # Coordinate fields for leveling points
+        self.level_x1_spin = QtWidgets.QDoubleSpinBox(); self.level_x1_spin.setDecimals(6); self.level_x1_spin.setRange(-1000.0, 1000.0); self.level_x1_spin.setValue(0.0)
+        self.level_y1_spin = QtWidgets.QDoubleSpinBox(); self.level_y1_spin.setDecimals(6); self.level_y1_spin.setRange(-1000.0, 1000.0); self.level_y1_spin.setValue(0.0)
+        self.btn_level_p1 = QtWidgets.QPushButton("Use pos")
+        self.level_x2_spin = QtWidgets.QDoubleSpinBox(); self.level_x2_spin.setDecimals(6); self.level_x2_spin.setRange(-1000.0, 1000.0); self.level_x2_spin.setValue(0.0)
+        self.level_y2_spin = QtWidgets.QDoubleSpinBox(); self.level_y2_spin.setDecimals(6); self.level_y2_spin.setRange(-1000.0, 1000.0); self.level_y2_spin.setValue(0.0)
+        self.btn_level_p2 = QtWidgets.QPushButton("Use pos")
+        self.level_x3_spin = QtWidgets.QDoubleSpinBox(); self.level_x3_spin.setDecimals(6); self.level_x3_spin.setRange(-1000.0, 1000.0); self.level_x3_spin.setValue(0.0)
+        self.level_y3_spin = QtWidgets.QDoubleSpinBox(); self.level_y3_spin.setDecimals(6); self.level_y3_spin.setRange(-1000.0, 1000.0); self.level_y3_spin.setValue(0.0)
+        self.btn_level_p3 = QtWidgets.QPushButton("Use pos")
+        self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
+        self.btn_apply_level = QtWidgets.QPushButton("Apply Leveling")
+        self.btn_disable_level = QtWidgets.QPushButton("Disable Leveling")
+        self.level_status = QtWidgets.QLabel("Disabled")
+        row = 0
+        l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
+        l.addWidget(QtWidgets.QLabel("P1 X:"), row, 0); l.addWidget(self.level_x1_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y1_spin, row, 3); l.addWidget(self.btn_level_p1, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P2 X:"), row, 0); l.addWidget(self.level_x2_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y2_spin, row, 3); l.addWidget(self.btn_level_p2, row, 4); row += 1
+        l.addWidget(QtWidgets.QLabel("P3 X:"), row, 0); l.addWidget(self.level_x3_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y3_spin, row, 3); l.addWidget(self.btn_level_p3, row, 4); row += 1
+        l.addWidget(self.btn_start_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_apply_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_disable_level, row, 0, 1, 5); row += 1
+        l.addWidget(self.level_status, row, 0, 1, 5); row += 1
+        self.level_equation = QtWidgets.QLabel("")
+        l.addWidget(self.level_equation, row, 0, 1, 5); row += 1
+        self.level_prompt = QtWidgets.QLabel("")
+        self.level_prompt.setVisible(False)
+        self.btn_level_continue = QtWidgets.QPushButton("Next")
+        self.btn_level_continue.setVisible(False)
+        l.addWidget(self.level_prompt, row, 0, 1, 5); row += 1
+        l.addWidget(self.btn_level_continue, row, 0, 1, 5); row += 1
+        left.addWidget(lvl_box)
+
         left.addStretch(1)
         left.addWidget(self.stage_pos)
 
@@ -861,54 +909,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # ---- Area tab
         area = QtWidgets.QWidget()
         a = QtWidgets.QVBoxLayout(area)
-
-        # Leveling controls
-        lvl_box = QtWidgets.QGroupBox("Leveling")
-        l = QtWidgets.QGridLayout(lvl_box)
-        l.setColumnStretch(1, 1)
-        l.setColumnStretch(3, 1)
-        l.setColumnStretch(4, 0)
-        self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
-        self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
-        self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
-        self.level_cols = QtWidgets.QSpinBox(); self.level_cols.setRange(2, 10); self.level_cols.setValue(3)
-        self.level_mode = QtWidgets.QComboBox(); self.level_mode.addItems(["Auto", "Manual"])
-        # Coordinate fields for leveling points
-        self.level_x1_spin = QtWidgets.QDoubleSpinBox(); self.level_x1_spin.setDecimals(6); self.level_x1_spin.setRange(-1000.0, 1000.0); self.level_x1_spin.setValue(0.0)
-        self.level_y1_spin = QtWidgets.QDoubleSpinBox(); self.level_y1_spin.setDecimals(6); self.level_y1_spin.setRange(-1000.0, 1000.0); self.level_y1_spin.setValue(0.0)
-        self.btn_level_p1 = QtWidgets.QPushButton("Use pos")
-        self.level_x2_spin = QtWidgets.QDoubleSpinBox(); self.level_x2_spin.setDecimals(6); self.level_x2_spin.setRange(-1000.0, 1000.0); self.level_x2_spin.setValue(0.0)
-        self.level_y2_spin = QtWidgets.QDoubleSpinBox(); self.level_y2_spin.setDecimals(6); self.level_y2_spin.setRange(-1000.0, 1000.0); self.level_y2_spin.setValue(0.0)
-        self.btn_level_p2 = QtWidgets.QPushButton("Use pos")
-        self.level_x3_spin = QtWidgets.QDoubleSpinBox(); self.level_x3_spin.setDecimals(6); self.level_x3_spin.setRange(-1000.0, 1000.0); self.level_x3_spin.setValue(0.0)
-        self.level_y3_spin = QtWidgets.QDoubleSpinBox(); self.level_y3_spin.setDecimals(6); self.level_y3_spin.setRange(-1000.0, 1000.0); self.level_y3_spin.setValue(0.0)
-        self.btn_level_p3 = QtWidgets.QPushButton("Use pos")
-        self.btn_start_level = QtWidgets.QPushButton("Start Leveling")
-        self.btn_apply_level = QtWidgets.QPushButton("Apply Leveling")
-        self.btn_disable_level = QtWidgets.QPushButton("Disable Leveling")
-        self.level_status = QtWidgets.QLabel("Disabled")
-        row = 0
-        l.addWidget(QtWidgets.QLabel("Method:"), row, 0); l.addWidget(self.level_method, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Polynomial:"), row, 0); l.addWidget(self.level_poly, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Rows:"), row, 0); l.addWidget(self.level_rows, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Cols:"), row, 0); l.addWidget(self.level_cols, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("Mode:"), row, 0); l.addWidget(self.level_mode, row, 1); row += 1
-        l.addWidget(QtWidgets.QLabel("P1 X:"), row, 0); l.addWidget(self.level_x1_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y1_spin, row, 3); l.addWidget(self.btn_level_p1, row, 4); row += 1
-        l.addWidget(QtWidgets.QLabel("P2 X:"), row, 0); l.addWidget(self.level_x2_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y2_spin, row, 3); l.addWidget(self.btn_level_p2, row, 4); row += 1
-        l.addWidget(QtWidgets.QLabel("P3 X:"), row, 0); l.addWidget(self.level_x3_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y3_spin, row, 3); l.addWidget(self.btn_level_p3, row, 4); row += 1
-        l.addWidget(self.btn_start_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.btn_apply_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.btn_disable_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 5); row += 1
-        self.level_equation = QtWidgets.QLabel("")
-        l.addWidget(self.level_equation, row, 0, 1, 5); row += 1
-        self.level_prompt = QtWidgets.QLabel("")
-        self.level_prompt.setVisible(False)
-        self.btn_level_continue = QtWidgets.QPushButton("Next")
-        self.btn_level_continue.setVisible(False)
-        l.addWidget(self.level_prompt, row, 0, 1, 5); row += 1
-        l.addWidget(self.btn_level_continue, row, 0, 1, 5); row += 1
-        a.addWidget(lvl_box)
 
         # Raster controls
         rast_box = QtWidgets.QGroupBox("Raster")
