@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import json
+import datetime
 
 import numpy as np
 import pytest
@@ -9,6 +10,8 @@ from PIL import Image
 
 # Ensure the repository root is on sys.path so ``microstage_app`` is importable
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+import microstage_app.io.storage as storage
 from microstage_app.io.storage import ImageWriter
 
 
@@ -43,6 +46,55 @@ def test_filename_generation_with_auto_numbering(tmp_path):
     assert not (out_dir / "foo.bmp").exists()
     assert (out_dir / "foo_1.bmp").exists()
     assert (out_dir / "foo_2.bmp").exists()
+
+
+def test_auto_prefix(monkeypatch, tmp_path):
+    writer = ImageWriter(base_dir=str(tmp_path / "runs"))
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    out_dir = tmp_path / "prefix"
+    timestamp = datetime.datetime(2024, 7, 8, 9, 10, 11)
+
+    class FixedDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return timestamp
+
+    monkeypatch.setattr(storage.datetime, "datetime", FixedDateTime)
+
+    writer.save_single(img, directory=str(out_dir), filename="foo", auto_prefix=True)
+    assert (out_dir / "20240708091011_foo.bmp").exists()
+
+
+def test_auto_prefix_with_autonumber(monkeypatch, tmp_path):
+    writer = ImageWriter(base_dir=str(tmp_path / "runs"))
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    out_dir = tmp_path / "prefix_auto"
+    timestamp = datetime.datetime(2024, 7, 8, 9, 10, 11)
+
+    class FixedDateTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return timestamp
+
+    monkeypatch.setattr(storage.datetime, "datetime", FixedDateTime)
+
+    writer.save_single(
+        img,
+        directory=str(out_dir),
+        filename="foo",
+        auto_prefix=True,
+        auto_number=True,
+    )
+    writer.save_single(
+        img,
+        directory=str(out_dir),
+        filename="foo",
+        auto_prefix=True,
+        auto_number=True,
+    )
+    assert not (out_dir / "20240708091011_foo.bmp").exists()
+    assert (out_dir / "20240708091011_foo_1.bmp").exists()
+    assert (out_dir / "20240708091011_foo_2.bmp").exists()
 
 
 def test_creates_missing_directory(tmp_path):

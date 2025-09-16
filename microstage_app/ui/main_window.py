@@ -418,7 +418,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.focus_mgr = FocusPlaneManager()
         # flag indicating whether leveling corrections are applied
         self.leveling_enabled = False
-        # track the most recent absolute Z target requested by the user or hardware
+        # track the most recent absolute Z target requested by the user
         self._last_requested_z: Optional[float] = None
 
         # profiles
@@ -454,6 +454,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                         expected_type=str)
         self.capture_dir = dir_profile if dir_profile else self.image_writer.run_dir
         self.capture_name = self.profiles.get('capture.name', "capture", expected_type=str)
+        self.auto_prefix = self.profiles.get('capture.auto_prefix', False, expected_type=bool)
         self.auto_number = self.profiles.get('capture.auto_number', False, expected_type=bool)
         fmt = self.profiles.get('capture.format', 'png', expected_type=str)
         if fmt.lower() not in {"bmp", "tif", "png", "jpg"}:
@@ -772,6 +773,14 @@ class MainWindow(QtWidgets.QMainWindow):
             "the same name exists to avoid overwriting. Setting persists."
         )
         ctr4.addWidget(self.autonumber_chk)
+        self.autoprefix_chk = QtWidgets.QCheckBox("Auto-prefix (yyyymmddhhmmss_)")
+        self.autoprefix_chk.setChecked(self.auto_prefix)
+        self.autoprefix_chk.setToolTip(
+            "When enabled, prepend a timestamp such as 20240101010101_ to the "
+            "base filename for every capture. Auto-numbering still applies "
+            "after the prefix when enabled."
+        )
+        ctr4.addWidget(self.autoprefix_chk)
         ctr4.addWidget(QtWidgets.QLabel("Format:"))
         self.format_combo = QtWidgets.QComboBox()
         self.format_combo.addItems(["BMP", "TIF", "PNG", "JPG"])
@@ -783,10 +792,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Right: tabs
         rightw = QtWidgets.QTabWidget()
+        rightw.setMaximumWidth(350)  # tweak as needed
+        rightw.setSizePolicy(
+            QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred
+        )
 
         # ---- Camera tab (performance controls)
         camtab = QtWidgets.QWidget()
         c = QtWidgets.QGridLayout(camtab)
+        c.setColumnStretch(1, 1)
+        c.setColumnStretch(2, 0)
         row = 0
         self.exp_spin = QtWidgets.QDoubleSpinBox(); self.exp_spin.setRange(0.01, 10000.0); self.exp_spin.setValue(10.0)
         self.exp_spin.setSuffix(" ms")
@@ -853,6 +868,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Leveling controls
         lvl_box = QtWidgets.QGroupBox("Leveling")
         l = QtWidgets.QGridLayout(lvl_box)
+        l.setColumnStretch(1, 1)
+        l.setColumnStretch(3, 1)
+        l.setColumnStretch(4, 0)
         self.level_method = QtWidgets.QComboBox(); self.level_method.addItems(["Three-point", "Grid"])
         self.level_poly = QtWidgets.QComboBox(); self.level_poly.addItems(["Linear", "Quadratic", "Cubic"])
         self.level_rows = QtWidgets.QSpinBox(); self.level_rows.setRange(2, 10); self.level_rows.setValue(3)
@@ -898,6 +916,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Raster controls
         rast_box = QtWidgets.QGroupBox("Raster")
         r = QtWidgets.QGridLayout(rast_box)
+        r.setColumnStretch(1, 1)
+        r.setColumnStretch(3, 1)
+        r.setColumnStretch(4, 0)
+        r.setColumnStretch(5, 0)
         self.rows_spin = QtWidgets.QSpinBox(); self.rows_spin.setRange(1, 1000); self.rows_spin.setValue(5)
         self.cols_spin = QtWidgets.QSpinBox(); self.cols_spin.setRange(1, 1000); self.cols_spin.setValue(5)
 
@@ -1120,6 +1142,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.capture_dir_edit.textChanged.connect(self._on_capture_dir_changed)
         self.capture_name_edit.textChanged.connect(self._on_capture_name_changed)
         self.autonumber_chk.toggled.connect(self._on_autonumber_toggled)
+        self.autoprefix_chk.toggled.connect(self._on_autoprefix_toggled)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
 
@@ -1190,6 +1213,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_autonumber_toggled(self, checked: bool):
         self.auto_number = checked
         self.profiles.set('capture.auto_number', checked)
+        self.profiles.save()
+
+    def _on_autoprefix_toggled(self, checked: bool):
+        self.auto_prefix = checked
+        self.profiles.set('capture.auto_prefix', checked)
         self.profiles.save()
 
     def _on_format_changed(self, text: str):
@@ -1560,7 +1588,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._last_pos["y"] = y
         if z is not None:
             self._last_pos["z"] = z
-            self._last_requested_z = z
         # merge hardware-reported bounds with fallback from config
         b = self.stage_bounds or {}
         fb = getattr(self, "_stage_bounds_fallback", None)
@@ -1887,6 +1914,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.btn_browse_dir,
             self.capture_name_edit,
             self.autonumber_chk,
+            self.autoprefix_chk,
             self.format_combo,
             self.depth_combo,
             self.raw_chk,
@@ -2169,6 +2197,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         directory = self.capture_dir
         name = self.capture_name
+        auto_prefix = self.auto_prefix
         auto_num = self.auto_number
 
         # validate directory
@@ -2253,6 +2282,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     img,
                     directory=directory,
                     filename=name,
+                    auto_prefix=auto_prefix,
                     auto_number=auto_num,
                     fmt=self.capture_format,
                     metadata=meta,
@@ -2276,6 +2306,10 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self, "Autofocus", f"Best Z offset (relative): {best:.6f} mm"
             )
+            if self.stage_worker:
+                self.stage_worker.enqueue(
+                    self.stage.get_position, callback=self._on_stage_position
+                )
 
     @QtCore.Slot()
     def _cleanup_autofocus_thread(self):
@@ -2301,7 +2335,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_autofocus.setEnabled(False)
 
         def do_af():
-            af = AutoFocus(self.stage, self.camera)
+            af = AutoFocus(
+                self.stage,
+                self.camera,
+                position_cb=lambda: self.stage_worker.enqueue(
+                    self.stage.get_position, callback=self._on_stage_position
+                ),
+            )
             best_z = af.coarse_to_fine(
                 metric=metric,
                 z_range_mm=float(self.af_range.value()),
@@ -2800,6 +2840,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         directory = self.capture_dir
         name = self.capture_name
+        auto_prefix = self.auto_prefix
         auto_num = self.auto_number
         fmt = self.capture_format
 
@@ -2832,6 +2873,7 @@ class MainWindow(QtWidgets.QMainWindow):
             cfg,
             directory=directory,
             base_name=name,
+            auto_prefix=auto_prefix,
             auto_number=auto_num,
             fmt=fmt,
             position_cb=lambda pos: self.stage_worker.enqueue(

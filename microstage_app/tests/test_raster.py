@@ -49,11 +49,22 @@ class WriterMock:
         img,
         directory=None,
         filename="capture",
+        auto_prefix=False,
         auto_number=False,
         fmt="bmp",
         metadata=None,
     ):
-        self.saved.append((img, directory, filename, auto_number, fmt, metadata))
+        self.saved.append(
+            {
+                "img": img,
+                "directory": directory,
+                "filename": filename,
+                "auto_prefix": auto_prefix,
+                "auto_number": auto_number,
+                "fmt": fmt,
+                "metadata": metadata,
+            }
+        )
 
 
 @pytest.mark.parametrize("mode", ["rectangle", "parallelogram", "trapezoid"])
@@ -102,9 +113,9 @@ def test_raster_traversal_modes(mode, serpentine):
             expected_meta.append((r, c))
 
     assert stage.moves == expected_moves
-    assert [f[2] for f in writer.saved] == expected_files
-    assert [m[5]["Row"] for m in writer.saved] == [r for r, _ in expected_meta]
-    assert [m[5]["Column"] for m in writer.saved] == [c for _, c in expected_meta]
+    assert [entry["filename"] for entry in writer.saved] == expected_files
+    assert [entry["metadata"]["Row"] for entry in writer.saved] == [r for r, _ in expected_meta]
+    assert [entry["metadata"]["Column"] for entry in writer.saved] == [c for _, c in expected_meta]
 
 
 def test_raster_capture_disabled():
