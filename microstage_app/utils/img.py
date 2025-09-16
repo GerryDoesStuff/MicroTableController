@@ -7,6 +7,8 @@ from PySide6 import QtGui, QtWidgets
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 
+from microstage_app import get_dejavu_sans_path
+
 
 # Scaling factors for the scale bar drawing used across the application
 VERT_SCALE = 2  # line thickness multiplier
@@ -16,6 +18,7 @@ TEXT_SCALE = 4  # font size multiplier
 _scale_font_cache = None
 _font_error_reported = False
 logger = logging.getLogger(__name__)
+DEJAVU_SANS_PATH = get_dejavu_sans_path()
 
 
 def _show_font_error_dialog(message: str) -> None:
@@ -41,16 +44,29 @@ def _show_font_error_dialog(message: str) -> None:
 def _load_default_scale_font(reason: str, font_size: int) -> ImageFont.ImageFont:
     """Load a bundled or Pillow default font and log the fallback reason."""
 
-    for candidate in ("DejaVuSans.ttf",):
+    fallback_candidates = (
+        DEJAVU_SANS_PATH,
+        "DejaVuSans.ttf",
+    )
+
+    for candidate in fallback_candidates:
         try:
-            font = ImageFont.truetype(candidate, font_size)
+            font = ImageFont.truetype(str(candidate), font_size)
         except OSError:
             continue
-        logger.warning(
-            "%s; using bundled font '%s' for scale bar text.",
-            reason,
-            candidate,
-        )
+
+        if candidate == DEJAVU_SANS_PATH:
+            logger.warning(
+                "%s; using packaged DejaVu Sans font at '%s' for scale bar text.",
+                reason,
+                candidate,
+            )
+        else:
+            logger.warning(
+                "%s; using fallback font '%s' located via Pillow's search path.",
+                reason,
+                candidate,
+            )
         return font
 
     try:
