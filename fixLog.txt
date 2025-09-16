@@ -1,4 +1,3 @@
 Add right-click-invoked tooltips to all fields and buttons. Continue adding them to all newly created fields and buttons.
 Scale bar text font for acquired images differs from the preview image font. Use the preview image font for acquired images as well.
 GPU usage is still not displayed. It seems like the GPU is not being utilized at all since the app is consuming about 33% of an intel core i7-9700K CPU. I dread to think how bad it's gonna be on lesser machines.
-Values in autofocus and focus stack are not persistent.
