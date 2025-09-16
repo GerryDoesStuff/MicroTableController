@@ -584,9 +584,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
-        left.addWidget(self.stage_status)
-        left.addWidget(self.cam_status)
-        left.addSpacing(8)
         left.addWidget(self.profile_label)
         left.addWidget(self.profile_combo)
         left.addWidget(self.btn_reload_profiles)
@@ -1007,6 +1004,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ---- System monitor tab
         self.system_tab = SystemMonitorTab()
+        self.system_tab.add_device_status_widgets(self.stage_status, self.cam_status)
         rightw.addTab(self.system_tab, "System")
         self.system_tab.start()
 

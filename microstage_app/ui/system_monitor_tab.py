@@ -34,7 +34,10 @@ class SystemMonitorTab(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
 
-        layout = QtWidgets.QVBoxLayout(self)
+        self._layout = QtWidgets.QVBoxLayout(self)
+        layout = self._layout
+
+        self._status_layout: QtWidgets.QVBoxLayout | None = None
 
         # CPU widgets
         self.proc = psutil.Process()
@@ -73,6 +76,24 @@ class SystemMonitorTab(QtWidgets.QWidget):
 
         # ensure right-click tooltips for any interactive widgets
         apply_tooltip_context(self)
+
+    # ------------------------------------------------------------------
+    def add_device_status_widgets(self, *widgets: QtWidgets.QWidget | None) -> None:
+        """Place external device status widgets above the utilization meters."""
+
+        valid_widgets = [w for w in widgets if w is not None]
+        if not valid_widgets:
+            return
+
+        if self._status_layout is None:
+            self._status_layout = QtWidgets.QVBoxLayout()
+            self._status_layout.setContentsMargins(0, 0, 0, 0)
+            self._status_layout.setSpacing(2)
+            self._layout.insertLayout(0, self._status_layout)
+            self._layout.insertSpacing(1, 8)
+
+        for widget in valid_widgets:
+            self._status_layout.addWidget(widget)
 
     # ------------------------------------------------------------------
     def start(self) -> None:
