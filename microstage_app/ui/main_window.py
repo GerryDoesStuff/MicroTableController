@@ -707,6 +707,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Leveling controls
         lvl_box = QtWidgets.QGroupBox("Leveling")
         l = QtWidgets.QGridLayout(lvl_box)
+        l.setContentsMargins(8, 6, 8, 6)
+        l.setHorizontalSpacing(6)
+        l.setVerticalSpacing(4)
         l.setColumnStretch(1, 1)
         l.setColumnStretch(3, 1)
         l.setColumnStretch(4, 0)
@@ -738,12 +741,25 @@ class MainWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("P1 X:"), row, 0); l.addWidget(self.level_x1_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y1_spin, row, 3); l.addWidget(self.btn_level_p1, row, 4); row += 1
         l.addWidget(QtWidgets.QLabel("P2 X:"), row, 0); l.addWidget(self.level_x2_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y2_spin, row, 3); l.addWidget(self.btn_level_p2, row, 4); row += 1
         l.addWidget(QtWidgets.QLabel("P3 X:"), row, 0); l.addWidget(self.level_x3_spin, row, 1); l.addWidget(QtWidgets.QLabel("Y:"), row, 2); l.addWidget(self.level_y3_spin, row, 3); l.addWidget(self.btn_level_p3, row, 4); row += 1
-        l.addWidget(self.btn_start_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.btn_apply_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.btn_disable_level, row, 0, 1, 5); row += 1
-        l.addWidget(self.level_status, row, 0, 1, 5); row += 1
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(6)
+        btn_row.addWidget(self.btn_start_level)
+        btn_row.addWidget(self.btn_apply_level)
+        btn_row.addWidget(self.btn_disable_level)
+        l.addLayout(btn_row, row, 0, 1, 5)
+        row += 1
         self.level_equation = QtWidgets.QLabel("")
-        l.addWidget(self.level_equation, row, 0, 1, 5); row += 1
+        self.level_equation.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        self.level_equation.setWordWrap(True)
+        status_row = QtWidgets.QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(6)
+        status_row.addWidget(self.level_status)
+        status_row.addSpacing(12)
+        status_row.addWidget(self.level_equation, 1)
+        l.addLayout(status_row, row, 0, 1, 5)
+        row += 1
         self.level_prompt = QtWidgets.QLabel("")
         self.level_prompt.setVisible(False)
         self.btn_level_continue = QtWidgets.QPushButton("Next")
