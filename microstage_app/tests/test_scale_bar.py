@@ -1,7 +1,8 @@
 import os
 from types import SimpleNamespace
 import math
-from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
@@ -116,6 +117,9 @@ def test_preview_scale_bar_pen_and_font(monkeypatch, qt_app):
 
     def fake_setFont(self, font):
         captured["font_size"] = font.pointSizeF()
+        captured["font_pixel_size"] = font.pixelSize()
+        captured["font"] = QtGui.QFont(font)
+        captured["metrics_height"] = QtGui.QFontMetricsF(font).height()
         orig_setFont(self, font)
 
     monkeypatch.setattr(QtGui.QPainter, "setPen", fake_setPen)
@@ -127,8 +131,34 @@ def test_preview_scale_bar_pen_and_font(monkeypatch, qt_app):
     painter.end()
 
     assert captured["pen_width"] == 2 * VERT_SCALE
-    base_size = QtGui.QFont().pointSizeF()
-    assert captured["font_size"] == pytest.approx(base_size * TEXT_SCALE)
+    app_font = QtGui.QFont(qt_app.font())
+    base_point = app_font.pointSizeF()
+    if base_point > 0:
+        assert captured["font_size"] == pytest.approx(base_point * TEXT_SCALE)
+    else:
+        expected_pixel = app_font.pixelSize() * TEXT_SCALE
+        assert captured["font_pixel_size"] == expected_pixel
+
+    assert "metrics_height" in captured
+
+    from microstage_app.utils import img as img_utils
+
+    img_utils._scale_font_cache = None
+    height_capture = {}
+    original_textbbox = ImageDraw.ImageDraw.textbbox
+
+    def spy_textbbox(self, xy, text, font=None, *args, **kwargs):
+        bbox = original_textbbox(self, xy, text, font=font, *args, **kwargs)
+        height_capture["height"] = bbox[3] - bbox[1]
+        return bbox
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "textbbox", spy_textbbox)
+    draw_scale_bar(np.zeros((100, 200, 3), dtype=np.uint8), 1.0)
+
+    assert "height" in height_capture
+    assert height_capture["height"] == pytest.approx(
+        captured["metrics_height"], abs=2.0
+    )
     view.close()
 
 
@@ -146,7 +176,7 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     from microstage_app.utils import img as img_utils
     img_utils._scale_font_cache = None
 
-    out = draw_scale_bar(img, 0.2)
+    out = draw_scale_bar(img, 0.05)
     Image.fromarray(out).save(tmp_path / "scale.png")
 
     font_path = used["path"]
@@ -156,7 +186,7 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     monkeypatch.setattr(ImageFont, "truetype", orig_truetype)
 
     h, w, _ = img.shape
-    um_per_px = 0.2
+    um_per_px = 0.05
     max_um = 0.2 * w * um_per_px
     exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
     nice_um = 10 ** exp
@@ -169,14 +199,7 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     x0 = int(round(w - 20 - length_px))
     y0 = int(round(h - 20))
 
-    qfont = qt_app.font()
-    ps = qfont.pointSizeF()
-    if ps > 0:
-        base_size = ps
-    else:
-        base_size = qfont.pixelSize()
-    font_size = int(round(base_size * TEXT_SCALE))
-    font = ImageFont.truetype(str(Path(font_path).resolve()), font_size)
+    font = img_utils._load_scale_font()
     dummy = Image.new("RGB", (1, 1))
     draw = ImageDraw.Draw(dummy)
     label = f"{nice_um:.0f} µm"
@@ -185,10 +208,12 @@ def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
     mu_w = draw.textlength("µ", font=font)
     th = bbox[3] - bbox[1]
     y_text = y0 - (7 * TEXT_SCALE) - th
+    y_start = max(0, y_text)
+    y_end = min(h, y_text + th)
 
-    x_start = int(x0 + pre)
-    x_end = int(min(w, x0 + pre + mu_w))
-    mu_region = out[y_text : y_text + th, x_start:x_end]
+    x_start = int(max(0, math.floor(x0 + pre)))
+    x_end = int(min(w, math.ceil(x0 + pre + mu_w)))
+    mu_region = out[y_start:y_end, x_start:x_end]
     assert mu_region.size > 0 and np.any(mu_region == 255)
 
 

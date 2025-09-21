@@ -41,7 +41,7 @@ def _show_font_error_dialog(message: str) -> None:
         _font_error_reported = True
 
 
-def _load_default_scale_font(reason: str, font_size: int) -> ImageFont.ImageFont:
+def _load_default_scale_font(reason: str, pixel_size: int) -> ImageFont.ImageFont:
     """Load a bundled or Pillow default font and log the fallback reason."""
 
     fallback_candidates = (
@@ -51,7 +51,7 @@ def _load_default_scale_font(reason: str, font_size: int) -> ImageFont.ImageFont
 
     for candidate in fallback_candidates:
         try:
-            font = ImageFont.truetype(str(candidate), font_size)
+            font = ImageFont.truetype(str(candidate), pixel_size)
         except OSError:
             continue
 
@@ -104,16 +104,26 @@ def _load_scale_font() -> ImageFont.ImageFont:
     if qapp is None:
         raise RuntimeError("QGuiApplication instance required to load font")
 
-    qfont = qapp.font()
-    ps = qfont.pointSizeF()
-    if ps > 0:
-        base_size = ps
+    qfont = QtGui.QFont(qapp.font())
+    original_point_size = qfont.pointSizeF()
+    if original_point_size > 0:
+        qfont.setPointSizeF(original_point_size * TEXT_SCALE)
     else:
-        base_size = qfont.pixelSize()
+        qfont.setPixelSize(qfont.pixelSize() * TEXT_SCALE)
 
-    font_size = int(round(base_size * TEXT_SCALE))
+    metrics = QtGui.QFontMetricsF(qfont)
+    pixel_size = int(round(metrics.height()))
+    if pixel_size <= 0:
+        info = QtGui.QFontInfo(qfont)
+        pixel_size = info.pixelSize()
+    if pixel_size <= 0:
+        fallback = qfont.pixelSize()
+        if fallback <= 0 and original_point_size > 0:
+            fallback = int(round(original_point_size * TEXT_SCALE))
+        pixel_size = fallback
+    pixel_size = max(1, int(round(pixel_size)))
 
-    family = qfont.family()
+    family = QtGui.QFontInfo(qfont).family() or qfont.family()
     font: ImageFont.ImageFont
 
     try:
@@ -127,7 +137,7 @@ def _load_scale_font() -> ImageFont.ImageFont:
         font = _load_default_scale_font(
             "System font lookup utility 'fc-match' is not available: "
             f"{exc}",
-            font_size,
+            pixel_size,
         )
         logger.debug("fc-match not found while resolving '%s': %s", family, exc)
     except subprocess.CalledProcessError as exc:
@@ -141,21 +151,27 @@ def _load_scale_font() -> ImageFont.ImageFont:
         )
         if stderr:
             reason = f"{reason}: {stderr}"
-        font = _load_default_scale_font(reason, font_size)
+        font = _load_default_scale_font(reason, pixel_size)
     else:
         font_path = res.stdout.strip()
         if not font_path:
             font = _load_default_scale_font(
                 f"System font lookup returned an empty path for '{family}'",
-                font_size,
+                pixel_size,
             )
         else:
             try:
-                font = ImageFont.truetype(font_path, font_size)
+                font = ImageFont.truetype(font_path, pixel_size)
+                logger.debug(
+                    "Loaded scale bar font '%s' at %d px from '%s'",
+                    family,
+                    pixel_size,
+                    font_path,
+                )
             except OSError as exc:
                 font = _load_default_scale_font(
                     f"Failed to load system font '{font_path}': {exc}",
-                    font_size,
+                    pixel_size,
                 )
                 logger.debug("Unable to load font '%s': %s", font_path, exc)
 
