@@ -6,12 +6,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PIL import Image, ImageDraw, ImageFont
 from PySide6 import QtWidgets, QtGui, QtCore
 
 import microstage_app.ui.main_window as mw
 from microstage_app.analysis import Lens
-from microstage_app.utils.img import draw_scale_bar, VERT_SCALE, TEXT_SCALE
+from microstage_app.utils.img import (
+    draw_scale_bar,
+    VERT_SCALE,
+    TEXT_SCALE,
+    _scale_bar_geometry,
+    _scaled_font,
+)
 
 
 @pytest.fixture
@@ -27,23 +32,35 @@ def test_draw_scale_bar_length_and_label(monkeypatch, qt_app):
     img = np.zeros((100, 200, 3), dtype=np.uint8)
     captured = {}
 
-    orig_text = ImageDraw.ImageDraw.text
+    original_draw_text = QtGui.QPainter.drawText
 
-    def fake_text(self, xy, text, fill=None, font=None):
-        captured["text"] = text
-        return orig_text(self, xy, text, fill=fill, font=font)
+    def spy_draw_text(self, *args, **kwargs):
+        text = kwargs.get("text")
+        if text is None and args:
+            candidate = args[-1]
+            if isinstance(candidate, str):
+                text = candidate
+        if text is not None:
+            captured["text"] = text
+        return original_draw_text(self, *args, **kwargs)
 
-    monkeypatch.setattr(ImageDraw.ImageDraw, "text", fake_text)
+    monkeypatch.setattr(QtGui.QPainter, "drawText", spy_draw_text)
 
     out = draw_scale_bar(img, 1.0)
 
-    # Bar is 20 µm => 20 px long starting at x=160 for this image size
     bar_row = out[80]
     bar_pixels = np.where(np.all(bar_row == 255, axis=1))[0]
-    assert bar_pixels[0] == 160
-    assert bar_pixels[-1] - bar_pixels[0] == 20
-    assert np.all(bar_row[:160] == 0)
-    assert np.all(bar_row[181:] == 0)
+    assert bar_pixels.size > 0
+
+    _, length_px, x0, _ = _scale_bar_geometry(out.shape[1], out.shape[0], 1.0)
+    tolerance = max(1, VERT_SCALE)
+    assert abs(bar_pixels[0] - x0) <= tolerance
+    assert abs(bar_pixels[-1] - (x0 + length_px)) <= tolerance
+
+    left_clear = max(0, bar_pixels[0] - tolerance)
+    right_clear = min(out.shape[1], bar_pixels[-1] + tolerance + 1)
+    assert np.all(bar_row[:left_clear] == 0)
+    assert np.all(bar_row[right_clear:] == 0)
 
     assert captured["text"] == "20 µm"
 
@@ -87,13 +104,19 @@ def test_capture_contains_scale_bar(monkeypatch, tmp_path, qt_app):
     win._capture()
     out = saved["img"]
 
-    # Scale bar drawn at bottom-right with length 20 px
     bar_row = out[80]
     bar_pixels = np.where(np.all(bar_row == 255, axis=1))[0]
-    assert bar_pixels[0] == 160
-    assert bar_pixels[-1] - bar_pixels[0] == 20
-    assert np.all(bar_row[:160] == 0)
-    assert np.all(bar_row[181:] == 0)
+    assert bar_pixels.size > 0
+
+    _, length_px, x0, _ = _scale_bar_geometry(out.shape[1], out.shape[0], 1.0)
+    tolerance = max(1, VERT_SCALE)
+    assert abs(bar_pixels[0] - x0) <= tolerance
+    assert abs(bar_pixels[-1] - (x0 + length_px)) <= tolerance
+
+    left_clear = max(0, bar_pixels[0] - tolerance)
+    right_clear = min(out.shape[1], bar_pixels[-1] + tolerance + 1)
+    assert np.all(bar_row[:left_clear] == 0)
+    assert np.all(bar_row[right_clear:] == 0)
 
     win.preview_timer.stop()
     win.fps_timer.stop()
@@ -107,113 +130,95 @@ def test_preview_scale_bar_pen_and_font(monkeypatch, qt_app):
     img.fill(QtCore.Qt.black)
     view.set_image(img)
 
-    captured = {}
-    orig_setPen = QtGui.QPainter.setPen
-    orig_setFont = QtGui.QPainter.setFont
+    captured_pen_widths = []
+    original_set_pen = QtGui.QPainter.setPen
 
-    def fake_setPen(self, pen):
-        captured["pen_width"] = pen.width()
-        orig_setPen(self, pen)
+    def spy_set_pen(self, pen):
+        if isinstance(pen, QtGui.QPen) and pen.color() == QtCore.Qt.white and pen.width() > 0:
+            captured_pen_widths.append(pen.width())
+        return original_set_pen(self, pen)
 
-    def fake_setFont(self, font):
-        captured["font_size"] = font.pointSizeF()
-        captured["font_pixel_size"] = font.pixelSize()
-        captured["font"] = QtGui.QFont(font)
-        captured["metrics_height"] = QtGui.QFontMetricsF(font).height()
-        orig_setFont(self, font)
+    draw_calls = []
+    original_draw_text = QtGui.QPainter.drawText
 
-    monkeypatch.setattr(QtGui.QPainter, "setPen", fake_setPen)
-    monkeypatch.setattr(QtGui.QPainter, "setFont", fake_setFont)
+    def spy_draw_text(self, *args, **kwargs):
+        text = kwargs.get("text")
+        if text is None and args:
+            candidate = args[-1]
+            if isinstance(candidate, str):
+                text = candidate
+        metrics = QtGui.QFontMetricsF(self.font())
+        draw_calls.append(
+            {
+                "text": text,
+                "point_size": self.font().pointSizeF(),
+                "pixel_size": self.font().pixelSize(),
+                "height": metrics.height(),
+                "descent": metrics.descent(),
+            }
+        )
+        return original_draw_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(QtGui.QPainter, "setPen", spy_set_pen)
+    monkeypatch.setattr(QtGui.QPainter, "drawText", spy_draw_text)
 
     target = QtGui.QImage(200, 100, QtGui.QImage.Format_RGB32)
     painter = QtGui.QPainter(target)
     view.drawForeground(painter, QtCore.QRectF(target.rect()))
     painter.end()
 
-    assert captured["pen_width"] == 2 * VERT_SCALE
+    assert captured_pen_widths[0] == 2 * VERT_SCALE
+    assert draw_calls
+    preview_call = draw_calls[0]
+
     app_font = QtGui.QFont(qt_app.font())
     base_point = app_font.pointSizeF()
     if base_point > 0:
-        assert captured["font_size"] == pytest.approx(base_point * TEXT_SCALE)
+        assert preview_call["point_size"] == pytest.approx(base_point * TEXT_SCALE)
     else:
         expected_pixel = app_font.pixelSize() * TEXT_SCALE
-        assert captured["font_pixel_size"] == expected_pixel
+        assert preview_call["pixel_size"] == expected_pixel
 
-    assert "metrics_height" in captured
+    out = draw_scale_bar(np.zeros((100, 200, 3), dtype=np.uint8), 1.0)
+    assert out.shape == (100, 200, 3)
+    assert len(draw_calls) >= 2
+    capture_call = draw_calls[-1]
 
-    from microstage_app.utils import img as img_utils
+    assert capture_call["text"] == preview_call["text"]
+    assert capture_call["height"] == pytest.approx(preview_call["height"])
+    assert capture_call["descent"] == pytest.approx(preview_call["descent"])
+    if base_point > 0:
+        assert capture_call["point_size"] == pytest.approx(preview_call["point_size"])
+    else:
+        assert capture_call["pixel_size"] == preview_call["pixel_size"]
 
-    img_utils._scale_font_cache = None
-    height_capture = {}
-    original_textbbox = ImageDraw.ImageDraw.textbbox
-
-    def spy_textbbox(self, xy, text, font=None, *args, **kwargs):
-        bbox = original_textbbox(self, xy, text, font=font, *args, **kwargs)
-        height_capture["height"] = bbox[3] - bbox[1]
-        return bbox
-
-    monkeypatch.setattr(ImageDraw.ImageDraw, "textbbox", spy_textbbox)
-    draw_scale_bar(np.zeros((100, 200, 3), dtype=np.uint8), 1.0)
-
-    assert "height" in height_capture
-    assert height_capture["height"] == pytest.approx(
-        captured["metrics_height"], abs=2.0
-    )
     view.close()
 
 
-def test_scale_bar_mu_character_renders(monkeypatch, tmp_path, qt_app):
+def test_scale_bar_mu_character_renders(qt_app):
     img = np.zeros((100, 200, 3), dtype=np.uint8)
-    used = {}
-
-    orig_truetype = ImageFont.truetype
-
-    def spy_truetype(font, size=10, *args, **kwargs):
-        used["path"] = font
-        return orig_truetype(font, size, *args, **kwargs)
-
-    monkeypatch.setattr(ImageFont, "truetype", spy_truetype)
-    from microstage_app.utils import img as img_utils
-    img_utils._scale_font_cache = None
-
     out = draw_scale_bar(img, 0.05)
-    Image.fromarray(out).save(tmp_path / "scale.png")
 
-    font_path = used["path"]
-    assert isinstance(font_path, (str, bytes)) and font_path
-
-    # restore original truetype for analysis
-    monkeypatch.setattr(ImageFont, "truetype", orig_truetype)
-
-    h, w, _ = img.shape
+    h, w, _ = out.shape
     um_per_px = 0.05
-    max_um = 0.2 * w * um_per_px
-    exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
-    nice_um = 10 ** exp
-    for m in (5, 2, 1):
-        candidate = m * (10 ** exp)
-        if candidate <= max_um:
-            nice_um = candidate
-            break
-    length_px = int(round(nice_um / um_per_px))
-    x0 = int(round(w - 20 - length_px))
-    y0 = int(round(h - 20))
+    nice_um, length_px, x0, y0 = _scale_bar_geometry(w, h, um_per_px)
 
-    font = img_utils._load_scale_font()
-    dummy = Image.new("RGB", (1, 1))
-    draw = ImageDraw.Draw(dummy)
-    label = f"{nice_um:.0f} µm"
-    bbox = draw.textbbox((0, 0), label, font=font)
-    pre = draw.textlength(f"{nice_um:.0f} ", font=font)
-    mu_w = draw.textlength("µ", font=font)
-    th = bbox[3] - bbox[1]
-    y_text = y0 - (7 * TEXT_SCALE) - th
-    y_start = max(0, y_text)
-    y_end = min(h, y_text + th)
+    font = _scaled_font(QtGui.QFont(qt_app.font()))
+    metrics = QtGui.QFontMetricsF(font)
+    label = (
+        f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
+    )
 
-    x_start = int(max(0, math.floor(x0 + pre)))
-    x_end = int(min(w, math.ceil(x0 + pre + mu_w)))
-    mu_region = out[y_start:y_end, x_start:x_end]
+    baseline = y0 - (7 * TEXT_SCALE) - metrics.descent()
+    prefix_width = metrics.horizontalAdvance(label.split("µ")[0])
+    mu_width = metrics.horizontalAdvance("µ")
+
+    top = int(max(0, math.floor(baseline - metrics.ascent())))
+    bottom = int(min(h, math.ceil(baseline + metrics.descent())))
+    left = int(max(0, math.floor(x0 + prefix_width)))
+    right = int(min(w, math.ceil(x0 + prefix_width + mu_width)))
+
+    mu_region = out[top:bottom, left:right]
     assert mu_region.size > 0 and np.any(mu_region == 255)
 
 

@@ -1,13 +1,9 @@
 import math
-import subprocess
 import logging
 
 import numpy as np
-from PySide6 import QtGui, QtWidgets
-from PIL import Image, ImageDraw, ImageFont
+from PySide6 import QtCore, QtGui
 import cv2
-
-from microstage_app import get_dejavu_sans_path
 
 
 # Scaling factors for the scale bar drawing used across the application
@@ -15,168 +11,79 @@ VERT_SCALE = 2  # line thickness multiplier
 TEXT_SCALE = 4  # font size multiplier
 
 
-_scale_font_cache = None
-_font_error_reported = False
 logger = logging.getLogger(__name__)
-DEJAVU_SANS_PATH = get_dejavu_sans_path()
 
 
-def _show_font_error_dialog(message: str) -> None:
-    """Display a user-visible error when fonts cannot be loaded."""
+def _scaled_font(base_font: QtGui.QFont) -> QtGui.QFont:
+    """Return a copy of ``base_font`` scaled like :meth:`MeasureView.drawForeground`."""
 
-    global _font_error_reported
-
-    if _font_error_reported:
-        return
-
-    qapp = QtGui.QGuiApplication.instance()
-    if qapp is None:
-        return
-
-    try:
-        QtWidgets.QMessageBox.warning(None, "Scale Bar Font Error", message)
-    except Exception as exc:  # pragma: no cover - GUI availability dependent
-        logger.debug("Unable to display font error dialog: %s", exc)
-    finally:
-        _font_error_reported = True
-
-
-def _load_default_scale_font(reason: str, pixel_size: int) -> ImageFont.ImageFont:
-    """Load a bundled or Pillow default font and log the fallback reason."""
-
-    fallback_candidates = (
-        DEJAVU_SANS_PATH,
-        "DejaVuSans.ttf",
-    )
-
-    for candidate in fallback_candidates:
-        try:
-            font = ImageFont.truetype(str(candidate), pixel_size)
-        except OSError:
-            continue
-
-        if candidate == DEJAVU_SANS_PATH:
-            logger.warning(
-                "%s; using packaged DejaVu Sans font at '%s' for scale bar text.",
-                reason,
-                candidate,
-            )
-        else:
-            logger.warning(
-                "%s; using fallback font '%s' located via Pillow's search path.",
-                reason,
-                candidate,
-            )
-        return font
-
-    try:
-        font = ImageFont.load_default()
-    except Exception as exc:  # pragma: no cover - Pillow default rarely fails
-        logger.error("%s; unable to load Pillow default font: %s", reason, exc)
-        _show_font_error_dialog(
-            "MicroStage was unable to load any font for the scale bar overlay. "
-            "The text labels will not be displayed."
-        )
-        raise RuntimeError("No usable font available for scale bar") from exc
-
-    logger.warning(
-        "%s; using Pillow default bitmap font for scale bar text.",
-        reason,
-    )
+    font = QtGui.QFont(base_font)
+    point_size = font.pointSizeF()
+    if point_size > 0:
+        font.setPointSizeF(point_size * TEXT_SCALE)
+    else:
+        pixel_size = font.pixelSize()
+        if pixel_size <= 0:
+            pixel_size = 1
+        font.setPixelSize(pixel_size * TEXT_SCALE)
     return font
 
 
-def _load_scale_font() -> ImageFont.ImageFont:
-    """Return a PIL font matching the application's QFont.
+def _scale_bar_geometry(width: int, height: int, um_per_px: float) -> tuple[float, int, int, int]:
+    """Compute the unit length, pixel length, and anchor point for the bar."""
 
-    The font file is resolved once using ``fc-match`` and the resulting font is
-    cached for reuse.  When the lookup fails, a bundled or Pillow default font
-    is used so the scale bar overlay can still render text.  The size is scaled
-    by :data:`TEXT_SCALE` to mirror :func:`MeasureView.drawForeground`.
-    """
+    max_um = 0.2 * width * um_per_px
+    exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
+    nice_um = 10 ** exp
+    for m in (5, 2, 1):
+        candidate = m * (10 ** exp)
+        if candidate <= max_um:
+            nice_um = candidate
+            break
 
-    global _scale_font_cache
+    length_px = int(round(nice_um / um_per_px)) if um_per_px > 0 else 0
+    max_length = max(0, width - 40)
+    if length_px > max_length:
+        length_px = max_length
+        nice_um = length_px * um_per_px
 
-    if _scale_font_cache is not None:
-        return _scale_font_cache
+    margin = 20
+    x0 = int(round(width - margin - length_px))
+    y0 = int(round(height - margin))
+    return nice_um, length_px, x0, y0
 
-    qapp = QtGui.QGuiApplication.instance()
-    if qapp is None:
-        raise RuntimeError("QGuiApplication instance required to load font")
 
-    qfont = QtGui.QFont(qapp.font())
-    original_point_size = qfont.pointSizeF()
-    if original_point_size > 0:
-        qfont.setPointSizeF(original_point_size * TEXT_SCALE)
-    else:
-        qfont.setPixelSize(qfont.pixelSize() * TEXT_SCALE)
+def _paint_scale_bar(
+    painter: QtGui.QPainter,
+    width: int,
+    height: int,
+    um_per_px: float,
+    *,
+    draw_line: bool = True,
+) -> tuple[str, QtGui.QFontMetricsF]:
+    """Draw the scale bar and return the rendered label and font metrics."""
 
-    metrics = QtGui.QFontMetricsF(qfont)
-    pixel_size = int(round(metrics.height()))
-    if pixel_size <= 0:
-        info = QtGui.QFontInfo(qfont)
-        pixel_size = info.pixelSize()
-    if pixel_size <= 0:
-        fallback = qfont.pixelSize()
-        if fallback <= 0 and original_point_size > 0:
-            fallback = int(round(original_point_size * TEXT_SCALE))
-        pixel_size = fallback
-    pixel_size = max(1, int(round(pixel_size)))
+    nice_um, length_px, x0, y0 = _scale_bar_geometry(width, height, um_per_px)
+    label = (
+        f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
+    )
 
-    family = QtGui.QFontInfo(qfont).family() or qfont.family()
-    font: ImageFont.ImageFont
-
+    painter.save()
     try:
-        res = subprocess.run(
-            ["fc-match", "-f", "%{file}\n", family],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as exc:
-        font = _load_default_scale_font(
-            "System font lookup utility 'fc-match' is not available: "
-            f"{exc}",
-            pixel_size,
-        )
-        logger.debug("fc-match not found while resolving '%s': %s", family, exc)
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() if exc.stderr else ""
-        if stderr:
-            logger.debug(
-                "fc-match error while resolving '%s': %s", family, stderr
-            )
-        reason = (
-            f"System font lookup failed for '{family}' (exit code {exc.returncode})"
-        )
-        if stderr:
-            reason = f"{reason}: {stderr}"
-        font = _load_default_scale_font(reason, pixel_size)
-    else:
-        font_path = res.stdout.strip()
-        if not font_path:
-            font = _load_default_scale_font(
-                f"System font lookup returned an empty path for '{family}'",
-                pixel_size,
-            )
-        else:
-            try:
-                font = ImageFont.truetype(font_path, pixel_size)
-                logger.debug(
-                    "Loaded scale bar font '%s' at %d px from '%s'",
-                    family,
-                    pixel_size,
-                    font_path,
-                )
-            except OSError as exc:
-                font = _load_default_scale_font(
-                    f"Failed to load system font '{font_path}': {exc}",
-                    pixel_size,
-                )
-                logger.debug("Unable to load font '%s': %s", font_path, exc)
+        if draw_line and length_px > 0:
+            painter.setPen(QtGui.QPen(QtCore.Qt.white, 2 * VERT_SCALE))
+            painter.drawLine(float(x0), float(y0), float(x0 + length_px), float(y0))
 
-    _scale_font_cache = font
-    return _scale_font_cache
+        font = _scaled_font(painter.font())
+        painter.setFont(font)
+        painter.setPen(QtGui.QPen(QtCore.Qt.white))
+        metrics = QtGui.QFontMetricsF(font)
+        baseline = y0 - (7 * TEXT_SCALE) - metrics.descent()
+        painter.drawText(float(x0), float(baseline), label)
+    finally:
+        painter.restore()
+
+    return label, metrics
 
 
 def _has_cuda() -> bool:
@@ -190,67 +97,6 @@ _HAS_CUDA = _has_cuda()
 logger.info("Scale-bar drawing using %s", "CUDA" if _HAS_CUDA else "CPU")
 
 
-def _draw_scale_bar_cpu(img: np.ndarray, um_per_px: float,
-                        *, draw_line: bool = True) -> np.ndarray:
-    """CPU implementation of the scale bar drawing."""
-
-    h, w, _ = img.shape
-
-    # Compute a "nice" length that fits within ~20% of the image width
-    max_um = 0.2 * w * um_per_px
-    exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
-    nice_um = 10 ** exp
-    for m in (5, 2, 1):
-        candidate = m * (10 ** exp)
-        if candidate <= max_um:
-            nice_um = candidate
-            break
-
-    # Scale the length and clamp to image bounds
-    length_px = int(round(nice_um / um_per_px))
-    max_length = w - 40  # leave 20px margin on each side
-    if length_px > max_length:
-        length_px = max_length
-        nice_um = length_px * um_per_px
-
-    margin = 20
-    x0 = int(round(w - margin - length_px))
-    y0 = int(round(h - margin))
-
-    pil = Image.fromarray(img)
-    draw = ImageDraw.Draw(pil)
-    if draw_line:
-        draw.line(
-            [(x0, y0), (x0 + length_px, y0)],
-            fill=(255, 255, 255),
-            width=2 * VERT_SCALE,
-        )
-
-    label = (
-        f"{nice_um/1000:.2f} mm" if nice_um >= 1000 else f"{nice_um:.0f} µm"
-    )
-
-    try:
-        font = _load_scale_font()
-    except RuntimeError as exc:
-        logger.error("Scale bar font unavailable; skipping text overlay: %s", exc)
-        font = None
-    except Exception:  # pragma: no cover - defensive logging
-        logger.exception("Unexpected error while loading scale bar font; skipping text overlay")
-        font = None
-
-    if font is not None:
-        bbox = draw.textbbox((0, 0), label, font=font)
-        th = bbox[3] - bbox[1]
-        draw.text(
-            (x0, y0 - (7 * TEXT_SCALE) - th),
-            label,
-            fill=(255, 255, 255),
-            font=font,
-        )
-
-    return np.array(pil)
-
 def numpy_to_qimage(img: np.ndarray) -> QtGui.QImage:
     if img.ndim == 2:
         h, w = img.shape
@@ -258,19 +104,49 @@ def numpy_to_qimage(img: np.ndarray) -> QtGui.QImage:
         return qimg.copy()
     elif img.ndim == 3 and img.shape[2] == 3:
         h, w, _ = img.shape
-        qimg = QtGui.QImage(img.data, w, h, 3*w, QtGui.QImage.Format_RGB888)
+        qimg = QtGui.QImage(img.data, w, h, 3 * w, QtGui.QImage.Format_RGB888)
         return qimg.copy()
     else:
         raise ValueError(f"Unsupported image shape: {img.shape}")
 
 
-def draw_scale_bar(img, um_per_px: float):
-    """Draw a scale bar on ``img`` using GPU acceleration when available.
+def qimage_to_numpy(qimg: QtGui.QImage) -> np.ndarray:
+    converted = qimg.convertToFormat(QtGui.QImage.Format_RGB888)
+    width = converted.width()
+    height = converted.height()
+    ptr = converted.constBits()
+    arr = np.frombuffer(ptr, dtype=np.uint8, count=converted.sizeInBytes())
+    arr = arr.reshape((height, converted.bytesPerLine()))
+    arr = arr[:, : width * 3]
+    return arr.reshape((height, width, 3)).copy()
 
-    ``img`` may be a :class:`numpy.ndarray` or ``cv2.cuda_GpuMat``. In the GPU
-    path, the line is rendered on the device and text is overlaid after
-    downloading the frame.
-    """
+
+def _draw_scale_bar_cpu(
+    img: np.ndarray,
+    um_per_px: float,
+    *,
+    draw_line: bool = True,
+) -> np.ndarray:
+    """CPU implementation of the scale bar drawing using Qt."""
+
+    if um_per_px <= 0:
+        return img.copy()
+
+    qimg = numpy_to_qimage(img)
+    if qimg.format() != QtGui.QImage.Format_ARGB32:
+        qimg = qimg.convertToFormat(QtGui.QImage.Format_ARGB32)
+
+    painter = QtGui.QPainter(qimg)
+    try:
+        _paint_scale_bar(painter, qimg.width(), qimg.height(), um_per_px, draw_line=draw_line)
+    finally:
+        painter.end()
+
+    return qimage_to_numpy(qimg)
+
+
+def draw_scale_bar(img, um_per_px: float):
+    """Draw a scale bar on ``img`` using GPU acceleration when available."""
 
     if um_per_px <= 0:
         return img if isinstance(img, np.ndarray) else img.download()
@@ -280,54 +156,20 @@ def draw_scale_bar(img, um_per_px: float):
         "CUDA" if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat) else "CPU",
     )
 
+    def _ensure_rgb(arr: np.ndarray) -> np.ndarray:
+        if arr.ndim == 2:
+            return np.repeat(arr[:, :, None], 3, axis=2)
+        if arr.ndim == 3 and arr.shape[2] == 3:
+            return arr
+        raise ValueError(f"Unsupported image shape: {arr.shape}")
+
     if _HAS_CUDA and isinstance(img, cv2.cuda_GpuMat):
-        w, h = img.size()
-        h = int(h)
-        w = int(w)
-
-        # Compute geometry
-        max_um = 0.2 * w * um_per_px
-        exp = math.floor(math.log10(max_um)) if max_um > 0 else 0
-        nice_um = 10 ** exp
-        for m in (5, 2, 1):
-            candidate = m * (10 ** exp)
-            if candidate <= max_um:
-                nice_um = candidate
-                break
-
-        length_px = int(round(nice_um / um_per_px))
-        max_length = w - 40
-        if length_px > max_length:
-            length_px = max_length
-            nice_um = length_px * um_per_px
-
-        margin = 20
-        x0 = int(round(w - margin - length_px))
-        y0 = int(round(h - margin))
-        thickness = 2 * VERT_SCALE
-        y1 = max(0, y0 - thickness)
-        roi = img.rowRange(y1, y0).colRange(x0, x0 + length_px)
-        roi.setTo((255, 255, 255))
-
         arr = img.download()
-        return _draw_scale_bar_cpu(arr, um_per_px, draw_line=False)
+        arr = _ensure_rgb(arr)
+        return _draw_scale_bar_cpu(arr, um_per_px)
 
     if isinstance(img, np.ndarray):
-        if img.ndim == 2:
-            if _HAS_CUDA:
-                try:
-                    gm = cv2.cuda_GpuMat()
-                    gm.upload(img)
-                    gm = cv2.cuda.cvtColor(gm, cv2.COLOR_GRAY2RGB)
-                    arr = gm.download()
-                except Exception:
-                    arr = np.repeat(img[:, :, None], 3, axis=2)
-            else:
-                arr = np.repeat(img[:, :, None], 3, axis=2)
-        elif img.ndim == 3 and img.shape[2] == 3:
-            arr = img
-        else:
-            raise ValueError(f"Unsupported image shape: {img.shape}")
+        arr = _ensure_rgb(img)
         return _draw_scale_bar_cpu(arr, um_per_px)
 
     raise TypeError("Unsupported image type for draw_scale_bar")
