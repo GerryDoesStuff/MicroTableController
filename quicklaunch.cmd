@@ -28,6 +28,10 @@ if exist .venv\Scripts\python.exe (
     set "PYTHON_EXE=python\python.exe"
 )
 
+if /I "%PYTHON_EXE%"=="python\python.exe" if exist scripts\ensure_embedded_python_ready.cmd (
+    call scripts\ensure_embedded_python_ready.cmd "%PYTHON_EXE%"
+)
+
 if not defined PYTHON_EXE (
     set "PYTHON_EXE=python"
 )
