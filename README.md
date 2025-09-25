@@ -38,6 +38,9 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```bash
    python -m microstage_app
    ```
+   On Windows you can also double-click `quicklaunch.cmd`, which delegates to the
+   new Python launcher discussed below so the GUI starts without a console
+   window.
 
 > No camera? The app falls back to a software **MockCamera** so you can test UI and scans.
 
@@ -115,14 +118,33 @@ this `profiles.yaml` file to the target system's working directory.
 pyinstaller -F -w -n MicroStageApp microstage_app/main.py
 ```
 
-## Preparing `quicklaunch.cmd` for distribution
+## Launcher and interpreter selection
 
-The quick-launch script now assumes a regular Python installation instead of a
-bundled embedded runtime. It will use a local virtual environment if one is
-present and otherwise fall back to the system-wide `py` launcher (or `python`
-on the `PATH`). Before distributing the launcher, ensure the target environment
-has Python 3.10+ installed and that `pip install -r requirements.txt` has been
-run—either inside a venv or against the global interpreter.
+The new `scripts/quicklaunch.py` helper finds the repository root by looking
+for `microstage_app/__init__.py`. If the file is not present alongside the
+launcher, the script inspects immediate subdirectories named
+`MicroTableController*` until it locates the package. Once the root is
+identified the script searches for an interpreter in priority order:
+
+1. `python/pythonw.exe` (embedded runtime shipped with the distribution).
+2. `.venv/Scripts/pythonw.exe` (virtual environment, GUI-friendly build).
+3. `.venv/Scripts/python.exe` (virtual environment console interpreter).
+4. The interpreter running `quicklaunch.py` (`sys.executable`).
+
+When the embedded runtime is chosen, `scripts/ensure_embedded_python_ready.cmd`
+is invoked before the GUI is started so the bundled dependencies are installed
+or refreshed. The GUI is launched with `pythonw.exe` whenever possible so end
+users do not see a console window; the code automatically falls back to
+`python.exe` in environments that do not provide `pythonw.exe` (for example,
+stock CPython installs on Linux or minimal virtual environments).
+
+`quicklaunch.cmd` is now just a thin wrapper that executes
+`pythonw.exe scripts\quicklaunch.py`, falling back to `python.exe` when the
+windowless binary is not available. Packagers that ship the embedded runtime
+should place it in the top-level `python/` directory next to the launcher; the
+ensure script will handle the first-run dependency bootstrap. When targeting an
+existing Python installation instead, provide a ready-to-use `.venv` directory
+or instruct users to install requirements before running `quicklaunch.cmd`.
 
 ## License
 
