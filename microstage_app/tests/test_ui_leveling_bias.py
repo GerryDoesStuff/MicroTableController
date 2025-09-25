@@ -108,3 +108,58 @@ def test_leveling_bias_persists_and_supports_large_offsets(main_window):
     assert feed == pytest.approx(1.0)
     assert wait_ok is True
     assert abs(z - z_target) > 0.001  # retains ~2 µm offset when moving to the new point
+
+
+def test_leveling_bias_increments_with_consecutive_jogs_before_position_update(main_window):
+    win = main_window
+    win.leveling_enabled = True
+
+    commanded_z = []
+
+    class StageStub:
+        def move_absolute(self, x, y, z, feed, wait_ok):
+            commanded_z.append(z)
+            return None
+
+        def move_relative(self, *args, **kwargs):  # pragma: no cover - should not be used
+            raise AssertionError("move_relative should not be called when leveling")
+
+        def wait_for_moves(self):
+            return None
+
+        def get_position(self):
+            return (0.0, 0.0, 0.0)
+
+    win.stage = StageStub()
+
+    def enqueue(fn, *args, callback=None):
+        result = fn(*args)
+        if callback:
+            callback(result)
+        return result
+
+    win.stage_worker = SimpleNamespace(enqueue=enqueue)
+
+    model = SurfaceModel(kind=SurfaceKind.LINEAR)
+    model.coeffs = np.array([0.5, 0.0, 0.0])
+    area = Area(
+        name="all",
+        polygon=[(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)],
+        model=model,
+        priority=1,
+    )
+    win.focus_mgr.areas = [area]
+
+    win._last_pos.update(x=0.0, y=0.0, z=0.1)
+    win._last_requested_z = 0.5
+
+    def trigger_second_jog(_res=None):
+        win._jog(dx=0.0, dy=0.0, dz=0.05, feed=5.0, wait_ok=True)
+
+    win._jog(dx=0.0, dy=0.0, dz=0.05, feed=5.0, wait_ok=True, callback=trigger_second_jog)
+
+    assert len(commanded_z) >= 2
+    assert commanded_z[0] == pytest.approx(0.55)
+    assert commanded_z[1] == pytest.approx(0.60)
+    assert win.focus_mgr.z_bias == pytest.approx(0.10)
+    assert win._last_requested_z == pytest.approx(0.60)

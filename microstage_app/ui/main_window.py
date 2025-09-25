@@ -2164,7 +2164,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.leveling_enabled:
             x0 = self._last_pos["x"] or 0.0
             y0 = self._last_pos["y"] or 0.0
-            z0 = self._last_pos["z"] or 0.0
+            z0 = (
+                self._last_requested_z
+                if self._last_requested_z is not None
+                else self._last_pos["z"] or 0.0
+            )
             x = x0 + dx
             y = y0 + dy
             z_target = z0 + dz
