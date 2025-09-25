@@ -117,29 +117,12 @@ pyinstaller -F -w -n MicroStageApp microstage_app/main.py
 
 ## Preparing `quicklaunch.cmd` for distribution
 
-The repo ships an embedded Windows Python build under `python/`. When
-distributing the `quicklaunch.cmd` artifact ensure that this interpreter has
-all runtime dependencies pre-installed so that the app can import
-`serial`/`pyserial` during startup:
-
-1. Install the full dependency set into the embedded interpreter:
-   ```cmd
-   python\python.exe -m pip install --upgrade pip
-   python\python.exe -m pip install -r requirements.txt
-   ```
-2. If the embedded interpreter was stripped of `pip` (common in embedded
-   redistributables), run the helper script to unpack the bundled
-   `pyserial` wheel directly into `python\Lib\site-packages`:
-   ```cmd
-   scripts\ensure_embedded_python_ready.cmd python\python.exe
-   ```
-   The script first attempts to bootstrap `pip`; if that fails it extracts
-   the wheel so `StageMarlin` can import `serial` without raising a
-   `ModuleNotFoundError`.
-
-`quicklaunch.cmd` automatically calls the helper whenever it resolves to
-`python\python.exe`, ensuring the embedded interpreter is ready on clean
-installations.
+The quick-launch script now assumes a regular Python installation instead of a
+bundled embedded runtime. It will use a local virtual environment if one is
+present and otherwise fall back to the system-wide `py` launcher (or `python`
+on the `PATH`). Before distributing the launcher, ensure the target environment
+has Python 3.10+ installed and that `pip install -r requirements.txt` has been
+run—either inside a venv or against the global interpreter.
 
 ## License
 
