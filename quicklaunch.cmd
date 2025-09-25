@@ -20,23 +20,26 @@ if defined ACTIVATE_SCRIPT (
 )
 
 set "PYTHON_EXE="
+set "PYTHON_ARGS=-m microstage_app"
 if exist .venv\Scripts\python.exe (
     set "PYTHON_EXE=.venv\Scripts\python.exe"
 ) else if exist microstage_app\.venv\Scripts\python.exe (
     set "PYTHON_EXE=microstage_app\.venv\Scripts\python.exe"
-) else if exist python\python.exe (
-    set "PYTHON_EXE=python\python.exe"
 )
 
-if /I "%PYTHON_EXE%"=="python\python.exe" if exist scripts\ensure_embedded_python_ready.cmd (
-    call scripts\ensure_embedded_python_ready.cmd "%PYTHON_EXE%"
+if not defined PYTHON_EXE (
+    where py >nul 2>&1
+    if not errorlevel 1 (
+        set "PYTHON_EXE=py"
+        set "PYTHON_ARGS=-3 -m microstage_app"
+    )
 )
 
 if not defined PYTHON_EXE (
     set "PYTHON_EXE=python"
 )
 
-"%PYTHON_EXE%" -m microstage_app
+"%PYTHON_EXE%" %PYTHON_ARGS%
 
 if defined ADJUSTED_ROOT popd
 popd
