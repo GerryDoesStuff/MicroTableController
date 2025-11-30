@@ -2776,6 +2776,8 @@ class MainWindow(QtWidgets.QMainWindow):
             stack=self.chk_raster_stack.isChecked(),
             stack_range_mm=float(self.stack_range.value()),
             stack_step_mm=float(self.stack_step.value()),
+            fuse_edf=self.chk_edf.isChecked(),
+            delete_stack=self.chk_delete_stack.isChecked(),
             af_range_mm=float(self.af_range.value()),
             af_coarse_step_mm=float(self.af_coarse.value()),
             af_fine_step_mm=float(self.af_fine.value()),
