@@ -1,8 +1,13 @@
 import yaml, os, copy
 from ..utils.log import log
 
+DEFAULT_ILLUMINATION_LIGHTS = [
+    {'name': f'Light {i}', 'host': '', 'enabled': False, 'brightness': 0}
+    for i in range(1, 6)
+]
+
 DEFAULTS = {
-    'version': 7,
+    'version': 8,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -74,7 +79,8 @@ DEFAULTS = {
             'host': '',
             'on': False,
             'brightness': 0,
-        }
+        },
+        'lights': copy.deepcopy(DEFAULT_ILLUMINATION_LIGHTS),
     },
 }
 
@@ -82,6 +88,7 @@ DEFAULTS = {
 class Profiles:
     PATH = os.path.abspath('profiles.yaml')
     VERSION = DEFAULTS['version']
+    MAX_LIGHTS = len(DEFAULT_ILLUMINATION_LIGHTS)
 
     @classmethod
     def load_or_create(cls):
@@ -94,6 +101,74 @@ class Profiles:
             with open(cls.PATH, 'w') as f:
                 yaml.safe_dump(data, f)
         p = Profiles(); p.data = data; return p
+
+    @staticmethod
+    def illumination_light_defaults():
+        return copy.deepcopy(DEFAULT_ILLUMINATION_LIGHTS)
+
+    @classmethod
+    def sanitize_illumination_lights(cls, lights):
+        """Return a sanitized list of illumination light configs.
+
+        Ensures a list of length ``MAX_LIGHTS`` containing dictionaries with
+        ``name`` (str), ``host`` (str), ``enabled`` (bool), and ``brightness``
+        (int 0-100).  Extra entries are discarded and missing/invalid values
+        are replaced with defaults.
+        """
+
+        defaults = cls.illumination_light_defaults()
+        sanitized = []
+        changed = False
+
+        entries = lights if isinstance(lights, list) else []
+        if not isinstance(lights, list):
+            changed = True
+
+        for idx in range(cls.MAX_LIGHTS):
+            base = defaults[idx]
+            entry = entries[idx] if idx < len(entries) and isinstance(entries[idx], dict) else {}
+            if not isinstance(entry, dict):
+                changed = True
+                entry = {}
+
+            name = entry.get('name', base['name'])
+            if isinstance(name, str):
+                name = name.strip()
+            else:
+                name = base['name']
+                changed = True
+
+            host = entry.get('host', base['host'])
+            if isinstance(host, str):
+                host = host.strip()
+            else:
+                host = base['host']
+                changed = True
+
+            enabled = entry.get('enabled', base['enabled'])
+            if not isinstance(enabled, bool):
+                enabled = bool(enabled) if isinstance(enabled, (int, float)) else base['enabled']
+                changed = True
+
+            brightness = entry.get('brightness', base['brightness'])
+            if not isinstance(brightness, (int, float)):
+                brightness = base['brightness']
+                changed = True
+            brightness = max(0, min(100, int(brightness)))
+            if brightness != entry.get('brightness'):
+                changed = True
+
+            sanitized.append({
+                'name': name,
+                'host': host,
+                'enabled': enabled,
+                'brightness': brightness,
+            })
+
+        if len(entries) > cls.MAX_LIGHTS:
+            changed = True
+
+        return sanitized, changed
 
     @classmethod
     def migrate(cls, data: dict) -> bool:
@@ -144,6 +219,38 @@ class Profiles:
                             'um_per_px': float(um),
                             'calibrations': cal,
                         }
+            illum = data.get('illumination')
+            if not isinstance(illum, dict):
+                data['illumination'] = copy.deepcopy(DEFAULTS['illumination'])
+                illum = data['illumination']
+                changed = True
+
+            lights_raw = illum.get('lights') if isinstance(illum, dict) else None
+            lights, lights_changed = cls.sanitize_illumination_lights(lights_raw)
+
+            dim_cfg = illum.get('dimmer') if isinstance(illum, dict) else {}
+            if isinstance(dim_cfg, dict) and lights:
+                first = lights[0]
+                migrated = False
+                host = dim_cfg.get('host')
+                if isinstance(host, str) and not first.get('host'):
+                    first['host'] = host.strip()
+                    migrated = True
+                on = dim_cfg.get('on')
+                if isinstance(on, bool):
+                    first['enabled'] = on
+                    migrated = True
+                bright = dim_cfg.get('brightness')
+                if isinstance(bright, (int, float)):
+                    first['brightness'] = max(0, min(100, int(bright)))
+                    migrated = True
+                if migrated:
+                    lights[0] = first
+                    changed = True
+
+            if lights_changed:
+                changed = True
+            illum['lights'] = lights
             data['version'] = cls.VERSION
             changed = True
         return changed

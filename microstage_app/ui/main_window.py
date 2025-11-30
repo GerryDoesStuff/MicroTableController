@@ -433,6 +433,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # illumination rows shown in the Camera tab
         self.max_illumination_rows = 5
         self.illumination_rows: list[dict[str, object]] = []
+        self._updating_illumination_ui = False
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -561,6 +562,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hue_slider.setValue(self.hue_spin.value())
         self.gamma_slider.setValue(self.gamma_spin.value())
         self.dimmer_brightness_slider.setValue(self.dimmer_brightness_spin.value())
+
+        self._load_illumination_rows_from_profiles()
 
         self.measure_view.set_scale_bar(
             self.chk_scale_bar.isChecked(), self.current_lens.um_per_px
@@ -1270,25 +1273,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_illumination_buttons()
         return box
 
-    def _set_illumination_row_active(self, row: dict[str, object], active: bool) -> None:
-        widgets = row.get("widgets", [])
-        for w in widgets:
-            if isinstance(w, QtWidgets.QWidget):
-                w.setVisible(active)
-                w.setEnabled(active)
+    def _set_illumination_row_active(self, row: dict[str, object], active: bool, *, clear: bool = True) -> None:
+        self._updating_illumination_ui = True
+        try:
+            widgets = row.get("widgets", [])
+            for w in widgets:
+                if isinstance(w, QtWidgets.QWidget):
+                    w.setVisible(active)
+                    w.setEnabled(active)
 
-        row["active"] = active
+            row["active"] = active
 
-        if not active:
-            toggle = row.get("toggle")
-            slider = row.get("slider")
-            spin = row.get("spin")
-            if isinstance(toggle, QtWidgets.QCheckBox):
-                toggle.setChecked(False)
-            if isinstance(slider, QtWidgets.QSlider):
-                slider.setValue(0)
-            if isinstance(spin, QtWidgets.QSpinBox):
-                spin.setValue(0)
+            if not active and clear:
+                toggle = row.get("toggle")
+                slider = row.get("slider")
+                spin = row.get("spin")
+                if isinstance(toggle, QtWidgets.QCheckBox):
+                    toggle.setChecked(False)
+                if isinstance(slider, QtWidgets.QSlider):
+                    slider.setValue(0)
+                if isinstance(spin, QtWidgets.QSpinBox):
+                    spin.setValue(0)
+        finally:
+            self._updating_illumination_ui = False
 
     def _active_illumination_rows(self) -> list[dict[str, object]]:
         return [row for row in self.illumination_rows if row.get("active")]
@@ -1304,6 +1311,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._set_illumination_row_active(row, True)
                 break
         self._update_illumination_buttons()
+        self._persist_illumination_rows()
 
     def _hide_last_illumination_row(self):
         visible_rows = self._active_illumination_rows()
@@ -1320,6 +1328,109 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._set_illumination_row_active(row, False)
         self._update_illumination_buttons()
+        self._persist_illumination_rows()
+
+    def _load_illumination_rows_from_profiles(self):
+        defaults = Profiles.illumination_light_defaults()
+        lights_raw = self.profiles.get(
+            "illumination.lights", defaults, expected_type=list
+        )
+        lights, changed = Profiles.sanitize_illumination_lights(lights_raw)
+
+        if changed:
+            self.profiles.set("illumination.lights", lights)
+            self.profiles.save()
+
+        self._updating_illumination_ui = True
+        try:
+            for idx, row in enumerate(self.illumination_rows):
+                cfg = lights[idx] if idx < len(lights) else defaults[idx % len(defaults)]
+                name_edit = row.get("name")
+                host_edit = row.get("host")
+                toggle = row.get("toggle")
+                slider = row.get("slider")
+                spin = row.get("spin")
+
+                if isinstance(name_edit, QtWidgets.QLineEdit):
+                    name_edit.setText(cfg.get("name", defaults[idx]["name"]))
+                if isinstance(host_edit, QtWidgets.QLineEdit):
+                    host_edit.setText(cfg.get("host", defaults[idx]["host"]))
+                if isinstance(toggle, QtWidgets.QCheckBox):
+                    toggle.setChecked(bool(cfg.get("enabled", False)))
+                brightness = int(cfg.get("brightness", 0))
+                if isinstance(spin, QtWidgets.QSpinBox):
+                    spin.setValue(brightness)
+                if isinstance(slider, QtWidgets.QSlider):
+                    slider.setValue(brightness)
+
+                should_activate = (
+                    idx == 0
+                    or bool(
+                        cfg.get("host")
+                        or cfg.get("enabled")
+                        or cfg.get("brightness")
+                        or cfg.get("name")
+                    )
+                )
+                self._set_illumination_row_active(row, should_activate, clear=False)
+            self._update_illumination_buttons()
+        finally:
+            self._updating_illumination_ui = False
+
+    def _collect_illumination_profile_rows(self) -> list[dict[str, object]]:
+        defaults = Profiles.illumination_light_defaults()
+        lights: list[dict[str, object]] = []
+        for idx, row in enumerate(self.illumination_rows):
+            default_cfg = defaults[idx] if idx < len(defaults) else defaults[0]
+            name_edit = row.get("name")
+            host_edit = row.get("host")
+            toggle = row.get("toggle")
+            spin = row.get("spin")
+
+            name = name_edit.text().strip() if isinstance(name_edit, QtWidgets.QLineEdit) else default_cfg["name"]
+            host = host_edit.text().strip() if isinstance(host_edit, QtWidgets.QLineEdit) else default_cfg["host"]
+            enabled = toggle.isChecked() if isinstance(toggle, QtWidgets.QCheckBox) else default_cfg["enabled"]
+            brightness = (
+                int(spin.value()) if isinstance(spin, QtWidgets.QSpinBox) else int(default_cfg["brightness"])
+            )
+            brightness = max(0, min(100, brightness))
+
+            lights.append({
+                "name": name or default_cfg["name"],
+                "host": host,
+                "enabled": bool(enabled),
+                "brightness": brightness,
+            })
+        return lights
+
+    def _persist_illumination_rows(self, *, save: bool = True):
+        lights = self._collect_illumination_profile_rows()
+        lights, _ = Profiles.sanitize_illumination_lights(lights)
+        self.profiles.set("illumination.lights", lights)
+        if save:
+            self.profiles.save()
+
+    def _on_illumination_row_changed(self, row: dict[str, object]):
+        if self._updating_illumination_ui:
+            return
+        # activate the row if it currently holds user data
+        has_data = False
+        name_edit = row.get("name")
+        host_edit = row.get("host")
+        toggle = row.get("toggle")
+        spin = row.get("spin")
+        if isinstance(name_edit, QtWidgets.QLineEdit) and name_edit.text().strip():
+            has_data = True
+        if isinstance(host_edit, QtWidgets.QLineEdit) and host_edit.text().strip():
+            has_data = True
+        if isinstance(toggle, QtWidgets.QCheckBox) and toggle.isChecked():
+            has_data = True
+        if isinstance(spin, QtWidgets.QSpinBox) and spin.value() > 0:
+            has_data = True
+        if has_data and not row.get("active"):
+            self._set_illumination_row_active(row, True, clear=False)
+            self._update_illumination_buttons()
+        self._persist_illumination_rows()
 
     def _connect_signals(self):
         self.btn_capture.clicked.connect(self._capture)
@@ -1377,9 +1488,19 @@ class MainWindow(QtWidgets.QMainWindow):
         for row in self.illumination_rows:
             slider = row.get("slider")
             spin = row.get("spin")
+            name_edit = row.get("name")
+            host_edit = row.get("host")
+            toggle = row.get("toggle")
             if isinstance(slider, QtWidgets.QSlider) and isinstance(spin, QtWidgets.QSpinBox):
                 slider.valueChanged.connect(spin.setValue)
                 spin.valueChanged.connect(slider.setValue)
+                spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+            if isinstance(name_edit, QtWidgets.QLineEdit):
+                name_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+            if isinstance(host_edit, QtWidgets.QLineEdit):
+                host_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+            if isinstance(toggle, QtWidgets.QCheckBox):
+                toggle.toggled.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
 
         self._on_edf_toggled(self.chk_edf.isChecked())
 
@@ -3433,6 +3554,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 continue
             self.profiles.set(path, val)
+        self._persist_illumination_rows(save=False)
         self.profiles.save()
         try:
             self._stop_all()
