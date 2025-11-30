@@ -6,7 +6,7 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
 
 ## Quick start (Windows 10/11, 64‑bit)
 
-1. Install **Python 3.10+ (64‑bit)**.
+1. Install **Python 3.10–3.12 (64‑bit)** on Windows; newer releases may fail until wheels are published.
 2. Create & activate a venv, then install deps:
    ```bash
    pip install -r requirements.txt
@@ -18,7 +18,9 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
   dependency. The system monitor tab uses `psutil`; NVIDIA GPU metrics also
   require the optional `nvidia-ml-py3` package and appropriate drivers. When
   no GPU is present, the tab simply shows a notice so the app continues to
-  run normally.
+  run normally. Using unsupported Python versions can trigger source builds (e.g.
+  for PySide6 or OpenCV) that need a compiler; stick to 3.10–3.12 or install a
+  compatible wheel to avoid that hassle.
 
    Optional GPU acceleration for captures, autofocus metrics, and scale-bar
    drawing is available when OpenCV is built with CUDA modules. The
