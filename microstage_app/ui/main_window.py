@@ -430,6 +430,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # track the most recent absolute Z target requested by the user
         self._last_requested_z: Optional[float] = None
 
+        # illumination rows shown in the Camera tab
+        self.max_illumination_rows = 5
+        self.illumination_rows: list[dict[str, object]] = []
+
         # profiles
         self.profiles = Profiles.load_or_create()
         self.dark_mode = self.profiles.get('ui.dark_mode', False, expected_type=bool)
@@ -946,6 +950,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gain_spin.setToolTip("Analog gain (1.0–4.0x). Internally scaled ×100 for the SDK.")
         c.addWidget(QtWidgets.QLabel("Gain (AGain):"), row, 0); c.addWidget(self.gain_spin, row, 1); row += 1
 
+        illum_box = self._build_camera_illumination_group()
+        c.addWidget(illum_box, row, 0, 1, 3)
+        row += 1
+
         self.brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setRange(-255, 255)
         self.brightness_spin = QtWidgets.QSpinBox(); self.brightness_spin.setRange(-255, 255); self.brightness_spin.setValue(0)
         self.brightness_slider.setValue(self.brightness_spin.value())
@@ -1189,6 +1197,130 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.rast_x4_spin, self.rast_y4_spin, self.btn_raster_p4):
             w.setEnabled(p4)
 
+    def _build_camera_illumination_group(self) -> QtWidgets.QGroupBox:
+        box = QtWidgets.QGroupBox("Illumination")
+        layout = QtWidgets.QGridLayout(box)
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 0)
+        layout.setColumnStretch(2, 0)
+        layout.setColumnStretch(3, 1)
+        layout.setColumnStretch(4, 0)
+        layout.setHorizontalSpacing(6)
+
+        layout.addWidget(QtWidgets.QLabel("Name"), 0, 0)
+        layout.addWidget(QtWidgets.QLabel("IP / Host"), 0, 1)
+        layout.addWidget(QtWidgets.QLabel("Power"), 0, 2)
+        layout.addWidget(QtWidgets.QLabel("Intensity"), 0, 3, 1, 2)
+
+        self.illumination_rows = []
+        for idx in range(self.max_illumination_rows):
+            name_edit = QtWidgets.QLineEdit(f"Light {idx + 1}")
+            name_edit.setPlaceholderText("Light label")
+            name_edit.setToolTip("Custom label for this light source. Right-click to re-show.")
+
+            host_edit = QtWidgets.QLineEdit()
+            host_edit.setPlaceholderText("192.168.1.10")
+            host_edit.setToolTip("Device IP or hostname for this light. Right-click to re-show.")
+
+            toggle = QtWidgets.QCheckBox("On")
+            toggle.setToolTip("Turn this light on or off. Right-click to re-show.")
+
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(50)
+            slider.setToolTip("Adjust illumination intensity (0–100%). Right-click to re-show.")
+
+            spin = QtWidgets.QSpinBox()
+            spin.setRange(0, 100)
+            spin.setSuffix(" %")
+            spin.setValue(slider.value())
+            spin.setToolTip("Numeric intensity entry for this light. Right-click to re-show.")
+
+            layout.addWidget(name_edit, idx + 1, 0)
+            layout.addWidget(host_edit, idx + 1, 1)
+            layout.addWidget(toggle, idx + 1, 2)
+            layout.addWidget(slider, idx + 1, 3)
+            layout.addWidget(spin, idx + 1, 4)
+
+            row_data = {
+                "widgets": [name_edit, host_edit, toggle, slider, spin],
+                "name": name_edit,
+                "host": host_edit,
+                "toggle": toggle,
+                "slider": slider,
+                "spin": spin,
+                "active": False,
+            }
+            self.illumination_rows.append(row_data)
+            self._set_illumination_row_active(row_data, idx == 0)
+
+        controls_row = self.max_illumination_rows + 1
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(6)
+        self.btn_add_illumination = QtWidgets.QPushButton("Add Light")
+        self.btn_add_illumination.setToolTip("Show another illumination device slot. Right-click to re-show.")
+        self.btn_remove_illumination = QtWidgets.QPushButton("Remove Light")
+        self.btn_remove_illumination.setToolTip("Hide the last visible illumination slot. Right-click to re-show.")
+        btn_row.addWidget(self.btn_add_illumination)
+        btn_row.addWidget(self.btn_remove_illumination)
+        layout.addLayout(btn_row, controls_row, 0, 1, 5)
+        layout.setRowStretch(controls_row + 1, 1)
+
+        self._update_illumination_buttons()
+        return box
+
+    def _set_illumination_row_active(self, row: dict[str, object], active: bool) -> None:
+        widgets = row.get("widgets", [])
+        for w in widgets:
+            if isinstance(w, QtWidgets.QWidget):
+                w.setVisible(active)
+                w.setEnabled(active)
+
+        row["active"] = active
+
+        if not active:
+            toggle = row.get("toggle")
+            slider = row.get("slider")
+            spin = row.get("spin")
+            if isinstance(toggle, QtWidgets.QCheckBox):
+                toggle.setChecked(False)
+            if isinstance(slider, QtWidgets.QSlider):
+                slider.setValue(0)
+            if isinstance(spin, QtWidgets.QSpinBox):
+                spin.setValue(0)
+
+    def _active_illumination_rows(self) -> list[dict[str, object]]:
+        return [row for row in self.illumination_rows if row.get("active")]
+
+    def _update_illumination_buttons(self) -> None:
+        visible_rows = self._active_illumination_rows()
+        self.btn_add_illumination.setEnabled(len(visible_rows) < self.max_illumination_rows)
+        self.btn_remove_illumination.setEnabled(len(visible_rows) > 1)
+
+    def _show_next_illumination_row(self):
+        for row in self.illumination_rows:
+            if not row.get("active"):
+                self._set_illumination_row_active(row, True)
+                break
+        self._update_illumination_buttons()
+
+    def _hide_last_illumination_row(self):
+        visible_rows = self._active_illumination_rows()
+        if len(visible_rows) <= 1:
+            return
+
+        row = visible_rows[-1]
+        name_edit = row.get("name")
+        host_edit = row.get("host")
+        if isinstance(name_edit, QtWidgets.QLineEdit):
+            name_edit.clear()
+        if isinstance(host_edit, QtWidgets.QLineEdit):
+            host_edit.clear()
+
+        self._set_illumination_row_active(row, False)
+        self._update_illumination_buttons()
+
     def _connect_signals(self):
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
@@ -1240,6 +1372,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dimmer_brightness_spin.valueChanged.connect(self.dimmer_brightness_slider.setValue)
         self.dimmer_brightness_slider.sliderReleased.connect(self._on_dimmer_brightness_changed)
         self.dimmer_brightness_spin.editingFinished.connect(self._on_dimmer_brightness_changed)
+        self.btn_add_illumination.clicked.connect(self._show_next_illumination_row)
+        self.btn_remove_illumination.clicked.connect(self._hide_last_illumination_row)
+        for row in self.illumination_rows:
+            slider = row.get("slider")
+            spin = row.get("spin")
+            if isinstance(slider, QtWidgets.QSlider) and isinstance(spin, QtWidgets.QSpinBox):
+                slider.valueChanged.connect(spin.setValue)
+                spin.valueChanged.connect(slider.setValue)
 
         self._on_edf_toggled(self.chk_edf.isChecked())
 
