@@ -190,6 +190,8 @@ def test_raster_stack_config(make_window):
     win.rast_x2_spin.setValue(1.0)
     win.rast_y2_spin.setValue(1.0)
     win.chk_raster_stack.setChecked(True)
+    win.chk_edf.setChecked(True)
+    win.chk_delete_stack.setChecked(True)
     win.stack_range.setValue(0.7)
     win.stack_step.setValue(0.02)
     win._run_raster()
@@ -197,3 +199,5 @@ def test_raster_stack_config(make_window):
     assert cfg.stack is True
     assert cfg.stack_range_mm == pytest.approx(0.7)
     assert cfg.stack_step_mm == pytest.approx(0.02)
+    assert cfg.fuse_edf is True
+    assert cfg.delete_stack is True

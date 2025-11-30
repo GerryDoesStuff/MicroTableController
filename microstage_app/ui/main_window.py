@@ -10,6 +10,7 @@ import cv2
 
 from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
 from ..devices.camera_toupcam import create_camera, list_cameras
+from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
 
 from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
@@ -374,6 +375,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # device handles
         self.stage = None
         self.camera = None
+        self.dimmer: ShellyDimmer | None = None
         self.stage_bounds = _load_stage_bounds()
         self._stage_bounds_fallback = self.stage_bounds.copy() if self.stage_bounds else None
         self._last_pos = {"x": None, "y": None, "z": None}
@@ -385,6 +387,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # async connect helper refs
         self._conn_thread = None
         self._conn_worker = None
+
+        # shelly dimmer async helpers
+        self._dimmer_conn_thread = None
+        self._dimmer_conn_worker = None
+        self._dimmer_op_thread = None
+        self._dimmer_op_worker = None
+        self._updating_dimmer_ui = False
 
         # background op refs (prevent GC while running)
         self._last_thread = None
@@ -420,6 +429,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.leveling_enabled = False
         # track the most recent absolute Z target requested by the user
         self._last_requested_z: Optional[float] = None
+
+        # illumination rows shown in the Camera tab
+        self.max_illumination_rows = 5
+        self.illumination_rows: list[dict[str, object]] = []
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -461,6 +474,23 @@ class MainWindow(QtWidgets.QMainWindow):
             log(f"WARNING: profile 'capture.format' has invalid value {fmt!r}; using default 'png'")
             fmt = 'png'
         self.capture_format = fmt
+
+        # illumination
+        self.dimmer_host_default = self.profiles.get(
+            "illumination.dimmer.host", "", expected_type=str
+        )
+        self.dimmer_on_default = self.profiles.get(
+            "illumination.dimmer.on", False, expected_type=bool
+        )
+        self.dimmer_brightness_default = int(
+            self.profiles.get(
+                "illumination.dimmer.brightness",
+                0,
+                expected_type=(int, float),
+                min_value=0,
+                max_value=100,
+            )
+        )
 
         # placeholders for legacy connect/disconnect buttons moved to the menu
         self.btn_stage_connect = None
@@ -530,6 +560,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.saturation_slider.setValue(self.saturation_spin.value())
         self.hue_slider.setValue(self.hue_spin.value())
         self.gamma_slider.setValue(self.gamma_spin.value())
+        self.dimmer_brightness_slider.setValue(self.dimmer_brightness_spin.value())
 
         self.measure_view.set_scale_bar(
             self.chk_scale_bar.isChecked(), self.current_lens.um_per_px
@@ -581,6 +612,8 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.Qt.TextSelectableByMouse | QtCore.Qt.TextSelectableByKeyboard
         )
         self.cam_status = QtWidgets.QLabel("Camera: —")
+        self.dimmer_status = QtWidgets.QLabel("Illumination: —")
+        self.dimmer_status.setTextFormat(QtCore.Qt.PlainText)
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
@@ -590,6 +623,49 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profile_label.hide()
         self.profile_combo.hide()
         self.btn_reload_profiles.hide()
+        left.addWidget(self.stage_status)
+        left.addWidget(self.cam_status)
+        left.addWidget(self.dimmer_status)
+
+        # Illumination controls
+        illum_box = QtWidgets.QGroupBox("Illumination")
+        il = QtWidgets.QGridLayout(illum_box)
+        il.setColumnStretch(1, 1)
+        il.setColumnStretch(2, 0)
+        row = 0
+        self.dimmer_host_edit = QtWidgets.QLineEdit(self.dimmer_host_default)
+        self.btn_dimmer_connect = QtWidgets.QPushButton("Connect")
+        self.btn_dimmer_disconnect = QtWidgets.QPushButton("Disconnect")
+        self.btn_dimmer_disconnect.setEnabled(False)
+        il.addWidget(QtWidgets.QLabel("Host:"), row, 0)
+        il.addWidget(self.dimmer_host_edit, row, 1)
+        row += 1
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(6)
+        btn_row.addWidget(self.btn_dimmer_connect)
+        btn_row.addWidget(self.btn_dimmer_disconnect)
+        il.addLayout(btn_row, row, 0, 1, 3)
+        row += 1
+        self.dimmer_toggle = QtWidgets.QCheckBox("On")
+        self.dimmer_toggle.setChecked(self.dimmer_on_default)
+        self.dimmer_toggle.setEnabled(False)
+        il.addWidget(self.dimmer_toggle, row, 0)
+        row += 1
+        self.dimmer_brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.dimmer_brightness_slider.setRange(0, 100)
+        self.dimmer_brightness_spin = QtWidgets.QSpinBox()
+        self.dimmer_brightness_spin.setRange(0, 100)
+        self.dimmer_brightness_spin.setValue(self.dimmer_brightness_default)
+        self.dimmer_brightness_slider.setValue(self.dimmer_brightness_spin.value())
+        self.dimmer_brightness_slider.setEnabled(False)
+        self.dimmer_brightness_spin.setEnabled(False)
+        il.addWidget(QtWidgets.QLabel("Brightness:"), row, 0)
+        il.addWidget(self.dimmer_brightness_slider, row, 1)
+        il.addWidget(self.dimmer_brightness_spin, row, 2)
+        row += 1
+        il.setRowStretch(row, 1)
+        left.addWidget(illum_box)
         # Homing controls
         home_box = QtWidgets.QGroupBox("Homing")
         hl = QtWidgets.QVBoxLayout(home_box)
@@ -874,6 +950,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gain_spin.setToolTip("Analog gain (1.0–4.0x). Internally scaled ×100 for the SDK.")
         c.addWidget(QtWidgets.QLabel("Gain (AGain):"), row, 0); c.addWidget(self.gain_spin, row, 1); row += 1
 
+        illum_box = self._build_camera_illumination_group()
+        c.addWidget(illum_box, row, 0, 1, 3)
+        row += 1
+
         self.brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal); self.brightness_slider.setRange(-255, 255)
         self.brightness_spin = QtWidgets.QSpinBox(); self.brightness_spin.setRange(-255, 255); self.brightness_spin.setValue(0)
         self.brightness_slider.setValue(self.brightness_spin.value())
@@ -1020,7 +1100,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ---- System monitor tab
         self.system_tab = SystemMonitorTab()
-        self.system_tab.add_device_status_widgets(self.stage_status, self.cam_status)
+        self.system_tab.add_device_status_widgets(
+            self.stage_status, self.cam_status, self.dimmer_status
+        )
         rightw.addTab(self.system_tab, "System")
         self.system_tab.start()
 
@@ -1115,6 +1197,130 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.rast_x4_spin, self.rast_y4_spin, self.btn_raster_p4):
             w.setEnabled(p4)
 
+    def _build_camera_illumination_group(self) -> QtWidgets.QGroupBox:
+        box = QtWidgets.QGroupBox("Illumination")
+        layout = QtWidgets.QGridLayout(box)
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 0)
+        layout.setColumnStretch(2, 0)
+        layout.setColumnStretch(3, 1)
+        layout.setColumnStretch(4, 0)
+        layout.setHorizontalSpacing(6)
+
+        layout.addWidget(QtWidgets.QLabel("Name"), 0, 0)
+        layout.addWidget(QtWidgets.QLabel("IP / Host"), 0, 1)
+        layout.addWidget(QtWidgets.QLabel("Power"), 0, 2)
+        layout.addWidget(QtWidgets.QLabel("Intensity"), 0, 3, 1, 2)
+
+        self.illumination_rows = []
+        for idx in range(self.max_illumination_rows):
+            name_edit = QtWidgets.QLineEdit(f"Light {idx + 1}")
+            name_edit.setPlaceholderText("Light label")
+            name_edit.setToolTip("Custom label for this light source. Right-click to re-show.")
+
+            host_edit = QtWidgets.QLineEdit()
+            host_edit.setPlaceholderText("192.168.1.10")
+            host_edit.setToolTip("Device IP or hostname for this light. Right-click to re-show.")
+
+            toggle = QtWidgets.QCheckBox("On")
+            toggle.setToolTip("Turn this light on or off. Right-click to re-show.")
+
+            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(50)
+            slider.setToolTip("Adjust illumination intensity (0–100%). Right-click to re-show.")
+
+            spin = QtWidgets.QSpinBox()
+            spin.setRange(0, 100)
+            spin.setSuffix(" %")
+            spin.setValue(slider.value())
+            spin.setToolTip("Numeric intensity entry for this light. Right-click to re-show.")
+
+            layout.addWidget(name_edit, idx + 1, 0)
+            layout.addWidget(host_edit, idx + 1, 1)
+            layout.addWidget(toggle, idx + 1, 2)
+            layout.addWidget(slider, idx + 1, 3)
+            layout.addWidget(spin, idx + 1, 4)
+
+            row_data = {
+                "widgets": [name_edit, host_edit, toggle, slider, spin],
+                "name": name_edit,
+                "host": host_edit,
+                "toggle": toggle,
+                "slider": slider,
+                "spin": spin,
+                "active": False,
+            }
+            self.illumination_rows.append(row_data)
+            self._set_illumination_row_active(row_data, idx == 0)
+
+        controls_row = self.max_illumination_rows + 1
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(6)
+        self.btn_add_illumination = QtWidgets.QPushButton("Add Light")
+        self.btn_add_illumination.setToolTip("Show another illumination device slot. Right-click to re-show.")
+        self.btn_remove_illumination = QtWidgets.QPushButton("Remove Light")
+        self.btn_remove_illumination.setToolTip("Hide the last visible illumination slot. Right-click to re-show.")
+        btn_row.addWidget(self.btn_add_illumination)
+        btn_row.addWidget(self.btn_remove_illumination)
+        layout.addLayout(btn_row, controls_row, 0, 1, 5)
+        layout.setRowStretch(controls_row + 1, 1)
+
+        self._update_illumination_buttons()
+        return box
+
+    def _set_illumination_row_active(self, row: dict[str, object], active: bool) -> None:
+        widgets = row.get("widgets", [])
+        for w in widgets:
+            if isinstance(w, QtWidgets.QWidget):
+                w.setVisible(active)
+                w.setEnabled(active)
+
+        row["active"] = active
+
+        if not active:
+            toggle = row.get("toggle")
+            slider = row.get("slider")
+            spin = row.get("spin")
+            if isinstance(toggle, QtWidgets.QCheckBox):
+                toggle.setChecked(False)
+            if isinstance(slider, QtWidgets.QSlider):
+                slider.setValue(0)
+            if isinstance(spin, QtWidgets.QSpinBox):
+                spin.setValue(0)
+
+    def _active_illumination_rows(self) -> list[dict[str, object]]:
+        return [row for row in self.illumination_rows if row.get("active")]
+
+    def _update_illumination_buttons(self) -> None:
+        visible_rows = self._active_illumination_rows()
+        self.btn_add_illumination.setEnabled(len(visible_rows) < self.max_illumination_rows)
+        self.btn_remove_illumination.setEnabled(len(visible_rows) > 1)
+
+    def _show_next_illumination_row(self):
+        for row in self.illumination_rows:
+            if not row.get("active"):
+                self._set_illumination_row_active(row, True)
+                break
+        self._update_illumination_buttons()
+
+    def _hide_last_illumination_row(self):
+        visible_rows = self._active_illumination_rows()
+        if len(visible_rows) <= 1:
+            return
+
+        row = visible_rows[-1]
+        name_edit = row.get("name")
+        host_edit = row.get("host")
+        if isinstance(name_edit, QtWidgets.QLineEdit):
+            name_edit.clear()
+        if isinstance(host_edit, QtWidgets.QLineEdit):
+            host_edit.clear()
+
+        self._set_illumination_row_active(row, False)
+        self._update_illumination_buttons()
+
     def _connect_signals(self):
         self.btn_capture.clicked.connect(self._capture)
         self.chk_reticle.toggled.connect(self.measure_view.set_reticle)
@@ -1159,6 +1365,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.autoprefix_chk.toggled.connect(self._on_autoprefix_toggled)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
         self.btn_browse_dir.clicked.connect(self._browse_capture_dir)
+        self.btn_dimmer_connect.clicked.connect(self._connect_dimmer_async)
+        self.btn_dimmer_disconnect.clicked.connect(self._disconnect_dimmer)
+        self.dimmer_toggle.toggled.connect(self._on_dimmer_toggle)
+        self.dimmer_brightness_slider.valueChanged.connect(self.dimmer_brightness_spin.setValue)
+        self.dimmer_brightness_spin.valueChanged.connect(self.dimmer_brightness_slider.setValue)
+        self.dimmer_brightness_slider.sliderReleased.connect(self._on_dimmer_brightness_changed)
+        self.dimmer_brightness_spin.editingFinished.connect(self._on_dimmer_brightness_changed)
+        self.btn_add_illumination.clicked.connect(self._show_next_illumination_row)
+        self.btn_remove_illumination.clicked.connect(self._hide_last_illumination_row)
+        for row in self.illumination_rows:
+            slider = row.get("slider")
+            spin = row.get("spin")
+            if isinstance(slider, QtWidgets.QSlider) and isinstance(spin, QtWidgets.QSpinBox):
+                slider.valueChanged.connect(spin.setValue)
+                spin.valueChanged.connect(slider.setValue)
 
         self._on_edf_toggled(self.chk_edf.isChecked())
 
@@ -1408,6 +1629,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _auto_connect_async(self):
         self._connect_camera()
         self._connect_stage_async()
+        self._connect_dimmer_async()
 
     def _attach_stage_worker(self):
         if not self.stage or self.stage_thread:
@@ -1422,6 +1644,137 @@ class MainWindow(QtWidgets.QMainWindow):
     def _dispatch_stage_result(self, cb, res):
         if cb:
             QtCore.QTimer.singleShot(0, lambda r=res: cb(r))
+
+    # --------------------------- DIMMER ---------------------------
+
+    def _update_dimmer_controls_enabled(self, enabled: bool):
+        for widget in (
+            self.dimmer_toggle,
+            self.dimmer_brightness_slider,
+            self.dimmer_brightness_spin,
+        ):
+            widget.setEnabled(enabled)
+        self.btn_dimmer_disconnect.setEnabled(enabled and self.dimmer is not None)
+
+    def _connect_dimmer_async(self):
+        host = (self.dimmer_host_edit.text() or "").strip()
+        if not host:
+            if self.sender():
+                self.dimmer_status.setText("Illumination: host required")
+            return
+
+        self.dimmer_status.setText("Illumination: connecting…")
+        self._update_dimmer_controls_enabled(False)
+
+        def do_connect():
+            dimmer = ShellyDimmer(host)
+            state = dimmer.connect()
+            return dimmer, state
+
+        if self._dimmer_conn_thread:
+            self._dimmer_conn_thread.quit()
+            self._dimmer_conn_thread.wait()
+        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect)
+        self._dimmer_conn_worker.finished.connect(self._on_dimmer_connect)
+
+    @QtCore.Slot(object, object)
+    def _on_dimmer_connect(self, result, err):
+        thread = self._dimmer_conn_thread
+        self._dimmer_conn_thread = self._dimmer_conn_worker = None
+        if err or not result:
+            log(f"UI: dimmer connect failed: {err}")
+            self._handle_dimmer_failure(err)
+        else:
+            dimmer, state = result
+            self.dimmer = dimmer
+            self.profiles.set("illumination.dimmer.host", dimmer.host)
+            self.profiles.save()
+            self._apply_dimmer_state(state)
+            self.btn_dimmer_disconnect.setEnabled(True)
+            log("UI: dimmer connected")
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _disconnect_dimmer(self):
+        for attr in ("_dimmer_conn_thread", "_dimmer_op_thread"):
+            thread = getattr(self, attr)
+            worker_attr = f"{attr.replace('thread', 'worker')}"
+            if thread:
+                thread.quit()
+                thread.wait()
+            setattr(self, attr, None)
+            setattr(self, worker_attr, None)
+        self.dimmer = None
+        self._update_dimmer_controls_enabled(False)
+        try:
+            self._updating_dimmer_ui = True
+            self.dimmer_toggle.setChecked(False)
+            self.dimmer_brightness_slider.setValue(self.dimmer_brightness_spin.value())
+        finally:
+            self._updating_dimmer_ui = False
+        self.dimmer_status.setText("Illumination: disconnected")
+
+    def _run_dimmer_action(self, fn):
+        if not self.dimmer:
+            self.dimmer_status.setText("Illumination: not connected")
+            return
+        self.dimmer_status.setText("Illumination: updating…")
+        self._update_dimmer_controls_enabled(False)
+        if self._dimmer_op_thread:
+            self._dimmer_op_thread.quit()
+            self._dimmer_op_thread.wait()
+        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn)
+        self._dimmer_op_worker.finished.connect(self._on_dimmer_action_done)
+
+    @QtCore.Slot(object, object)
+    def _on_dimmer_action_done(self, state, err):
+        thread = self._dimmer_op_thread
+        self._dimmer_op_thread = self._dimmer_op_worker = None
+        if err or state is None:
+            log(f"UI: dimmer command failed: {err}")
+            self._handle_dimmer_failure(err)
+        else:
+            self._apply_dimmer_state(state)
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _apply_dimmer_state(self, state: ShellyState):
+        if state is None:
+            self._handle_dimmer_failure("no state")
+            return
+        self._updating_dimmer_ui = True
+        try:
+            self.dimmer_toggle.setChecked(state.on)
+            self.dimmer_brightness_spin.setValue(state.brightness)
+            self.dimmer_brightness_slider.setValue(state.brightness)
+        finally:
+            self._updating_dimmer_ui = False
+        status = "on" if state.on else "off"
+        self.dimmer_status.setText(f"Illumination: {status} ({state.brightness}%)")
+        self._update_dimmer_controls_enabled(True)
+        self.btn_dimmer_disconnect.setEnabled(True)
+        self.profiles.set("illumination.dimmer.on", state.on)
+        self.profiles.set("illumination.dimmer.brightness", state.brightness)
+        self.profiles.save()
+
+    def _on_dimmer_toggle(self, checked: bool):
+        if self._updating_dimmer_ui:
+            return
+        self._run_dimmer_action(lambda: self.dimmer.set_on(checked) if self.dimmer else None)
+
+    def _on_dimmer_brightness_changed(self):
+        if self._updating_dimmer_ui:
+            return
+        value = int(self.dimmer_brightness_spin.value())
+        self._run_dimmer_action(lambda: self.dimmer.set_brightness(value) if self.dimmer else None)
+
+    def _handle_dimmer_failure(self, err=None):
+        self.dimmer = None
+        self._update_dimmer_controls_enabled(False)
+        if err:
+            self.dimmer_status.setText(f"Illumination: error ({err})")
+        else:
+            self.dimmer_status.setText("Illumination: unavailable")
 
     def _show_camera_dialog(self):
         dlg = QtWidgets.QDialog(self)
@@ -2776,6 +3129,8 @@ class MainWindow(QtWidgets.QMainWindow):
             stack=self.chk_raster_stack.isChecked(),
             stack_range_mm=float(self.stack_range.value()),
             stack_step_mm=float(self.stack_step.value()),
+            fuse_edf=self.chk_edf.isChecked(),
+            delete_stack=self.chk_delete_stack.isChecked(),
             af_range_mm=float(self.af_range.value()),
             af_coarse_step_mm=float(self.af_coarse.value()),
             af_fine_step_mm=float(self.af_fine.value()),
@@ -3047,6 +3402,9 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.speed_spin, "camera.usb_speed"),
             (self.lens_combo, "measurement.current_lens"),
             (self.chk_scale_bar, "ui.scale_bar"),
+            (self.dimmer_host_edit, "illumination.dimmer.host"),
+            (self.dimmer_toggle, "illumination.dimmer.on"),
+            (self.dimmer_brightness_spin, "illumination.dimmer.brightness"),
         ]
 
     # --------------------------- PROFILES ---------------------------
@@ -3078,6 +3436,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles.save()
         try:
             self._stop_all()
+            self._disconnect_dimmer()
             if self._raster_thread:
                 self._raster_thread.quit()
                 self._raster_thread.wait()

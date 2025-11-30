@@ -253,6 +253,7 @@ def test_raster_focus_stack_order(monkeypatch):
             writer=None,
             directory=None,
             lens_name=None,
+            **kwargs,
         ):
             events.append("focus_stack")
 
@@ -278,6 +279,39 @@ def test_raster_focus_stack_order(monkeypatch):
     ops = [e for e in events if not isinstance(e, tuple)]
     assert ops == ["autofocus", "capture", "focus_stack"]
     assert events[-2:] == ["focus_stack", ("sleep", 1)]
+
+
+def test_raster_focus_stack_edf_delete(monkeypatch):
+    stage = StageMock()
+    cam = CameraMock()
+    writer = WriterMock()
+    cfg = RasterConfig(
+        rows=1,
+        cols=1,
+        stack=True,
+        fuse_edf=True,
+        delete_stack=True,
+    )
+
+    called_kwargs = {}
+
+    class DummyAF:
+        def __init__(self, stage, camera):
+            pass
+
+        def focus_stack(self, *args, **kwargs):
+            called_kwargs.update(kwargs)
+
+    monkeypatch.setattr(raster, "AutoFocus", DummyAF)
+    monkeypatch.setattr(raster.time, "sleep", lambda s: None)
+
+    runner = RasterRunner(stage, cam, writer, cfg, base_name="tile")
+    runner.run()
+
+    assert called_kwargs.get("fuse_edf") is True
+    assert called_kwargs.get("delete_stack") is True
+    assert called_kwargs.get("base_name") == "tile_r0000_c0000"
+    assert called_kwargs.get("fmt") == runner.fmt
 
 
 def test_raster_no_stack(monkeypatch):
