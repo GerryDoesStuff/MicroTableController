@@ -2,7 +2,7 @@ import yaml, os, copy
 from ..utils.log import log
 
 DEFAULTS = {
-    'version': 6,
+    'version': 7,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -68,6 +68,13 @@ DEFAULTS = {
     },
     'ui': {
         'dark_mode': False,
+    },
+    'illumination': {
+        'dimmer': {
+            'host': '',
+            'on': False,
+            'brightness': 0,
+        }
     },
 }
 
