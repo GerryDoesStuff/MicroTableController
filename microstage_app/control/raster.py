@@ -48,6 +48,8 @@ class RasterConfig:
     stack: bool = False
     stack_range_mm: float = 0.5
     stack_step_mm: float = 0.01
+    fuse_edf: bool = False
+    delete_stack: bool = False
     af_range_mm: float = 0.5
     af_coarse_step_mm: float = 0.01
     af_fine_step_mm: float = 0.002
@@ -257,6 +259,10 @@ class RasterRunner:
                         writer=self.writer,
                         directory=stack_dir,
                         lens_name=self.lens_name,
+                        fmt=self.fmt,
+                        fuse_edf=self.cfg.fuse_edf,
+                        delete_stack=self.cfg.delete_stack,
+                        base_name=f"{self.base_name}_r{r:04d}_c{c:04d}",
                     )
                     time.sleep(1)
 
