@@ -38,3 +38,46 @@ def test_mock_enumeration_and_acquisition():
 
     manager.disconnect()
     assert manager.active is None
+
+
+def test_mock_capture_respects_parameters():
+    descriptor = SpectrometerDescriptor(
+        model="MockSpectrometer",
+        serial_number="SIM002",
+        path="mock://2",
+        vendor="Mock",
+    )
+    device = MockSpectrometerProvider([descriptor]).connect(descriptor)
+    device.connect()
+
+    default_capture = device.capture()
+    device.set_integration_time_ms(50.0)
+    device.set_averages(5)
+    adjusted_capture = device.capture()
+
+    assert adjusted_capture.mean() > default_capture.mean()
+    assert adjusted_capture.std() < (default_capture.std() * 2)
+    device.disconnect()
+
+
+def test_manager_routes_multiple_spectrometers():
+    first = SpectrometerDescriptor("MockSpectrometer", "A", "mock://a")
+    second = SpectrometerDescriptor("MockSpectrometer", "B", "mock://b")
+
+    provider = MockSpectrometerProvider([first, second])
+    manager = SpectrometerManager(providers=[provider])
+
+    devices = manager.refresh()
+    assert devices == [first, second]
+
+    dev_a = manager.connect(first)
+    assert manager.active is dev_a
+    assert dev_a.descriptor.serial_number == "A"
+
+    dev_b = manager.connect(second)
+    assert manager.active is dev_b
+    assert dev_b.descriptor.serial_number == "B"
+    assert dev_a is not dev_b
+
+    manager.disconnect()
+    assert manager.active is None

@@ -47,3 +47,27 @@ def test_roi_management():
     assert len(session.rois) == 1
     session.clear_rois()
     assert session.rois == []
+
+
+def test_calibration_invalidation_on_inputs(wavelengths, raw_spectrum, dark_spectrum, reference_spectrum):
+    session = SpectroscopySession()
+    session.set_wavelengths(wavelengths)
+    session.set_calibration(np.ones_like(wavelengths))
+    assert session.calibration_valid
+
+    session.set_dark(dark_spectrum)
+    assert not session.calibration_valid
+
+    session.set_reference(reference_spectrum)
+    assert not session.calibration_valid
+
+    session.set_mode_params(exposure=10)
+    assert not session.calibration_valid
+
+
+def test_roi_mapping_and_ordering():
+    session = SpectroscopySession()
+    roi = session.add_roi(620, 580)
+    assert roi.as_tuple() == (580.0, 620.0)
+    session.add_roi(500, 550, label="mid")
+    assert [r.label for r in session.rois] == ["", "mid"]
