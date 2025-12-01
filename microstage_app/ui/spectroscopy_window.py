@@ -12,12 +12,56 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
 
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
-from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
+from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerDevice, SpectrometerManager
 from ..spectroscopy.processing import smooth_boxcar, subtract_dark
 from ..spectroscopy.session import SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
 from ..utils.log import LOG, log
 from ..utils.workers import run_async
+
+
+@dataclass
+class CaptureJob:
+    token: object
+    device: SpectrometerDevice
+    lock: QtCore.QMutex
+    integration_ms: float
+    averages: int
+    smoothing: int
+    subtract_dark: bool
+    dark_spectrum: Optional[np.ndarray]
+    kind: str
+    timestamp: float
+
+
+class CaptureWorker(QtCore.QObject):
+    capture_ready = QtCore.Signal(object, np.ndarray, np.ndarray, float, float)
+    capture_failed = QtCore.Signal(object, str)
+    capture_started = QtCore.Signal(object)
+
+    @QtCore.Slot(object)
+    def perform_capture(self, job: CaptureJob) -> None:
+        self.capture_started.emit(job.token)
+        start = time.time()
+        try:
+            job.lock.lock()
+            try:
+                job.device.set_integration_time_ms(job.integration_ms)
+                job.device.set_averages(job.averages)
+                raw = job.device.capture()
+            finally:
+                job.lock.unlock()
+            processed = smooth_boxcar(np.asarray(raw, dtype=float), window=job.smoothing)
+            if job.subtract_dark and job.dark_spectrum is not None:
+                try:
+                    processed = subtract_dark(processed, job.dark_spectrum)
+                except Exception:
+                    pass
+            duration = time.time() - start
+            peak = float(np.nanmax(raw)) if raw is not None else float("nan")
+            self.capture_ready.emit(job, processed, np.asarray(raw, dtype=float), duration, peak)
+        except Exception as exc:  # pragma: no cover - runtime safety
+            self.capture_failed.emit(job, str(exc))
 
 
 @dataclass
@@ -171,7 +215,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self.capture_timer = QtCore.QTimer(self)
         self.capture_timer.setInterval(250)
-        self.capture_timer.timeout.connect(self._capture_once)
+        self.capture_timer.timeout.connect(self._trigger_continuous_capture)
+
+        self._capture_thread = QtCore.QThread(self)
+        self._capture_worker = CaptureWorker()
+        self._capture_worker.moveToThread(self._capture_thread)
+        self._capture_worker.capture_ready.connect(self._on_capture_ready)
+        self._capture_worker.capture_failed.connect(self._on_capture_failed)
+        self._capture_worker.capture_started.connect(self._on_capture_started)
+        self._capture_thread.start()
+        self._capture_in_flight = False
+        self._capture_token = object()
+        self._continuous = False
+        self._rate_limit_ms = 150
 
         self._build_ui()
         self._restore_geometry()
@@ -517,6 +573,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
         self.capture_timer.stop()
+        self._capture_token = object()
+        if self._capture_thread.isRunning():
+            self._capture_thread.quit()
+            self._capture_thread.wait(1000)
         try:
             self._disconnect_dimmer()
             self.profiles.set("spectroscopy.compact", self.compact_toggle.isChecked())
@@ -919,7 +979,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._update_status_from_selection()
 
     def _disconnect(self) -> None:
-        self.capture_timer.stop()
+        self._stop_continuous()
+        self._new_capture_token()
         desc = self._current_descriptor()
         self.spectrometer_manager.disconnect(desc)
         self._update_status_from_selection()
@@ -1053,87 +1114,130 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.recent_list.clear()
         self.recent_meta.setText("No captures yet")
 
-    def _capture_dark(self) -> None:
-        dev, lock, _desc = self._active_device_with_lock()
-        if dev is None or lock is None:
-            self.status_message.setText("No spectrometer connected")
-            return
-        try:
-            with self._acquisition_context(lock):
-                dev.set_integration_time_ms(self.integration_spin.value())
-                dev.set_averages(self.averages_spin.value())
-                dark = dev.capture()
-            self.session.set_dark(dark)
-            self._plot_spectrum("dark", dark, color=QtGui.QColor("gray"))
-            self.status_message.setText("Dark captured")
-            self._record_capture(
-                "dark",
-                dark,
-                {
-                    "integration_ms": float(self.integration_spin.value()),
-                    "averages": int(self.averages_spin.value()),
-                    "smoothing": int(self.smoothing_spin.value()),
-                },
-            )
-        except Exception as exc:
-            self.status_message.setText(f"Dark capture failed: {exc}")
+    def _new_capture_token(self) -> object:
+        self._capture_token = object()
+        return self._capture_token
 
-    def _capture_once(self) -> None:
+    def _trigger_continuous_capture(self) -> None:
+        if not self._continuous or self._capture_in_flight:
+            return
+        self._schedule_capture("measurement")
+
+    def _schedule_capture(self, kind: str) -> None:
+        if self._capture_in_flight:
+            return
         dev, lock, _desc = self._active_device_with_lock()
         if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             self._stop_continuous()
             return
-        start = time.time()
-        raw = None
-        try:
-            with self._acquisition_context(lock):
-                dev.set_integration_time_ms(self.integration_spin.value())
-                dev.set_averages(self.averages_spin.value())
-                raw = dev.capture()
-            self.session.set_raw(raw)
-            data = smooth_boxcar(raw, window=self.smoothing_spin.value())
-            if self.dark_chk.isChecked() and self.session.dark_spectrum is not None:
-                try:
-                    data = subtract_dark(data, self.session.dark_spectrum)
-                except Exception:
-                    pass
-            self._plot_spectrum("live", data, color=QtGui.QColor("deepskyblue"))
-            self.status_message.setText("Captured spectrum")
-            metadata = {
-                "integration_ms": float(self.integration_spin.value()),
-                "averages": int(self.averages_spin.value()),
-                "smoothing": int(self.smoothing_spin.value()),
-                "subtract_dark": bool(self.dark_chk.isChecked()),
-            }
-            self._record_capture("measurement", data, metadata)
-        except Exception as exc:
-            self.status_message.setText(f"Capture failed: {exc}")
-            self._stop_continuous()
+        job = CaptureJob(
+            token=self._capture_token,
+            device=dev,
+            lock=lock,
+            integration_ms=float(self.integration_spin.value()),
+            averages=int(self.averages_spin.value()),
+            smoothing=int(self.smoothing_spin.value()),
+            subtract_dark=bool(self.dark_chk.isChecked()) if kind != "dark" else False,
+            dark_spectrum=self.session.dark_spectrum,
+            kind=kind,
+            timestamp=time.time(),
+        )
+        self._capture_in_flight = True
+        QtCore.QMetaObject.invokeMethod(
+            self._capture_worker,
+            "perform_capture",
+            QtCore.Qt.QueuedConnection,
+            QtCore.Q_ARG(object, job),
+        )
+
+    @QtCore.Slot(object)
+    def _on_capture_started(self, token: object) -> None:
+        if token != self._capture_token:
             return
-        duration = time.time() - start
+        self.status_message.setText("Capturing…")
+
+    @QtCore.Slot(object, np.ndarray, np.ndarray, float, float)
+    def _on_capture_ready(
+        self, job: CaptureJob, processed: np.ndarray, raw: np.ndarray, duration: float, peak: float
+    ) -> None:
+        if job.token != self._capture_token:
+            return
+        self._capture_in_flight = False
+        now = time.time()
+        if self._continuous and (now - self._last_capture_ts) * 1000 < self._rate_limit_ms:
+            QtCore.QTimer.singleShot(self.capture_timer.interval(), self._trigger_continuous_capture)
+            return
+        self._last_capture_ts = now
+        if job.kind == "dark":
+            self.session.set_dark(raw)
+            self._plot_spectrum("dark", raw, color=QtGui.QColor("gray"))
+            meta = {
+                "integration_ms": float(job.integration_ms),
+                "averages": int(job.averages),
+                "smoothing": int(job.smoothing),
+            }
+            self._record_capture("dark", raw, meta)
+            self.status_message.setText("Dark captured")
+        else:
+            self.session.set_raw(raw)
+            self._plot_spectrum("live", processed, color=QtGui.QColor("deepskyblue"))
+            metadata = {
+                "integration_ms": float(job.integration_ms),
+                "averages": int(job.averages),
+                "smoothing": int(job.smoothing),
+                "subtract_dark": bool(job.subtract_dark),
+            }
+            self._record_capture("measurement", processed, metadata)
+            self.status_message.setText("Captured spectrum")
         if duration > 0:
             fps = 1.0 / duration
             self.fps_label.setText(f"{fps:.1f} Hz")
             if fps < 1:
                 self.status_message.setText(f"Capture slow ({fps:.2f} Hz)")
-        if raw is not None:
-            peak = float(np.nanmax(raw))
+        if not np.isnan(peak):
             self.saturation_label.setText(f"Peak: {peak:.0f}")
             if peak >= 60000:
                 self.status_message.setText("Warning: signal near saturation")
-        self._last_capture_ts = time.time()
+        if self._continuous:
+            QtCore.QTimer.singleShot(self.capture_timer.interval(), self._trigger_continuous_capture)
+
+    @QtCore.Slot(object, str)
+    def _on_capture_failed(self, job: CaptureJob, message: str) -> None:
+        if job.token != self._capture_token:
+            return
+        self._capture_in_flight = False
+        self.status_message.setText(f"Capture failed: {message}")
+        self._stop_continuous()
+
+    def _capture_dark(self) -> None:
+        self._continuous = False
+        self.capture_timer.stop()
+        self._new_capture_token()
+        self._schedule_capture("dark")
+
+    def _capture_once(self) -> None:
+        self._continuous = False
+        self.capture_timer.stop()
+        self._new_capture_token()
+        self._schedule_capture("measurement")
 
     def _start_continuous(self) -> None:
+        self._continuous = True
+        self._new_capture_token()
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.capture_timer.start()
         self.status_message.setText("Continuous capture running")
+        self._trigger_continuous_capture()
 
     def _stop_continuous(self) -> None:
+        self._continuous = False
         self.capture_timer.stop()
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self._capture_in_flight = False
+        self._new_capture_token()
         self.status_message.setText("Stopped")
 
     # ------------------------------------------------------------------
