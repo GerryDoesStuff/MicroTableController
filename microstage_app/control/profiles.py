@@ -7,7 +7,7 @@ DEFAULT_ILLUMINATION_LIGHTS = [
 ]
 
 DEFAULTS = {
-    'version': 8,
+    'version': 9,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -73,6 +73,11 @@ DEFAULTS = {
     },
     'ui': {
         'dark_mode': False,
+    },
+    'spectroscopy': {
+        'geometry': '',
+        'window_state': '',
+        'compact': False,
     },
     'illumination': {
         'dimmer': {

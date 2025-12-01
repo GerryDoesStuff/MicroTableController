@@ -4,6 +4,7 @@ from typing import Optional
 
 from .system_monitor_tab import SystemMonitorTab
 from .tooltips import apply_tooltip_context
+from .spectroscopy_window import SpectroscopyWindow
 
 import numpy as np
 import cv2
@@ -11,6 +12,7 @@ import cv2
 from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
 from ..devices.camera_toupcam import create_camera, list_cameras
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
+from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
 
 from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
@@ -376,6 +378,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage = None
         self.camera = None
         self.dimmer: ShellyDimmer | None = None
+        self.spectrometer_manager = SpectrometerManager()
+        self.spectroscopy_window: SpectroscopyWindow | None = None
         self.stage_bounds = _load_stage_bounds()
         self._stage_bounds_fallback = self.stage_bounds.copy() if self.stage_bounds else None
         self._last_pos = {"x": None, "y": None, "z": None}
@@ -583,6 +587,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # show window first, then connect devices asynchronously
         QtCore.QTimer.singleShot(0, self._auto_connect_async)
+        QtCore.QTimer.singleShot(0, self._refresh_spectrometers)
 
     # --------------------------- UI BUILD ---------------------------
 
@@ -598,6 +603,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_show_stages = devices_menu.addAction("Stages")
         self.act_show_cameras.triggered.connect(self._show_camera_dialog)
         self.act_show_stages.triggered.connect(self._show_stage_dialog)
+
+        modules_menu = self.menuBar().addMenu("Modules")
+        self.act_show_spectroscopy = modules_menu.addAction("Vis Spectroscopy…")
+        self.act_show_spectroscopy.triggered.connect(self._open_spectroscopy)
 
         view_menu = self.menuBar().addMenu("View")
         self.act_dark_mode = view_menu.addAction("Dark Theme")
@@ -617,6 +626,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cam_status = QtWidgets.QLabel("Camera: —")
         self.dimmer_status = QtWidgets.QLabel("Illumination: —")
         self.dimmer_status.setTextFormat(QtCore.Qt.PlainText)
+        self.spectrometer_status = QtWidgets.QLabel("Spectrometer: —")
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
@@ -629,6 +639,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addWidget(self.stage_status)
         left.addWidget(self.cam_status)
         left.addWidget(self.dimmer_status)
+        left.addWidget(self.spectrometer_status)
 
         # Illumination controls
         illum_box = QtWidgets.QGroupBox("Illumination")
@@ -1101,10 +1112,31 @@ class MainWindow(QtWidgets.QMainWindow):
         s.addStretch(1)
         rightw.addTab(scripts, "Scripts")
 
+        # ---- Devices tab (spectrometers)
+        devices_tab = QtWidgets.QWidget()
+        dv = QtWidgets.QVBoxLayout(devices_tab)
+        spec_box = QtWidgets.QGroupBox("Spectrometers")
+        spec_layout = QtWidgets.QVBoxLayout(spec_box)
+        self.spectrometer_list = QtWidgets.QListWidget()
+        self.spectrometer_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        spec_layout.addWidget(self.spectrometer_list)
+        btn_row = QtWidgets.QHBoxLayout()
+        self.btn_spec_refresh = QtWidgets.QPushButton("Refresh")
+        self.btn_spec_connect = QtWidgets.QPushButton("Connect")
+        self.btn_spec_disconnect = QtWidgets.QPushButton("Disconnect")
+        self.btn_spec_disconnect.setEnabled(False)
+        btn_row.addWidget(self.btn_spec_refresh)
+        btn_row.addWidget(self.btn_spec_connect)
+        btn_row.addWidget(self.btn_spec_disconnect)
+        spec_layout.addLayout(btn_row)
+        dv.addWidget(spec_box)
+        dv.addStretch(1)
+        rightw.addTab(devices_tab, "Devices")
+
         # ---- System monitor tab
         self.system_tab = SystemMonitorTab()
         self.system_tab.add_device_status_widgets(
-            self.stage_status, self.cam_status, self.dimmer_status
+            self.stage_status, self.cam_status, self.dimmer_status, self.spectrometer_status
         )
         rightw.addTab(self.system_tab, "System")
         self.system_tab.start()
@@ -1540,6 +1572,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
 
+        # spectrometers
+        self.btn_spec_refresh.clicked.connect(self._refresh_spectrometers)
+        self.btn_spec_connect.clicked.connect(self._connect_spectrometer_from_list)
+        self.btn_spec_disconnect.clicked.connect(self._disconnect_spectrometer)
+        self.spectrometer_list.itemDoubleClicked.connect(
+            lambda *_: self._connect_spectrometer_from_list()
+        )
+        self.spectrometer_manager.devices_changed.connect(self._on_spectrometers_changed)
+        self.spectrometer_manager.device_connected.connect(self._on_spectrometer_connected)
+
     def _init_persistent_fields(self):
         def bind(spin, key):
             spin.setValue(self.profiles.get(key, spin.value()))
@@ -1949,6 +1991,94 @@ class MainWindow(QtWidgets.QMainWindow):
             self._disconnect_stage()
             self._connect_stage_async(port)
         dlg.accept()
+
+    def _open_spectroscopy(self):
+        if self.spectroscopy_window is None:
+            self.spectroscopy_window = SpectroscopyWindow(
+                self.spectrometer_manager, self.profiles, self
+            )
+            self.spectroscopy_window.destroyed.connect(
+                lambda: setattr(self, "spectroscopy_window", None)
+            )
+        self.spectroscopy_window.show()
+        self.spectroscopy_window.raise_()
+        self.spectroscopy_window.activateWindow()
+
+    def _refresh_spectrometers(self):
+        devices = self.spectrometer_manager.refresh()
+        self._populate_spectrometer_list(devices)
+
+    def _on_spectrometers_changed(self, devices):
+        self._populate_spectrometer_list(devices)
+
+    def _populate_spectrometer_list(self, devices):
+        selection = self._current_spectrometer_descriptor()
+        active_desc = getattr(self.spectrometer_manager.active, "descriptor", None)
+        if selection is None and active_desc:
+            selection = active_desc
+        self.spectrometer_list.blockSignals(True)
+        self.spectrometer_list.clear()
+        for desc in devices:
+            label = f"{desc.model} ({desc.serial_number})\n{desc.path}"
+            item = QtWidgets.QListWidgetItem(label)
+            item.setData(QtCore.Qt.UserRole, desc)
+            if selection and selection == desc:
+                item.setSelected(True)
+            self.spectrometer_list.addItem(item)
+        self.spectrometer_list.blockSignals(False)
+        if selection:
+            self._select_spectrometer_descriptor(selection)
+        self._update_spectrometer_buttons()
+
+    def _current_spectrometer_descriptor(self):
+        item = self.spectrometer_list.currentItem()
+        if item:
+            data = item.data(QtCore.Qt.UserRole)
+            if isinstance(data, SpectrometerDescriptor):
+                return data
+        return None
+
+    def _select_spectrometer_descriptor(self, desc: SpectrometerDescriptor):
+        for i in range(self.spectrometer_list.count()):
+            item = self.spectrometer_list.item(i)
+            if item and item.data(QtCore.Qt.UserRole) == desc:
+                item.setSelected(True)
+                self.spectrometer_list.setCurrentItem(item)
+                break
+
+    def _connect_spectrometer_from_list(self):
+        desc = self._current_spectrometer_descriptor()
+        if not desc:
+            return
+        try:
+            dev = self.spectrometer_manager.connect(desc)
+            wavelengths = dev.get_wavelengths()
+            if self.spectroscopy_window:
+                self.spectroscopy_window.session.set_wavelengths(wavelengths)
+        except Exception as exc:
+            log(f"Spectrometer connect failed: {exc}")
+        self._update_spectrometer_buttons()
+
+    def _disconnect_spectrometer(self):
+        self.spectrometer_manager.disconnect()
+        self._update_spectrometer_buttons()
+
+    def _on_spectrometer_connected(self, device):
+        desc = getattr(device, "descriptor", None)
+        if desc:
+            text = f"Spectrometer: {desc.label()}"
+        else:
+            text = "Spectrometer: —"
+        self.spectrometer_status.setText(text)
+        if desc:
+            self._select_spectrometer_descriptor(desc)
+        self._update_spectrometer_buttons()
+
+    def _update_spectrometer_buttons(self):
+        active = self.spectrometer_manager.active
+        has_selection = bool(self._current_spectrometer_descriptor())
+        self.btn_spec_connect.setEnabled(has_selection and active is None)
+        self.btn_spec_disconnect.setEnabled(active is not None)
 
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
@@ -3557,6 +3687,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist_illumination_rows(save=False)
         self.profiles.save()
         try:
+            if self.spectroscopy_window:
+                self.spectroscopy_window.close()
+            self.spectrometer_manager.disconnect()
             self._stop_all()
             self._disconnect_dimmer()
             if self._raster_thread:
