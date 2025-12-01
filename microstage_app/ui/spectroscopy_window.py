@@ -23,7 +23,18 @@ from ..spectroscopy.io import (
     save_time_series_hdf5,
     save_time_series_npz,
 )
-from ..spectroscopy.processing import smooth_boxcar, subtract_dark
+from ..spectroscopy.processing import (
+    apply_baseline,
+    apply_mask_bands,
+    compute_absorbance,
+    compute_irradiance,
+    normalize_reference,
+    raman_shift_cm,
+    smooth_boxcar,
+    subtract_dark,
+    edge_baseline,
+    median_baseline,
+)
 from ..spectroscopy.session import AcquisitionMetadata, SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
 from ..utils.log import LOG, log
@@ -93,6 +104,7 @@ class CapturedSpectrum:
     metadata: Dict[str, object]
     kind: str = "measurement"
     raw_data: Optional[np.ndarray] = None
+    x_axis: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -322,6 +334,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._chart_view = SpectrumChartView(self._chart)
         self._traces: Dict[str, QtCharts.QLineSeries] = {}
         self._trace_meta: Dict[str, SpectrumTrace] = {}
+        self._secondary_axis: Optional[QtCharts.QCategoryAxis] = None
 
         self.capture_timer = QtCore.QTimer(self)
         self.capture_timer.setInterval(250)
@@ -828,6 +841,70 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             timestamp=time.time(),
         )
 
+    def _requires_reference(self) -> bool:
+        return self.current_mode in {"Absorbance", "Transmittance", "Reflectance"}
+
+    def _requires_calibration(self) -> bool:
+        return self.current_mode == "Relative Irradiance"
+
+    def _process_measurement(self, raw: np.ndarray, job: CaptureJob) -> tuple[np.ndarray, np.ndarray, bool, bool]:
+        wavelengths = self.session.wavelengths
+        if wavelengths is None:
+            return np.array([]), np.asarray(raw, dtype=float), False, False
+        params = dict(self.session.mode_params or {})
+        smoothed = smooth_boxcar(raw, window=int(params.get("smoothing", job.smoothing)))
+        dark_applied = False
+        reference_applied = False
+        if job.subtract_dark:
+            if self.session.dark_valid and self.session.dark_spectrum is not None:
+                try:
+                    smoothed = subtract_dark(smoothed, self.session.dark_spectrum)
+                    dark_applied = True
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOG.warning("Dark subtraction failed: %s", exc)
+            else:
+                self.status_message.setText("Dark subtraction requested but dark is invalid")
+        baseline_opt = str(params.get("baseline", "none")).lower()
+        if baseline_opt == "median":
+            smoothed = apply_baseline(smoothed, median_baseline)
+        elif baseline_opt.startswith("edge"):
+            smoothed = apply_baseline(smoothed, lambda arr: edge_baseline(arr))
+
+        x_axis = wavelengths
+        processed = smoothed
+        if self.current_mode == "Absorbance":
+            if self.session.reference_valid and self.session.reference_spectrum is not None:
+                processed = compute_absorbance(smoothed, self.session.reference_spectrum)
+                reference_applied = True
+            else:
+                self.status_message.setText("Reference required for absorbance; showing counts")
+        elif self.current_mode in {"Transmittance", "Reflectance"}:
+            if self.session.reference_valid and self.session.reference_spectrum is not None:
+                processed = normalize_reference(smoothed, self.session.reference_spectrum)
+                reference_applied = True
+                if params.get("clamp_zero", True):
+                    processed = np.clip(processed, 0.0, None)
+                if params.get("as_percent", True):
+                    processed = processed * 100.0
+            else:
+                self.status_message.setText("Reference required for %s" % self.current_mode.lower())
+        elif self.current_mode == "Relative Irradiance":
+            curve = self.session.calibration.response_curve if (
+                params.get("apply_response", True) and self.session.calibration_valid
+            ) else None
+            processed = compute_irradiance(smoothed, float(job.integration_ms), response_curve=curve)
+            if params.get("apply_response", True) and not self.session.calibration_valid:
+                self.status_message.setText("Response calibration invalid; skipped correction")
+        elif self.current_mode == "Raman":
+            excitation = float(params.get("excitation_nm", 532.0))
+            shift = raman_shift_cm(wavelengths, excitation) - float(params.get("shift_offset", 0.0))
+            x_axis = shift
+            processed = apply_mask_bands(wavelengths, smoothed, params.get("filter_bands", []))
+        else:
+            processed = smoothed
+
+        return np.asarray(x_axis, dtype=float), np.asarray(processed, dtype=float), dark_applied, reference_applied
+
     def _choose_data_dir(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(
             self,
@@ -909,7 +986,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._populate_devices(devices)
 
     def _on_devices_changed(self, devices: list) -> None:
+        previous = self._current_descriptor()
         self._populate_devices(devices)
+        active_desc = self.spectrometer_manager.active_descriptor
+        if active_desc and active_desc not in devices:
+            self._stop_continuous()
+            if self._time_series_active:
+                self._stop_time_series()
+            self.status_message.setText("Active spectrometer disconnected")
+        if previous and previous not in devices:
+            self.device_combo.setCurrentIndex(-1)
+        self._update_status_from_selection()
 
     def _populate_devices(self, devices: list[SpectrometerDescriptor]) -> None:
         current = self._current_descriptor()
@@ -925,6 +1012,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._apply_default_device(devices)
         elif self.spectrometer_manager.active_descriptor:
             self._set_current_descriptor(self.spectrometer_manager.active_descriptor)
+        elif not devices:
+            self.device_combo.setCurrentIndex(-1)
         self._update_status_from_selection()
 
     def _apply_default_device(self, devices: list[SpectrometerDescriptor]) -> None:
@@ -1204,8 +1293,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         metadata: Optional[Dict[str, object]] = None,
         *,
         raw_data: Optional[np.ndarray] = None,
+        x_axis: Optional[np.ndarray] = None,
     ) -> None:
-        if self.session.wavelengths is None or data is None:
+        if data is None:
+            return
+        if self.session.wavelengths is None and x_axis is None:
             return
         ts = time.time()
         metadata = dict(metadata or {})
@@ -1222,6 +1314,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             metadata=metadata,
             kind=kind,
             raw_data=None if raw_data is None else np.asarray(raw_data, dtype=float),
+            x_axis=None if x_axis is None else np.asarray(x_axis, dtype=float),
         )
         self._recent_captures.insert(0, entry)
         while len(self._recent_captures) > 25:
@@ -1258,7 +1351,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         if item.checkState() == QtCore.Qt.Checked:
             color = self._recent_colors[self._recent_captures.index(entry) % len(self._recent_colors)]
-            self._plot_spectrum(entry.key, entry.data, color=color)
+            self._plot_spectrum(entry.key, entry.data, color=color, x_axis=entry.x_axis)
         else:
             self._remove_trace(entry.key)
 
@@ -1308,12 +1401,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             mode=str(capture.metadata.get("mode", self.current_mode)),
             timestamp=float(capture.metadata.get("timestamp", capture.timestamp)),
         )
+        spectrum = capture.raw_data if capture.raw_data is not None else capture.data
         try:
             if target == "reference":
-                self.session.set_reference(capture.data, acquisition=acquisition)
+                self.session.set_reference(spectrum, acquisition=acquisition)
                 self.status_message.setText("Applied capture as reference")
             else:
-                self.session.set_dark(capture.data, acquisition=acquisition)
+                self.session.set_dark(spectrum, acquisition=acquisition)
                 self.status_message.setText("Applied capture as dark")
         except Exception as exc:
             self.status_message.setText(f"Failed to apply capture: {exc}")
@@ -1326,7 +1420,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if not self._data_dir:
             self.status_message.setText("Set a data folder first")
             return
-        if self.session.wavelengths is None:
+        axis = capture.x_axis if capture.x_axis is not None else self.session.wavelengths
+        if axis is None:
             self.status_message.setText("No wavelength axis available for export")
             return
         directory = ensure_data_directory(self._data_dir)
@@ -1349,6 +1444,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 "dark_applied": self.session.dark_valid,
                 "reference_applied": self.session.reference_valid,
                 "timestamp": capture.timestamp,
+                "x_axis": "Raman shift (cm^-1)" if capture.mode == "Raman" else "Wavelength (nm)",
             }
         )
         save_kwargs = {
@@ -1358,11 +1454,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         }
         try:
             if options.format == "csv":
-                save_spectrum_csv(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+                save_spectrum_csv(options.path, axis, capture.data, metadata, **save_kwargs)
             elif options.format == "h5":
-                save_spectrum_hdf5(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+                save_spectrum_hdf5(options.path, axis, capture.data, metadata, **save_kwargs)
             else:
-                save_spectrum_jcamp(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+                save_spectrum_jcamp(options.path, axis, capture.data, metadata, **save_kwargs)
             self.status_message.setText(f"Saved capture to {options.path}")
         except Exception as exc:
             self.status_message.setText(f"Save failed: {exc}")
@@ -1451,17 +1547,28 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._record_capture("dark", raw, meta, raw_data=raw)
             self.status_message.setText("Dark captured")
         else:
+            x_axis, processed, dark_applied, ref_applied = self._process_measurement(raw, job)
             self.session.set_raw(raw)
-            self._plot_spectrum("live", processed, color=QtGui.QColor("deepskyblue"))
+            self._plot_spectrum("live", processed, color=QtGui.QColor("deepskyblue"), x_axis=x_axis)
+            params = dict(self.session.mode_params)
+            calibration_applied = bool(
+                params.get("apply_response", True)
+                and self.session.calibration_valid
+                and self.current_mode == "Relative Irradiance"
+            )
             metadata = {
                 "integration_ms": float(job.integration_ms),
                 "averages": int(job.averages),
                 "smoothing": int(job.smoothing),
                 "subtract_dark": bool(job.subtract_dark),
+                "dark_applied": dark_applied or job.kind == "dark",
+                "reference_applied": ref_applied,
+                "calibration_applied": calibration_applied,
             }
-            self._record_capture("measurement", processed, metadata, raw_data=raw)
+            self._record_capture("measurement", processed, metadata, raw_data=raw, x_axis=x_axis)
             self._append_time_series(acquisition, processed, metadata)
             self.status_message.setText("Captured spectrum")
+        self._refresh_validity_state()
         if duration > 0:
             fps = 1.0 / duration
             self.fps_label.setText(f"{fps:.1f} Hz")
@@ -1772,9 +1879,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._schedule_next_time_series_tick()
 
     # ------------------------------------------------------------------
-    def _plot_spectrum(self, key: str, data: np.ndarray, color: QtGui.QColor) -> None:
-        wavelengths = self.session.wavelengths
-        if wavelengths is None:
+    def _plot_spectrum(
+        self, key: str, data: np.ndarray, color: QtGui.QColor, *, x_axis: Optional[np.ndarray] = None
+    ) -> None:
+        axis_data = x_axis if x_axis is not None else self.session.wavelengths
+        if axis_data is None or data is None:
+            return
+        axis_arr = np.asarray(axis_data, dtype=float).ravel()
+        data_arr = np.asarray(data, dtype=float).ravel()
+        if axis_arr.shape != data_arr.shape:
+            length = min(axis_arr.size, data_arr.size)
+            axis_arr = axis_arr[:length]
+            data_arr = data_arr[:length]
+        if axis_arr.size == 0 or data_arr.size == 0:
             return
         series = self._traces.get(key)
         if series is None:
@@ -1796,22 +1913,66 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._traces[key] = series
             self._trace_meta[key] = meta
             self._install_legend_handlers()
-        series.replace([QtCore.QPointF(x, y) for x, y in zip(wavelengths, data)])
+        series.replace([QtCore.QPointF(float(x), float(y)) for x, y in zip(axis_arr, data_arr)])
         axis_x = self._chart.axisX()
         axis_y = self._chart.axisY()
         if axis_x:
-            axis_x.setRange(float(wavelengths.min()), float(wavelengths.max()))
-        ymin = float(np.min(data))
-        ymax = float(np.max(data))
+            axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
+            if self.current_mode == "Raman":
+                axis_x.setTitleText("Raman shift (cm⁻¹)")
+            else:
+                axis_x.setTitleText("Wavelength (nm)")
+        ymin = float(np.nanmin(data_arr))
+        ymax = float(np.nanmax(data_arr))
         if ymin == ymax:
             ymax += 1.0
         if axis_y:
+            if self.current_mode == "Absorbance":
+                axis_y.setTitleText("Absorbance (AU)")
+            elif self.current_mode in {"Transmittance", "Reflectance"}:
+                axis_y.setTitleText("%" if self.session.mode_params.get("as_percent", True) else "Ratio")
+            elif self.current_mode == "Relative Irradiance":
+                axis_y.setTitleText("Irradiance")
+            elif self.current_mode == "Raman":
+                axis_y.setTitleText("Intensity (a.u.)")
+            else:
+                axis_y.setTitleText("Intensity (a.u.)")
             axis_y.setRange(ymin, ymax)
+        if self.current_mode == "Raman":
+            self._configure_raman_axis(axis_arr)
+            if self._secondary_axis:
+                series.attachAxis(self._secondary_axis)
+        elif self._secondary_axis:
+            self._chart.removeAxis(self._secondary_axis)
+            self._secondary_axis = None
+
+    def _configure_raman_axis(self, shift_axis: np.ndarray) -> None:
+        wavelengths = self.session.wavelengths
+        if wavelengths is None:
+            return
+        if self._secondary_axis is None:
+            self._secondary_axis = QtCharts.QCategoryAxis()
+            self._chart.addAxis(self._secondary_axis, QtCore.Qt.AlignTop)
+        self._secondary_axis.clear()
+        if shift_axis.size == 0:
+            return
+        min_shift = float(np.nanmin(shift_axis))
+        max_shift = float(np.nanmax(shift_axis))
+        self._secondary_axis.setRange(min_shift, max_shift)
+        excitation = float(self.session.mode_params.get("excitation_nm", 532.0)) if self.session.mode_params else 532.0
+        ticks = np.linspace(min_shift, max_shift, 5)
+        for tick in ticks:
+            denom = (1e7 / excitation) - tick
+            wl = 1e7 / denom if denom != 0 else float("nan")
+            if np.isfinite(wl):
+                self._secondary_axis.append(f"{wl:.0f} nm", float(tick))
+        self._secondary_axis.setTitleText("Wavelength (nm)")
 
     def _apply_roi(self, start: float, end: float) -> None:
         self.session.clear_rois()
         self.session.add_roi(start, end)
-        self.roi_label.setText(f"ROI: {start:.1f}–{end:.1f} nm")
+        unit = "cm⁻¹" if self.current_mode == "Raman" else "nm"
+        self.roi_label.setText(f"ROI: {start:.1f}–{end:.1f} {unit}")
 
     def _update_cursor(self, x: float) -> None:
         y_values = []
@@ -1828,9 +1989,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 y = ys[min(idx, len(ys) - 1)]
             y_values.append(y)
         if y_values:
-            self.cursor_label.setText(f"Cursor: {x:.1f} nm | {np.mean(y_values):.1f}")
+            unit = "cm⁻¹" if self.current_mode == "Raman" else "nm"
+            self.cursor_label.setText(f"Cursor: {x:.1f} {unit} | {np.mean(y_values):.1f}")
         else:
-            self.cursor_label.setText(f"Cursor: {x:.1f} nm")
+            unit = "cm⁻¹" if self.current_mode == "Raman" else "nm"
+            self.cursor_label.setText(f"Cursor: {x:.1f} {unit}")
 
     def _export_plot(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(

@@ -70,21 +70,41 @@ class SpectrometerManager(QtCore.QObject):
         self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
         self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
         self._last_active: Optional[SpectrometerDescriptor] = None
+        self._monitor_timer = QtCore.QTimer(self)
+        self._monitor_timer.setInterval(2000)
+        self._monitor_timer.timeout.connect(self._poll_devices)
+        self._monitor_timer.start()
 
     @property
     def devices(self) -> List[SpectrometerDescriptor]:
         return list(self._devices)
 
-    def refresh(self) -> List[SpectrometerDescriptor]:
+    def _enumerate_devices(self) -> List[SpectrometerDescriptor]:
         devices: List[SpectrometerDescriptor] = []
         for provider in self._providers:
             try:
                 devices.extend(provider.list_devices())
             except Exception as exc:  # pragma: no cover - defensive
                 LOG.warning("Failed to enumerate spectrometers: %s", exc)
-        self._devices = devices
+        return devices
+
+    def _poll_devices(self) -> None:
+        devices = self._enumerate_devices()
+        self._update_devices(devices)
+
+    def _update_devices(self, devices: List[SpectrometerDescriptor]) -> None:
+        if devices == self._devices:
+            return
+        removed = [desc for desc in self._active if desc not in devices]
+        for desc in removed:
+            self.disconnect(desc)
+        self._devices = list(devices)
         self.devices_changed.emit(list(devices))
-        return list(devices)
+
+    def refresh(self) -> List[SpectrometerDescriptor]:
+        devices = self._enumerate_devices()
+        self._update_devices(devices)
+        return list(self._devices)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> SpectrometerDevice:
         if descriptor in self._active:
