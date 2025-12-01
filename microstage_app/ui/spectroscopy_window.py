@@ -19,6 +19,7 @@ from ..spectroscopy.io import (
     ensure_data_directory,
     save_spectrum_csv,
     save_spectrum_hdf5,
+    save_spectrum_jcamp,
     save_time_series_hdf5,
     save_time_series_npz,
 )
@@ -91,6 +92,95 @@ class CapturedSpectrum:
     mode: str
     metadata: Dict[str, object]
     kind: str = "measurement"
+    raw_data: Optional[np.ndarray] = None
+
+
+@dataclass
+class SaveOptions:
+    path: str
+    format: str
+    include_processed: bool
+    include_raw: bool
+
+
+class SaveCaptureDialog(QtWidgets.QDialog):
+    def __init__(
+        self,
+        parent: Optional[QtWidgets.QWidget],
+        default_dir: str,
+        default_name: str,
+        raw_available: bool,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Save capture")
+        layout = QtWidgets.QFormLayout(self)
+
+        dir_row = QtWidgets.QHBoxLayout()
+        self.dir_edit = QtWidgets.QLineEdit(default_dir)
+        browse = QtWidgets.QToolButton()
+        browse.setText("…")
+        browse.clicked.connect(self._choose_directory)
+        dir_row.addWidget(self.dir_edit, 1)
+        dir_row.addWidget(browse)
+        layout.addRow("Directory", dir_row)
+
+        self.name_edit = QtWidgets.QLineEdit(default_name)
+        layout.addRow("File name", self.name_edit)
+
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItem("CSV", "csv")
+        self.format_combo.addItem("HDF5", "h5")
+        self.format_combo.addItem("JCAMP-DX", "jdx")
+        layout.addRow("Format", self.format_combo)
+
+        self.chk_processed = QtWidgets.QCheckBox("Save processed spectrum")
+        self.chk_processed.setChecked(True)
+        self.chk_raw = QtWidgets.QCheckBox("Include raw counts")
+        self.chk_raw.setChecked(raw_available)
+        self.chk_raw.setEnabled(raw_available)
+        layout.addRow(self.chk_processed)
+        layout.addRow(self.chk_raw)
+
+        self.status = QtWidgets.QLabel()
+        self.status.setStyleSheet("color: red;")
+        layout.addRow(self.status)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+        self._options: Optional[SaveOptions] = None
+
+    def _choose_directory(self) -> None:
+        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Select directory", self.dir_edit.text())
+        if directory:
+            self.dir_edit.setText(directory)
+
+    def _on_accept(self) -> None:
+        directory = ensure_data_directory(self.dir_edit.text())
+        filename = self.name_edit.text().strip()
+        ext = self.format_combo.currentData()
+        include_processed = self.chk_processed.isChecked()
+        include_raw = self.chk_raw.isChecked()
+        if not filename:
+            self.status.setText("File name is required")
+            return
+        if not include_processed and not include_raw:
+            self.status.setText("Select at least one spectrum to save")
+            return
+        path = os.path.join(directory, f"{filename}.{ext}")
+        self._options = SaveOptions(
+            path=path,
+            format=str(ext),
+            include_processed=include_processed,
+            include_raw=include_raw,
+        )
+        self.accept()
+
+    @property
+    def options(self) -> Optional[SaveOptions]:
+        return self._options
 
 
 class SpectrumChartView(QtCharts.QChartView):
@@ -415,7 +505,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         dir_row.addWidget(browse)
         data_layout.addRow("Data folder", dir_row)
         self.btn_save_selected = QtWidgets.QPushButton("Save selected capture")
-        self.btn_save_selected.setToolTip("Export the selected capture to CSV in the data folder")
+        self.btn_save_selected.setToolTip("Export the selected capture with format and data options")
         data_layout.addRow(self.btn_save_selected)
         self.time_series_interval = QtWidgets.QDoubleSpinBox()
         self.time_series_interval.setRange(0.05, 3600.0)
@@ -1107,7 +1197,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._update_session_context()
 
     # ------------------------------------------------------------------
-    def _record_capture(self, kind: str, data: np.ndarray, metadata: Optional[Dict[str, object]] = None) -> None:
+    def _record_capture(
+        self,
+        kind: str,
+        data: np.ndarray,
+        metadata: Optional[Dict[str, object]] = None,
+        *,
+        raw_data: Optional[np.ndarray] = None,
+    ) -> None:
         if self.session.wavelengths is None or data is None:
             return
         ts = time.time()
@@ -1124,6 +1221,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             mode=self.current_mode,
             metadata=metadata,
             kind=kind,
+            raw_data=None if raw_data is None else np.asarray(raw_data, dtype=float),
         )
         self._recent_captures.insert(0, entry)
         while len(self._recent_captures) > 25:
@@ -1233,7 +1331,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         directory = ensure_data_directory(self._data_dir)
         safe_mode = capture.mode.replace(" ", "_").lower()
-        base = os.path.join(directory, f"{safe_mode}_{int(capture.timestamp)}")
+        default_name = f"{safe_mode}_{int(capture.timestamp)}"
+        dialog = SaveCaptureDialog(self, directory, default_name, capture.raw_data is not None)
+        if dialog.exec() != QtWidgets.QDialog.Accepted or not dialog.options:
+            return
+        options = dialog.options
+        directory = os.path.dirname(options.path)
+        self._data_dir = directory
+        self._persist_data_dir()
         metadata = dict(capture.metadata)
         metadata.update(
             {
@@ -1246,10 +1351,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 "timestamp": capture.timestamp,
             }
         )
+        save_kwargs = {
+            "raw_counts": capture.raw_data,
+            "include_processed": options.include_processed,
+            "include_raw": options.include_raw,
+        }
         try:
-            save_spectrum_csv(base + ".csv", self.session.wavelengths, capture.data, metadata)
-            save_spectrum_hdf5(base + ".h5", self.session.wavelengths, capture.data, metadata)
-            self.status_message.setText(f"Saved capture to {base}.[csv|h5]")
+            if options.format == "csv":
+                save_spectrum_csv(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+            elif options.format == "h5":
+                save_spectrum_hdf5(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+            else:
+                save_spectrum_jcamp(options.path, self.session.wavelengths, capture.data, metadata, **save_kwargs)
+            self.status_message.setText(f"Saved capture to {options.path}")
         except Exception as exc:
             self.status_message.setText(f"Save failed: {exc}")
 
@@ -1334,7 +1448,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 "averages": int(job.averages),
                 "smoothing": int(job.smoothing),
             }
-            self._record_capture("dark", raw, meta)
+            self._record_capture("dark", raw, meta, raw_data=raw)
             self.status_message.setText("Dark captured")
         else:
             self.session.set_raw(raw)
@@ -1345,7 +1459,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 "smoothing": int(job.smoothing),
                 "subtract_dark": bool(job.subtract_dark),
             }
-            self._record_capture("measurement", processed, metadata)
+            self._record_capture("measurement", processed, metadata, raw_data=raw)
             self._append_time_series(acquisition, processed, metadata)
             self.status_message.setText("Captured spectrum")
         if duration > 0:
@@ -1788,6 +1902,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                     "mode": self.current_mode,
                     "timestamp": ts,
                 },
+                raw_data=spectrum,
             )
             return spectrum
         except Exception as exc:
