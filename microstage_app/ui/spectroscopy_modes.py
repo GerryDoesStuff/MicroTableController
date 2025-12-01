@@ -181,7 +181,8 @@ class BeerLambertPage(BaseWizardPage):
     def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
         super().__init__(wizard)
         self.setTitle("Beer–Lambert calibration")
-        layout = QtWidgets.QFormLayout(self)
+        layout = QtWidgets.QVBoxLayout(self)
+        form = QtWidgets.QFormLayout()
         self.path_length = QtWidgets.QDoubleSpinBox()
         self.path_length.setRange(0.01, 100.0)
         self.path_length.setValue(float(wizard.mode_params.get("path_length_cm", 1.0)))
@@ -193,12 +194,114 @@ class BeerLambertPage(BaseWizardPage):
         self.concentration.setSuffix(" mol/L")
         self.fit_checkbox = QtWidgets.QCheckBox("Compute molar absorptivity from captured sample")
         self.fit_checkbox.setChecked(bool(wizard.mode_params.get("compute_ext_coeff", True)))
+        self.band_start = QtWidgets.QDoubleSpinBox()
+        self.band_end = QtWidgets.QDoubleSpinBox()
+        for spin in (self.band_start, self.band_end):
+            spin.setRange(0, 2000)
+            spin.setSuffix(" nm")
+        self.band_label = QtWidgets.QLineEdit()
+        add_band_btn = QtWidgets.QPushButton("Add ROI/band")
+        add_band_btn.clicked.connect(self._add_band)
+        self.roi_combo = QtWidgets.QComboBox()
+        self._refresh_rois()
+        self.point_btn = QtWidgets.QPushButton("Add calibration point from current capture")
+        self.point_btn.clicked.connect(self._capture_point)
+        self.points_table = QtWidgets.QTableWidget(0, 3)
+        self.points_table.setHorizontalHeaderLabels(["Concentration", "Absorbance", "ROI"])
+        self.points_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        self.fit_label = QtWidgets.QLabel("No calibration points yet.")
         for widget in (self.path_length, self.concentration):
             widget.valueChanged.connect(self._changed)
         self.fit_checkbox.stateChanged.connect(self._changed)
-        layout.addRow("Path length", self.path_length)
-        layout.addRow("Concentration", self.concentration)
-        layout.addRow(self.fit_checkbox)
+        form.addRow("Path length", self.path_length)
+        form.addRow("Concentration", self.concentration)
+        form.addRow(self.fit_checkbox)
+        form.addRow(QtWidgets.QLabel("Add measurement band for Beer–Lambert fit"))
+        form.addRow("Start", self.band_start)
+        form.addRow("End", self.band_end)
+        form.addRow("Label", self.band_label)
+        form.addRow(add_band_btn)
+        form.addRow("Select ROI", self.roi_combo)
+        layout.addLayout(form)
+        layout.addWidget(self.point_btn)
+        layout.addWidget(self.points_table)
+        layout.addWidget(self.fit_label)
+        layout.addStretch(1)
+        self._restore_points()
+
+    def _refresh_rois(self) -> None:
+        self.roi_combo.clear()
+        if not self.session.rois:
+            self.roi_combo.addItem("(full spectrum)", userData=None)
+        for idx, roi in enumerate(self.session.rois):
+            label = roi.label or f"ROI {idx+1}"
+            self.roi_combo.addItem(f"{label}: {roi.start_nm:.1f}-{roi.end_nm:.1f} nm", userData=roi)
+
+    def _restore_points(self) -> None:
+        points = self.wizard_ref.mode_params.get("beer_lambert_points", [])
+        for conc, absorb, roi_label in points:
+            self._append_point_row(conc, absorb, roi_label)
+        self._update_fit_label()
+
+    def _append_point_row(self, conc: float, absorb: float, roi_label: str) -> None:
+        row = self.points_table.rowCount()
+        self.points_table.insertRow(row)
+        self.points_table.setItem(row, 0, QtWidgets.QTableWidgetItem(f"{conc:.6g}"))
+        self.points_table.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{absorb:.4f}"))
+        self.points_table.setItem(row, 2, QtWidgets.QTableWidgetItem(roi_label))
+
+    def _capture_point(self) -> None:
+        measurement = self._measure_absorbance()
+        if measurement is None:
+            QtWidgets.QMessageBox.warning(self, "Calibration", "Capture dark/reference/raw first to compute absorbance.")
+            return
+        conc = float(self.concentration.value())
+        roi_label, absorb = measurement
+        points = self.wizard_ref.mode_params.setdefault("beer_lambert_points", [])
+        points.append((conc, absorb, roi_label))
+        self._append_point_row(conc, absorb, roi_label)
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self._update_fit_label()
+        self.mark_dirty()
+
+    def _measure_absorbance(self) -> Optional[Tuple[str, float]]:
+        wl = self.session.wavelengths
+        raw = self.session.raw_spectrum
+        ref = self.session.reference_spectrum
+        dark = self.session.dark_spectrum
+        if wl is None or raw is None or ref is None:
+            return None
+        smoothed = processing.smooth_boxcar(raw, window=int(self.wizard_ref.mode_params.get("smoothing", 1)))
+        if dark is not None:
+            smoothed = processing.subtract_dark(smoothed, dark)
+        absorb = processing.compute_absorbance(smoothed, ref)
+        roi = self.roi_combo.currentData()
+        if roi is None:
+            value = float(np.nanmax(absorb))
+            roi_label = "Full spectrum"
+        else:
+            mask = (wl >= roi.start_nm) & (wl <= roi.end_nm)
+            value = float(np.nanmean(absorb[mask])) if np.any(mask) else float("nan")
+            roi_label = roi.label or "ROI"
+        return roi_label, value
+
+    def _add_band(self) -> None:
+        roi = self.session.add_roi(self.band_start.value(), self.band_end.value(), self.band_label.text())
+        self.wizard_ref.mode_params.setdefault("rois", []).append(roi.as_tuple())
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self._refresh_rois()
+        self.mark_dirty()
+
+    def _update_fit_label(self) -> None:
+        points = self.wizard_ref.mode_params.get("beer_lambert_points", [])
+        if len(points) < 2:
+            self.fit_label.setText("Add at least two points to fit Beer–Lambert line.")
+            return
+        try:
+            slope, intercept, r2 = processing.beer_lambert_fit([(p[0], p[1]) for p in points])
+            self.fit_label.setText(f"Fit: absorbance = {slope:.4g} * c + {intercept:.3f}  (R²={r2:.3f})")
+        except Exception as exc:
+            self.fit_label.setText(f"Fit error: {exc}")
 
     def _changed(self) -> None:
         self.wizard_ref.mode_params.update(
@@ -258,13 +361,27 @@ class IrradianceCalibrationPage(BaseWizardPage):
         self.metric_centroid.setChecked("centroid" in color_metrics)
         self.metric_cct = QtWidgets.QCheckBox("Report peak wavelength")
         self.metric_cct.setChecked("peak" in color_metrics)
-        for box in (self.metric_centroid, self.metric_cct):
+        self.metric_cie = QtWidgets.QCheckBox("Compute CIE-like metrics")
+        self.metric_cie.setChecked("cie" in color_metrics)
+        for box in (self.metric_centroid, self.metric_cct, self.metric_cie):
             box.stateChanged.connect(self._changed)
+        self.calibrate_btn = QtWidgets.QPushButton("Capture lamp and build response curve")
+        self.calibrate_btn.clicked.connect(self._capture_calibration)
+        self.status_label = QtWidgets.QLabel("Calibration pending.")
         layout.addRow(self.apply_checkbox)
         layout.addRow("Calibration target", self.cal_target)
         layout.addRow(QtWidgets.QLabel("Color metric options"))
         layout.addRow(self.metric_centroid)
         layout.addRow(self.metric_cct)
+        layout.addRow(self.metric_cie)
+        layout.addRow(self.calibrate_btn)
+        layout.addRow(self.status_label)
+
+    def initializePage(self) -> None:  # type: ignore[override]
+        if self.session.calibration_valid:
+            self.status_label.setText("Calibration already valid.")
+        else:
+            self.status_label.setText("Calibration pending.")
 
     def _changed(self) -> None:
         metrics = []
@@ -272,6 +389,8 @@ class IrradianceCalibrationPage(BaseWizardPage):
             metrics.append("centroid")
         if self.metric_cct.isChecked():
             metrics.append("peak")
+        if self.metric_cie.isChecked():
+            metrics.append("cie")
         self.wizard_ref.mode_params.update(
             apply_response=bool(self.apply_checkbox.isChecked()),
             calibration_target=self.cal_target.text(),
@@ -279,6 +398,32 @@ class IrradianceCalibrationPage(BaseWizardPage):
         )
         self.session.set_mode_params(**self.wizard_ref.mode_params)
         self.mark_dirty()
+
+    def _capture_calibration(self) -> None:
+        params = self.wizard_ref.mode_params
+        spectrum = self.wizard_ref.capture_callback(
+            "calibration",
+            float(params.get("integration", 10.0)),
+            int(params.get("averages", 1)),
+        )
+        if spectrum is None:
+            self.status_label.setText("Calibration capture failed.")
+            return
+        try:
+            smoothed = processing.smooth_boxcar(spectrum, window=int(params.get("smoothing", 1)))
+            normalized = smoothed / max(np.nanmax(smoothed), 1e-9)
+            response_curve = np.where(np.isfinite(normalized) & (normalized > 0), 1.0 / normalized, 1.0)
+            self.session.set_calibration(
+                response_curve,
+                calibration_target=self.cal_target.text(),
+                color_metrics=params.get("color_metrics", []),
+            )
+            self.wizard_ref.state["calibration_valid"] = True
+            self.status_label.setText("Calibration response stored.")
+        except Exception as exc:
+            self.status_label.setText(f"Calibration error: {exc}")
+        self.wizard_ref._update_finish_state()
+        self.completeChanged.emit()
 
     def isComplete(self) -> bool:  # type: ignore[override]
         return True
@@ -296,15 +441,21 @@ class FluorescenceMetadataPage(BaseWizardPage):
         self.emission_filter = QtWidgets.QLineEdit()
         self.emission_filter.setPlaceholderText("Emission filter description")
         self.emission_filter.setText(str(wizard.mode_params.get("emission_filter", "")))
+        self.baseline_combo = QtWidgets.QComboBox()
+        self.baseline_combo.addItems(["None", "Median", "Edge mean"])
+        self.baseline_combo.setCurrentText(str(wizard.mode_params.get("baseline", "None")).title())
         self.excitation_spin.valueChanged.connect(self._changed)
         self.emission_filter.textChanged.connect(self._changed)
+        self.baseline_combo.currentTextChanged.connect(self._changed)
         layout.addRow("Excitation wavelength", self.excitation_spin)
         layout.addRow("Emission filter", self.emission_filter)
+        layout.addRow("Baseline removal", self.baseline_combo)
 
     def _changed(self) -> None:
         self.wizard_ref.mode_params.update(
             excitation_nm=float(self.excitation_spin.value()),
             emission_filter=self.emission_filter.text(),
+            baseline=self.baseline_combo.currentText().lower(),
         )
         self.session.set_mode_params(**self.wizard_ref.mode_params)
         self.mark_dirty()
@@ -328,16 +479,44 @@ class RamanConfigPage(BaseWizardPage):
         self.shift_offset.setValue(float(wizard.mode_params.get("shift_offset", 0.0)))
         for widget in (self.excitation_spin, self.shift_offset):
             widget.valueChanged.connect(self._changed)
+        self.filter_start = QtWidgets.QDoubleSpinBox()
+        self.filter_end = QtWidgets.QDoubleSpinBox()
+        for spin in (self.filter_start, self.filter_end):
+            spin.setRange(0, 2000)
+            spin.setSuffix(" nm")
+        self.filter_btn = QtWidgets.QPushButton("Add notch/band-stop")
+        self.filter_btn.clicked.connect(self._add_filter)
+        self.filter_list = QtWidgets.QListWidget()
+        self._refresh_filters()
         layout.addRow("Excitation wavelength", self.excitation_spin)
         layout.addRow("Shift offset", self.shift_offset)
+        layout.addRow(QtWidgets.QLabel("Add filter stop band (nm)"))
+        layout.addRow("Start", self.filter_start)
+        layout.addRow("End", self.filter_end)
+        layout.addRow(self.filter_btn)
+        layout.addRow(self.filter_list)
 
     def _changed(self) -> None:
         self.wizard_ref.mode_params.update(
             excitation_nm=float(self.excitation_spin.value()),
             shift_offset=float(self.shift_offset.value()),
+            filter_bands=self.wizard_ref.mode_params.get("filter_bands", []),
         )
         self.session.set_mode_params(**self.wizard_ref.mode_params)
         self.mark_dirty()
+
+    def _add_filter(self) -> None:
+        band = (float(self.filter_start.value()), float(self.filter_end.value()))
+        filters = self.wizard_ref.mode_params.setdefault("filter_bands", [])
+        filters.append(band)
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self._refresh_filters()
+        self.mark_dirty()
+
+    def _refresh_filters(self) -> None:
+        self.filter_list.clear()
+        for start, end in self.wizard_ref.mode_params.get("filter_bands", []):
+            self.filter_list.addItem(f"{min(start, end):.1f}-{max(start, end):.1f} nm")
 
     def isComplete(self) -> bool:  # type: ignore[override]
         return self.excitation_spin.value() > 0
@@ -464,6 +643,14 @@ class ResultsPage(BaseWizardPage):
             return
         x_axis = self.chart.axisX()
         y_axis = self.chart.axisY()
+        if self.wizard_ref.mode == "Raman":
+            if getattr(self, "secondary_axis", None) is None:
+                self.secondary_axis = QtCharts.QCategoryAxis()
+                self.chart.addAxis(self.secondary_axis, QtCore.Qt.AlignTop)
+        else:
+            if getattr(self, "secondary_axis", None):
+                self.chart.removeAxis(self.secondary_axis)
+            self.secondary_axis = None
         if x_axis:
             if self.wizard_ref.mode == "Raman":
                 x_axis.setTitleText("Raman shift (cm⁻¹)")
@@ -491,6 +678,9 @@ class ResultsPage(BaseWizardPage):
             series.attachAxis(x_axis)
         if y_axis:
             series.attachAxis(y_axis)
+        if getattr(self, "secondary_axis", None):
+            series.attachAxis(self.secondary_axis)
+            self._configure_raman_secondary_axis(result[0])
         item = QtWidgets.QListWidgetItem("Current result")
         item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
         item.setCheckState(QtCore.Qt.Checked)
@@ -528,6 +718,21 @@ class ResultsPage(BaseWizardPage):
         self.history_list.addItem(item)
         self.series_for_item[item] = series
 
+    def _configure_raman_secondary_axis(self, shift_axis: np.ndarray) -> None:
+        if not getattr(self, "secondary_axis", None) or self.session.wavelengths is None:
+            return
+        self.secondary_axis.clear()
+        excitation = float(self.wizard_ref.mode_params.get("excitation_nm", 532.0))
+        min_shift = float(np.nanmin(shift_axis))
+        max_shift = float(np.nanmax(shift_axis))
+        ticks = np.linspace(min_shift, max_shift, 5)
+        for tick in ticks:
+            denom = (1e7 / excitation) - tick
+            wl = 1e7 / denom if denom != 0 else float("nan")
+            self.secondary_axis.append(f"{wl:.0f} nm", float(tick))
+        self.secondary_axis.setRange(min_shift, max_shift)
+        self.secondary_axis.setTitleText("Wavelength (nm)")
+
     def _compute_mode_result(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         wl = self.session.wavelengths
         raw = self.session.raw_spectrum
@@ -542,16 +747,36 @@ class ResultsPage(BaseWizardPage):
                 smoothed = processing.subtract_dark(smoothed, dark)
             except Exception:
                 pass
+        baseline_opt = params.get("baseline", "none").lower()
+        if baseline_opt == "median":
+            smoothed = processing.apply_baseline(smoothed, processing.median_baseline)
+        elif baseline_opt.startswith("edge"):
+            smoothed = processing.apply_baseline(smoothed, lambda arr: processing.edge_baseline(arr))
         if self.wizard_ref.mode == "Absorbance":
             if ref is None:
                 return None
             arr = processing.compute_absorbance(smoothed, ref)
-            metrics: Dict[str, float] = {"Max absorbance": float(np.max(arr))}
+            metrics: Dict[str, float] = {"Max absorbance": float(np.nanmax(arr))}
             path = float(params.get("path_length_cm", 1.0))
             conc = float(params.get("concentration_m", 0.0))
             if params.get("compute_ext_coeff") and path > 0 and conc > 0:
-                epsilon = float(np.max(arr) / (path * conc))
+                epsilon = float(np.nanmax(arr) / (path * conc))
                 metrics["Molar absorptivity"] = epsilon
+            roi_metrics = {}
+            for roi in self.session.rois:
+                mask = (wl >= roi.start_nm) & (wl <= roi.end_nm)
+                if np.any(mask):
+                    roi_metrics[f"{roi.label or 'ROI'} avg"] = float(np.nanmean(arr[mask]))
+            metrics.update(roi_metrics)
+            points = params.get("beer_lambert_points", [])
+            if len(points) >= 2:
+                try:
+                    slope, intercept, r2 = processing.beer_lambert_fit([(p[0], p[1]) for p in points])
+                    metrics["Fit slope"] = slope
+                    metrics["Fit intercept"] = intercept
+                    metrics["R²"] = r2
+                except Exception:
+                    pass
             self.wizard_ref.last_metrics = metrics
             return wl, arr
         if self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
@@ -563,9 +788,9 @@ class ResultsPage(BaseWizardPage):
             if params.get("as_percent", True):
                 arr = arr * 100.0
             self.wizard_ref.last_metrics = {
-                "Mean": float(np.mean(arr)),
-                "Peak": float(np.max(arr)),
-                "Min": float(np.min(arr)),
+                "Mean": float(np.nanmean(arr)),
+                "Peak": float(np.nanmax(arr)),
+                "Min": float(np.nanmin(arr)),
             }
             return wl, arr
         if self.wizard_ref.mode == "Relative Irradiance":
@@ -575,26 +800,29 @@ class ResultsPage(BaseWizardPage):
                 float(params.get("integration", 10.0)),
                 response_curve=curve if params.get("apply_response", True) else None,
             )
-            centroid = float(np.average(wl, weights=arr)) if np.sum(arr) > 0 else float("nan")
-            metrics = {"Total irradiance": float(np.trapz(arr, wl)), "Peak": float(np.max(arr))}
+            centroid = float(np.average(wl, weights=arr)) if np.nansum(arr) > 0 else float("nan")
+            metrics = {"Total irradiance": float(np.trapz(arr, wl)), "Peak": float(np.nanmax(arr))}
             if "centroid" in params.get("color_metrics", []):
                 metrics["Centroid nm"] = centroid
+            if "cie" in params.get("color_metrics", []):
+                metrics.update(processing.cie_approx_metrics(wl, arr))
             self.wizard_ref.last_metrics = metrics
             return wl, arr
         if self.wizard_ref.mode == "Fluorescence":
             area = float(np.trapz(smoothed, wl))
             self.wizard_ref.last_metrics = {
                 "Integrated intensity": area,
-                "Peak": float(np.max(smoothed)),
+                "Peak": float(np.nanmax(smoothed)),
             }
             return wl, smoothed
         if self.wizard_ref.mode == "Raman":
             excitation = float(params.get("excitation_nm", 532.0))
             shift = processing.raman_shift_cm(wl, excitation)
             shift = shift - float(params.get("shift_offset", 0.0))
+            smoothed = processing.apply_mask_bands(wl, smoothed, params.get("filter_bands", []))
             self.wizard_ref.last_metrics = {
-                "Max shift": float(np.max(shift)),
-                "Peak intensity": float(np.max(smoothed)),
+                "Max shift": float(np.nanmax(shift)),
+                "Peak intensity": float(np.nanmax(smoothed)),
             }
             return shift, smoothed
         return wl, smoothed
