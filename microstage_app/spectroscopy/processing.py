@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import List, Tuple
+
 import numpy as np
 from scipy.signal import convolve
 
@@ -90,3 +92,62 @@ def apply_baseline(signal: np.ndarray, baseline_fn=None) -> np.ndarray:
     if baseline.shape != arr.shape:
         raise ValueError("baseline shape must match signal")
     return arr - baseline
+
+
+def median_baseline(signal: np.ndarray) -> np.ndarray:
+    arr = np.asarray(signal, dtype=float)
+    return np.median(arr) * np.ones_like(arr)
+
+
+def edge_baseline(signal: np.ndarray, fraction: float = 0.1) -> np.ndarray:
+    arr = np.asarray(signal, dtype=float)
+    n = len(arr)
+    if n == 0:
+        return arr
+    count = max(1, int(n * fraction))
+    baseline_level = float(np.mean(np.concatenate([arr[:count], arr[-count:]])))
+    return baseline_level * np.ones_like(arr)
+
+
+def apply_mask_bands(
+    x_axis: np.ndarray, signal: np.ndarray, bands: List[Tuple[float, float]]
+) -> np.ndarray:
+    if not bands:
+        return signal
+    arr = np.asarray(signal, dtype=float).copy()
+    x_arr = np.asarray(x_axis, dtype=float)
+    for start, end in bands:
+        mask = (x_arr >= min(start, end)) & (x_arr <= max(start, end))
+        arr[mask] = np.nan
+    return arr
+
+
+def beer_lambert_fit(points: List[Tuple[float, float]]) -> Tuple[float, float, float]:
+    if len(points) < 2:
+        raise ValueError("At least two calibration points are required")
+    conc = np.asarray([p[0] for p in points], dtype=float)
+    absorb = np.asarray([p[1] for p in points], dtype=float)
+    coeffs = np.polyfit(conc, absorb, 1)
+    fit = np.poly1d(coeffs)
+    residuals = absorb - fit(conc)
+    ss_res = float(np.sum(residuals**2))
+    ss_tot = float(np.sum((absorb - np.mean(absorb)) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return float(coeffs[0]), float(coeffs[1]), r2
+
+
+def cie_approx_metrics(wavelengths: np.ndarray, spectrum: np.ndarray) -> dict:
+    wl = np.asarray(wavelengths, dtype=float)
+    arr = np.asarray(spectrum, dtype=float)
+    mask = (wl >= 380) & (wl <= 780)
+    if not np.any(mask):
+        return {}
+    wl = wl[mask]
+    arr = arr[mask]
+    if np.all(arr <= 0):
+        return {}
+    normalized = arr / np.max(arr)
+    centroid = float(np.average(wl, weights=normalized))
+    weighted_mean = float(np.trapz(wl * normalized, wl) / max(np.trapz(normalized, wl), 1e-12))
+    spread = float(np.sqrt(np.trapz(((wl - weighted_mean) ** 2) * normalized, wl) / max(np.trapz(normalized, wl), 1e-12)))
+    return {"Centroid nm": centroid, "Dominant nm": weighted_mean, "Spectral spread": spread}
