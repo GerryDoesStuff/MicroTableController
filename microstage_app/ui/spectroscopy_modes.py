@@ -126,10 +126,24 @@ class CapturePage(BaseWizardPage):
         self.btn_capture = QtWidgets.QPushButton("Capture with current settings")
         self.btn_capture.clicked.connect(self._capture)
         layout.addWidget(self.info)
+        if wizard.preset_names:
+            preset_row = QtWidgets.QHBoxLayout()
+            preset_row.addWidget(QtWidgets.QLabel("Illumination preset:"))
+            self.preset_combo = QtWidgets.QComboBox()
+            self.preset_combo.addItems(wizard.preset_names)
+            current = wizard.get_step_preset(self.capture_key)
+            if current:
+                self.preset_combo.setCurrentText(current)
+            self.preset_combo.currentTextChanged.connect(self._preset_changed)
+            preset_row.addWidget(self.preset_combo, 1)
+            layout.addLayout(preset_row)
+        else:
+            self.preset_combo = None
         layout.addWidget(self.btn_capture)
         layout.addStretch(1)
 
     def _capture(self) -> None:
+        self.wizard_ref.apply_preset_for_step(self.capture_key)
         params = self.wizard_ref.mode_params
         spectrum = self.wizard_ref.capture_callback(
             self.capture_key,
@@ -154,6 +168,9 @@ class CapturePage(BaseWizardPage):
             self.info.setText(f"Capture failed: {exc}")
         self.wizard_ref._update_finish_state()
         self.completeChanged.emit()
+
+    def _preset_changed(self, preset: str) -> None:
+        self.wizard_ref.set_step_preset(self.capture_key, preset)
 
     def isComplete(self) -> bool:  # type: ignore[override]
         return bool(self.wizard_ref.state.get(f"{self.capture_key}_captured", False))
@@ -388,6 +405,10 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         mode: str,
         session: SpectroscopySession,
         capture_callback: CaptureCallable,
+        preset_names: Optional[List[str]] = None,
+        apply_preset: Optional[Callable[[str], None]] = None,
+        step_presets: Optional[Dict[str, str]] = None,
+        on_step_preset_changed: Optional[Callable[[str, str], None]] = None,
         initial_acquisition: Optional[Dict[str, float]] = None,
         parent: Optional[QtWidgets.QWidget] = None,
     ) -> None:
@@ -396,6 +417,14 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.session = session
         self.capture_callback = capture_callback
         self.initial_acquisition = initial_acquisition or {}
+        self.preset_names = preset_names or []
+        self.apply_preset_cb = apply_preset
+        self.step_presets = step_presets or {}
+        self.on_step_preset_changed = on_step_preset_changed
+        if self.preset_names:
+            fallback = self.preset_names[0]
+            for key in ("dark", "reference", "raw"):
+                self.step_presets.setdefault(key, fallback)
         self.mode_params: Dict[str, object] = {"mode": mode}
         self.state: Dict[str, bool] = {
             "dark_captured": session.dark_spectrum is not None,
@@ -435,6 +464,18 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
     def invalidate_captures(self) -> None:
         self.state["raw_captured"] = False
         self.state["reference_captured"] = False
+
+    def apply_preset_for_step(self, step: str) -> None:
+        if self.apply_preset_cb and self.step_presets.get(step):
+            self.apply_preset_cb(step)
+
+    def get_step_preset(self, step: str) -> str:
+        return self.step_presets.get(step, "")
+
+    def set_step_preset(self, step: str, preset: str) -> None:
+        self.step_presets[step] = preset
+        if self.on_step_preset_changed:
+            self.on_step_preset_changed(step, preset)
 
     def _update_finish_state(self) -> None:
         finish_enabled = all(
