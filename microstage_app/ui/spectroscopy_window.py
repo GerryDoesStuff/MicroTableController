@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import time
 
@@ -197,6 +198,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._time_series_active = False
         self._time_series_records: List[tuple[float, np.ndarray, Dict[str, object]]] = []
         self._time_series_start = 0.0
+        self._time_series_sample_count = 0
+        self._ts_traces: Dict[str, QtCharts.QLineSeries] = {}
+        self._time_series_timer = QtCore.QTimer(self)
+        self._time_series_timer.setSingleShot(True)
+        self._time_series_timer.timeout.connect(self._trigger_time_series_capture)
         self._recent_colors = [
             QtGui.QColor("#1f77b4"),
             QtGui.QColor("#ff7f0e"),
@@ -322,6 +328,21 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         info.addWidget(self.roi_label)
         info.addStretch(1)
         chart_layout.addLayout(info)
+        ts_group = QtWidgets.QGroupBox("Time series views")
+        ts_layout = QtWidgets.QVBoxLayout(ts_group)
+        self._ts_chart = QtCharts.QChart()
+        self._ts_chart.legend().setVisible(True)
+        self._ts_chart.createDefaultAxes()
+        self._ts_chart.axisX().setTitleText("Time (s)")
+        self._ts_chart.axisY().setTitleText("Intensity (a.u.)")
+        self._ts_chart_view = QtCharts.QChartView(self._ts_chart)
+        self._ts_chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
+        ts_layout.addWidget(self._ts_chart_view, 1)
+        self.spectrogram_label = QtWidgets.QLabel("Spectrogram hidden")
+        self.spectrogram_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.spectrogram_label.setMinimumHeight(120)
+        ts_layout.addWidget(self.spectrogram_label)
+        chart_layout.addWidget(ts_group)
         splitter.addWidget(chart_container)
 
         # control panel
@@ -396,17 +417,42 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_save_selected = QtWidgets.QPushButton("Save selected capture")
         self.btn_save_selected.setToolTip("Export the selected capture to CSV in the data folder")
         data_layout.addRow(self.btn_save_selected)
+        self.time_series_interval = QtWidgets.QDoubleSpinBox()
+        self.time_series_interval.setRange(0.05, 3600.0)
+        self.time_series_interval.setValue(1.0)
+        self.time_series_interval.setSuffix(" s")
+        self.time_series_interval.setToolTip("Interval between captures when recording a time series")
+        data_layout.addRow("Interval", self.time_series_interval)
+        self.time_series_duration = QtWidgets.QDoubleSpinBox()
+        self.time_series_duration.setRange(0.0, 86400.0)
+        self.time_series_duration.setValue(30.0)
+        self.time_series_duration.setSuffix(" s (0 = no limit)")
+        self.time_series_duration.setToolTip("Maximum duration of a time series recording; 0 disables duration stop")
+        data_layout.addRow("Duration limit", self.time_series_duration)
+        self.time_series_samples = QtWidgets.QSpinBox()
+        self.time_series_samples.setRange(0, 1000000)
+        self.time_series_samples.setValue(0)
+        self.time_series_samples.setToolTip("Maximum number of captures to record; 0 disables sample limit")
+        data_layout.addRow("Max samples", self.time_series_samples)
         self.btn_start_timeseries = QtWidgets.QPushButton("Start time series")
         self.btn_stop_timeseries = QtWidgets.QPushButton("Stop time series")
         self.btn_stop_timeseries.setEnabled(False)
         self.chk_plot_timeseries = QtWidgets.QCheckBox("Save intensity vs time plot")
         self.chk_plot_spectrogram = QtWidgets.QCheckBox("Save spectrogram")
+        self.chk_show_timeseries = QtWidgets.QCheckBox("Show intensity vs time")
+        self.chk_show_timeseries.setChecked(True)
+        self.chk_show_spectrogram = QtWidgets.QCheckBox("Show spectrogram")
         ts_row = QtWidgets.QHBoxLayout()
         ts_row.addWidget(self.btn_start_timeseries)
         ts_row.addWidget(self.btn_stop_timeseries)
         data_layout.addRow("Time series", ts_row)
+        self.timeseries_wavelengths = QtWidgets.QLineEdit("450, 550, 650")
+        self.timeseries_wavelengths.setPlaceholderText("Comma-separated wavelengths to track")
+        data_layout.addRow("Tracked wavelengths", self.timeseries_wavelengths)
         data_layout.addRow(self.chk_plot_timeseries)
         data_layout.addRow(self.chk_plot_spectrogram)
+        data_layout.addRow(self.chk_show_timeseries)
+        data_layout.addRow(self.chk_show_spectrogram)
         ctrl.addWidget(data_box)
 
         shelly_box = QtWidgets.QGroupBox("Shelly controls")
@@ -550,6 +596,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_save_selected.clicked.connect(self._save_selected_capture)
         self.btn_start_timeseries.clicked.connect(self._start_time_series)
         self.btn_stop_timeseries.clicked.connect(self._stop_time_series)
+        self.chk_show_timeseries.toggled.connect(self._update_time_series_views)
+        self.chk_show_spectrogram.toggled.connect(self._update_time_series_views)
+        self.timeseries_wavelengths.editingFinished.connect(self._update_time_series_views)
         self.data_dir_edit.editingFinished.connect(self._persist_data_dir)
 
         self.btn_shelly_connect.clicked.connect(self._connect_dimmer_async)
@@ -1227,6 +1276,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             self._stop_continuous()
+            if self._time_series_active:
+                self._stop_time_series()
             return
         self._update_session_context()
         job = CaptureJob(
@@ -1315,6 +1366,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         self._capture_in_flight = False
         self.status_message.setText(f"Capture failed: {message}")
+        if self._time_series_active:
+            self._stop_time_series()
         self._stop_continuous()
 
     def _capture_dark(self) -> None:
@@ -1364,21 +1417,31 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         entry_meta.setdefault("dark_applied", self.session.dark_valid)
         entry_meta.setdefault("reference_applied", self.session.reference_valid)
         self._time_series_records.append((rel_ts, np.asarray(spectrum, dtype=float), entry_meta))
+        self._time_series_sample_count = len(self._time_series_records)
+        self._update_time_series_views()
+        self._check_time_series_limits(acquisition.timestamp)
 
     def _start_time_series(self) -> None:
         if self.session.wavelengths is None:
             self.status_message.setText("Set wavelengths before recording time series")
             return
         self._time_series_records.clear()
+        self._clear_time_series_views()
         self._time_series_start = time.time()
         self._time_series_active = True
+        self._time_series_sample_count = 0
+        self._continuous = False
+        self.capture_timer.stop()
+        self._new_capture_token()
         self.status_message.setText("Time series recording started")
+        self._trigger_time_series_capture()
         self._refresh_validity_state()
 
     def _stop_time_series(self) -> None:
         if not self._time_series_active:
             return
         self._time_series_active = False
+        self._time_series_timer.stop()
         self.status_message.setText("Time series recording stopped")
         self._persist_time_series()
         self._refresh_validity_state()
@@ -1404,6 +1467,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             "reference_applied": self.session.reference_valid,
             "start_timestamp": start_ts,
             "samples": len(self._time_series_records),
+            "interval_s": float(self.time_series_interval.value()),
+            "duration_limit_s": float(self.time_series_duration.value()),
+            "max_samples": int(self.time_series_samples.value()),
+            "elapsed_s": float(times.max()) if times.size else 0.0,
+            "tracked_wavelengths": self._selected_wavelengths(wavelengths),
         }
         base = os.path.join(directory, f"time_series_{int(start_ts)}")
         try:
@@ -1440,6 +1508,154 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(f"Saved time series to {base}.[npz|h5]")
         except Exception as exc:  # pragma: no cover - runtime safety
             self.status_message.setText(f"Failed to save time series: {exc}")
+
+    def _schedule_next_time_series_tick(self) -> None:
+        if not self._time_series_active:
+            return
+        interval_ms = int(max(50.0, float(self.time_series_interval.value()) * 1000.0))
+        self._time_series_timer.start(interval_ms)
+
+    def _trigger_time_series_capture(self) -> None:
+        if not self._time_series_active:
+            return
+        if self._capture_in_flight:
+            self._schedule_next_time_series_tick()
+            return
+        self._schedule_capture("measurement")
+
+    def _selected_wavelengths(self, axis: np.ndarray) -> List[float]:
+        entered = self.timeseries_wavelengths.text()
+        values: List[float] = []
+        for token in entered.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                values.append(float(token))
+            except ValueError:
+                continue
+        if values:
+            return values
+        if axis.size >= 3:
+            return [float(axis[0]), float(axis[len(axis) // 2]), float(axis[-1])]
+        return [float(x) for x in axis[:1]]
+
+    def _clear_time_series_views(self) -> None:
+        for series in list(self._ts_traces.values()):
+            self._ts_chart.removeSeries(series)
+        self._ts_traces.clear()
+        self.spectrogram_label.setPixmap(QtGui.QPixmap())
+        self.spectrogram_label.setText("Spectrogram hidden")
+
+    def _update_time_series_views(self) -> None:
+        if not self._time_series_records:
+            self._clear_time_series_views()
+            if self._time_series_active:
+                self.spectrogram_label.setText("Recording…")
+            return
+        wavelengths = self.session.wavelengths
+        if wavelengths is None:
+            return
+        times = np.array([t for t, _, _ in self._time_series_records], dtype=float)
+        spectra = np.vstack([np.asarray(s, dtype=float) for _, s, _ in self._time_series_records])
+
+        if self.chk_show_timeseries.isChecked():
+            desired = self._selected_wavelengths(wavelengths)
+            keep_keys = set()
+            for wl in desired:
+                key = f"{wl:.2f} nm"
+                keep_keys.add(key)
+                if key not in self._ts_traces:
+                    series = QtCharts.QLineSeries()
+                    series.setName(key)
+                    self._ts_chart.addSeries(series)
+                    axis_x = self._ts_chart.axisX()
+                    axis_y = self._ts_chart.axisY()
+                    if axis_x is None or axis_y is None:
+                        self._ts_chart.createDefaultAxes()
+                        axis_x = self._ts_chart.axisX()
+                        axis_y = self._ts_chart.axisY()
+                    if axis_x:
+                        series.attachAxis(axis_x)
+                    if axis_y:
+                        series.attachAxis(axis_y)
+                    self._ts_traces[key] = series
+                intensities = [float(np.interp(wl, wavelengths, row)) for row in spectra]
+                points = [QtCore.QPointF(t, i) for t, i in zip(times, intensities)]
+                self._ts_traces[key].replace(points)
+            for key in list(self._ts_traces.keys()):
+                if key not in keep_keys:
+                    series = self._ts_traces.pop(key)
+                    self._ts_chart.removeSeries(series)
+            axis_x = self._ts_chart.axisX()
+            axis_y = self._ts_chart.axisY()
+            if axis_x:
+                axis_x.setRange(float(times.min()), float(times.max()))
+            if axis_y:
+                ymin = float(np.nanmin(spectra))
+                ymax = float(np.nanmax(spectra))
+                if ymin == ymax:
+                    ymax = ymin + 1.0
+                axis_y.setRange(ymin, ymax)
+        else:
+            self._clear_time_series_views()
+
+        if self.chk_show_spectrogram.isChecked():
+            pixmap = self._render_spectrogram(times, wavelengths, spectra)
+            if pixmap is not None:
+                self.spectrogram_label.setPixmap(pixmap)
+                self.spectrogram_label.setText("")
+            else:
+                self.spectrogram_label.setText("Unable to render spectrogram")
+        else:
+            self.spectrogram_label.setPixmap(QtGui.QPixmap())
+            self.spectrogram_label.setText("Spectrogram hidden")
+
+    def _render_spectrogram(
+        self, times: np.ndarray, wavelengths: np.ndarray, spectra: np.ndarray
+    ) -> Optional[QtGui.QPixmap]:
+        if times.size == 0 or wavelengths.size == 0 or spectra.size == 0:
+            return None
+        fig, ax = plt.subplots()
+        try:
+            t_min, t_max = float(times.min()), float(times.max())
+            if t_max <= t_min:
+                t_max = t_min + 1e-6
+            w_min, w_max = float(wavelengths.min()), float(wavelengths.max())
+            if w_max <= w_min:
+                w_max = w_min + 1e-6
+            im = ax.imshow(
+                spectra.T,
+                aspect="auto",
+                origin="lower",
+                extent=[t_min, t_max, w_min, w_max],
+            )
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Wavelength (nm)")
+            ax.set_title("Spectrogram")
+            fig.colorbar(im, ax=ax, label="Intensity (a.u.)")
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+            buf.seek(0)
+            image = QtGui.QImage.fromData(buf.getvalue(), "PNG")
+            return QtGui.QPixmap.fromImage(image)
+        except Exception:
+            return None
+        finally:
+            plt.close(fig)
+
+    def _check_time_series_limits(self, timestamp: float) -> None:
+        if not self._time_series_active:
+            return
+        duration_limit = float(self.time_series_duration.value())
+        max_samples = int(self.time_series_samples.value())
+        elapsed = timestamp - self._time_series_start
+        if (duration_limit > 0 and elapsed >= duration_limit) or (
+            max_samples > 0 and self._time_series_sample_count >= max_samples
+        ):
+            self._stop_time_series()
+        else:
+            self._schedule_next_time_series_tick()
 
     # ------------------------------------------------------------------
     def _plot_spectrum(self, key: str, data: np.ndarray, color: QtGui.QColor) -> None:
