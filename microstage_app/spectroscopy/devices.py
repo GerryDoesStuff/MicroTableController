@@ -57,7 +57,7 @@ class _SpectrometerProvider(Protocol):
 
 class SpectrometerManager(QtCore.QObject):
     devices_changed = QtCore.Signal(list)
-    device_connected = QtCore.Signal(object)
+    device_connected = QtCore.Signal(object, object)
 
     def __init__(self, providers: Optional[Sequence[_SpectrometerProvider]] = None):
         super().__init__()
@@ -67,7 +67,9 @@ class SpectrometerManager(QtCore.QObject):
             else [OceanOpticsSpectrometerProvider(), MockSpectrometerProvider()]
         )
         self._devices: List[SpectrometerDescriptor] = []
-        self._active: Optional[SpectrometerDevice] = None
+        self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
+        self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
+        self._last_active: Optional[SpectrometerDescriptor] = None
 
     @property
     def devices(self) -> List[SpectrometerDescriptor]:
@@ -85,30 +87,63 @@ class SpectrometerManager(QtCore.QObject):
         return list(devices)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> SpectrometerDevice:
-        if self._active is not None:
-            self.disconnect()
+        if descriptor in self._active:
+            device = self._active[descriptor]
+            if not device.is_connected():
+                device.connect()
+            self._last_active = descriptor
+            self.device_connected.emit(descriptor, device)
+            return device
         for provider in self._providers:
             for candidate in provider.list_devices():
                 if candidate == descriptor:
                     device = provider.connect(descriptor)
                     device.connect()
-                    self._active = device
-                    self.device_connected.emit(device)
+                    self._active[descriptor] = device
+                    self._locks.setdefault(descriptor, QtCore.QMutex())
+                    self._last_active = descriptor
+                    self.device_connected.emit(descriptor, device)
                     return device
         raise RuntimeError("Device not found: %s" % descriptor.label())
 
-    def disconnect(self) -> None:
-        if self._active is None:
-            return
-        try:
-            self._active.disconnect()
-        finally:
-            self._active = None
-            self.device_connected.emit(None)
+    def disconnect(self, descriptor: Optional[SpectrometerDescriptor] = None) -> None:
+        targets = [descriptor] if descriptor else list(self._active.keys())
+        for desc in targets:
+            device = self._active.pop(desc, None)
+            self._locks.pop(desc, None)
+            if device is None:
+                self.device_connected.emit(desc, None)
+                continue
+            try:
+                device.disconnect()
+            finally:
+                self.device_connected.emit(desc, None)
+        if descriptor is None:
+            self._last_active = None
+        elif self._last_active == descriptor:
+            self._last_active = next(iter(self._active), None)
+
+    def get_active(self, descriptor: Optional[SpectrometerDescriptor] = None) -> Optional[SpectrometerDevice]:
+        if descriptor is not None:
+            return self._active.get(descriptor)
+        if self._last_active is not None:
+            return self._active.get(self._last_active)
+        return next(iter(self._active.values()), None) if self._active else None
 
     @property
     def active(self) -> Optional[SpectrometerDevice]:
-        return self._active
+        return self.get_active()
+
+    @property
+    def active_descriptor(self) -> Optional[SpectrometerDescriptor]:
+        return self._last_active
+
+    def acquisition_lock(self, descriptor: SpectrometerDescriptor) -> QtCore.QMutex:
+        lock = self._locks.get(descriptor)
+        if lock is None:
+            lock = QtCore.QMutex()
+            self._locks[descriptor] = lock
+        return lock
 
 
 class OceanOpticsSpectrometer:
@@ -146,9 +181,29 @@ class OceanOpticsSpectrometer:
         backend = self._get_backend()
         if backend is None:
             raise RuntimeError("seabreeze backend unavailable for OceanOptics spectrometers")
-        self._device = backend.Spectrometer.from_first_available()
+        if self._device is not None:
+            self.disconnect()
+        target = self._find_matching_device()
+        if target is None:
+            raise RuntimeError(f"Spectrometer not found: {self.descriptor.label()}")
+        self._device = backend.Spectrometer(target)
         self._connected = True
         self._device.integration_time_micros(int(self._integration_time_ms * 1000))
+
+    def _find_matching_device(self):
+        backend = self._get_backend()
+        if backend is None:
+            return None
+        desired_serial = str(self.descriptor.serial_number or "")
+        desired_path = str(self.descriptor.path or "")
+        for dev in backend.list_devices():
+            dev_serial = str(getattr(dev, "serial_number", ""))
+            dev_path = str(getattr(dev, "path", getattr(dev, "device_node", "")))
+            if desired_serial and dev_serial == desired_serial:
+                return dev
+            if desired_path and dev_path == desired_path:
+                return dev
+        return None
 
     def disconnect(self) -> None:
         if self._device is not None:
@@ -163,10 +218,7 @@ class OceanOpticsSpectrometer:
 
     def get_wavelengths(self) -> np.ndarray:
         if self._device is None:
-            backend = self._get_backend()
-            if backend is None:
-                raise RuntimeError("seabreeze backend unavailable for OceanOptics spectrometers")
-            self._device = backend.Spectrometer.from_first_available()
+            self.connect()
         return np.asarray(self._device.wavelengths(), dtype=float)
 
     def capture(self) -> np.ndarray:
