@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import time
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
@@ -22,6 +24,17 @@ class SpectrumTrace:
     label: str
     color: QtGui.QColor
     visible: bool = True
+
+
+@dataclass
+class CapturedSpectrum:
+    key: str
+    label: str
+    timestamp: float
+    data: np.ndarray
+    mode: str
+    metadata: Dict[str, object]
+    kind: str = "measurement"
 
 
 class SpectrumChartView(QtCharts.QChartView):
@@ -118,9 +131,21 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager = manager
         self.profiles = profiles
         self.session = SpectroscopySession()
-        self.current_mode = "Absorbance"
+        self.current_mode = str(self.profiles.get("spectroscopy.last_mode", "Absorbance", expected_type=str))
+        self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
         self._compact = bool(self.profiles.get("spectroscopy.compact", False, expected_type=bool))
         self._last_capture_ts = 0.0
+        self._data_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
+        self._default_device = str(self.profiles.get("spectroscopy.default_device", "", expected_type=str))
+        self._recent_captures: List[CapturedSpectrum] = []
+        self._recent_colors = [
+            QtGui.QColor("#1f77b4"),
+            QtGui.QColor("#ff7f0e"),
+            QtGui.QColor("#2ca02c"),
+            QtGui.QColor("#d62728"),
+            QtGui.QColor("#9467bd"),
+            QtGui.QColor("#8c564b"),
+        ]
 
         # Shelly dimmer state
         self.dimmer: Optional[ShellyDimmer] = None
@@ -151,6 +176,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._restore_geometry()
         self._connect_signals()
 
+        if self.mode_params:
+            self.session.set_mode_params(**self.mode_params)
+
         QtCore.QTimer.singleShot(0, self._refresh_devices)
 
     # ------------------------------------------------------------------
@@ -162,18 +190,25 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         # top bar
         top = QtWidgets.QHBoxLayout()
         self.device_combo = QtWidgets.QComboBox()
+        self.device_combo.setToolTip("Select a spectrometer device to connect")
         self.btn_refresh = QtWidgets.QPushButton("Refresh")
+        self.btn_refresh.setToolTip("Scan for connected spectrometers")
         self.btn_connect = QtWidgets.QPushButton("Connect")
+        self.btn_connect.setToolTip("Connect to the selected spectrometer")
         self.btn_disconnect = QtWidgets.QPushButton("Disconnect")
+        self.btn_disconnect.setToolTip("Disconnect the active spectrometer")
         self.status_led = QtWidgets.QLabel("●")
         self.status_led.setStyleSheet("color: red;")
         self.status_label = QtWidgets.QLabel("No spectrometer")
-        self.mode_label = QtWidgets.QLabel("Mode: Absorbance")
+        self.status_label.setToolTip("Connection status")
+        self.mode_label = QtWidgets.QLabel(f"Mode: {self.current_mode}")
         self.btn_modes = QtWidgets.QPushButton("Modes…")
+        self.btn_modes.setToolTip("Launch mode wizard and presets")
         self.compact_toggle = QtWidgets.QToolButton()
         self.compact_toggle.setText("Compact")
         self.compact_toggle.setCheckable(True)
         self.compact_toggle.setChecked(self._compact)
+        self.compact_toggle.setToolTip("Toggle compact layout (hides control panel)")
         top.addWidget(QtWidgets.QLabel("Spectrometer:"))
         top.addWidget(self.device_combo, 1)
         top.addWidget(self.btn_refresh)
@@ -189,12 +224,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self.chart_toolbar = QtWidgets.QToolBar()
         self.act_zoom_in = self.chart_toolbar.addAction("Zoom In")
+        self.act_zoom_in.setToolTip("Zoom in on the spectrum")
         self.act_zoom_out = self.chart_toolbar.addAction("Zoom Out")
+        self.act_zoom_out.setToolTip("Zoom out from the spectrum")
         self.act_reset = self.chart_toolbar.addAction("Reset")
+        self.act_reset.setToolTip("Reset zoom and pan")
         self.act_export = self.chart_toolbar.addAction("Save Plot…")
+        self.act_export.setToolTip("Export the current plot as an image")
         layout.addWidget(self.chart_toolbar)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.splitter = splitter
         layout.addWidget(splitter, 1)
 
         chart_container = QtWidgets.QWidget()
@@ -203,6 +243,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         info = QtWidgets.QHBoxLayout()
         self.cursor_label = QtWidgets.QLabel("Cursor: —")
         self.roi_label = QtWidgets.QLabel("ROI: —")
+        self.cursor_label.setToolTip("Hover over the plot to inspect values")
+        self.roi_label.setToolTip("Drag with Shift to set a region of interest")
         info.addWidget(self.cursor_label)
         info.addWidget(self.roi_label)
         info.addStretch(1)
@@ -221,6 +263,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.integration_spin.setRange(1.0, 1000.0)
         self.integration_spin.setValue(10.0)
         self.integration_spin.setSuffix(" ms")
+        self.integration_spin.setToolTip("Integration time per capture (ms)")
+        self.integration_slider.setToolTip("Integration time per capture (ms)")
         acq.addWidget(QtWidgets.QLabel("Integration:"), row, 0)
         acq.addWidget(self.integration_slider, row, 1)
         acq.addWidget(self.integration_spin, row, 2)
@@ -228,17 +272,21 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.averages_spin = QtWidgets.QSpinBox()
         self.averages_spin.setRange(1, 100)
         self.averages_spin.setValue(1)
+        self.averages_spin.setToolTip("Number of captures to average")
         acq.addWidget(QtWidgets.QLabel("Averages:"), row, 0)
         acq.addWidget(self.averages_spin, row, 1, 1, 2)
         row += 1
         self.smoothing_spin = QtWidgets.QSpinBox()
         self.smoothing_spin.setRange(1, 101)
         self.smoothing_spin.setValue(5)
+        self.smoothing_spin.setToolTip("Boxcar smoothing window (odd values recommended)")
         acq.addWidget(QtWidgets.QLabel("Smoothing (boxcar):"), row, 0)
         acq.addWidget(self.smoothing_spin, row, 1, 1, 2)
         row += 1
         self.dark_chk = QtWidgets.QCheckBox("Subtract dark")
         self.btn_capture_dark = QtWidgets.QPushButton("Capture dark")
+        self.dark_chk.setToolTip("Subtract the stored dark spectrum from captures")
+        self.btn_capture_dark.setToolTip("Capture a new dark spectrum")
         acq.addWidget(self.dark_chk, row, 0, 1, 2)
         acq.addWidget(self.btn_capture_dark, row, 2)
         row += 1
@@ -246,6 +294,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_start = QtWidgets.QPushButton("Start")
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setEnabled(False)
+        self.btn_single.setToolTip("Capture one spectrum and add to recents")
+        self.btn_start.setToolTip("Start continuous capture")
+        self.btn_stop.setToolTip("Stop continuous capture")
         acq.addWidget(self.btn_single, row, 0, 1, 3)
         row += 1
         acq.addWidget(self.btn_start, row, 0, 1, 2)
@@ -256,6 +307,23 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         mode_layout = QtWidgets.QVBoxLayout(mode_box)
         mode_layout.addWidget(self.btn_modes)
         ctrl.addWidget(mode_box)
+
+        data_box = QtWidgets.QGroupBox("Data")
+        data_layout = QtWidgets.QFormLayout(data_box)
+        self.data_dir_edit = QtWidgets.QLineEdit(self._data_dir)
+        self.data_dir_edit.setPlaceholderText("Select a folder for saved spectra")
+        browse = QtWidgets.QToolButton()
+        browse.setText("…")
+        browse.setToolTip("Choose a folder to save capture exports")
+        browse.clicked.connect(self._choose_data_dir)
+        dir_row = QtWidgets.QHBoxLayout()
+        dir_row.addWidget(self.data_dir_edit, 1)
+        dir_row.addWidget(browse)
+        data_layout.addRow("Data folder", dir_row)
+        self.btn_save_selected = QtWidgets.QPushButton("Save selected capture")
+        self.btn_save_selected.setToolTip("Export the selected capture to CSV in the data folder")
+        data_layout.addRow(self.btn_save_selected)
+        ctrl.addWidget(data_box)
 
         shelly_box = QtWidgets.QGroupBox("Shelly controls")
         shelly_layout = QtWidgets.QVBoxLayout(shelly_box)
@@ -320,15 +388,51 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         footer = QtWidgets.QVBoxLayout()
         self.status_message = QtWidgets.QLabel("Idle")
         self.fps_label = QtWidgets.QLabel("—")
+        self.saturation_label = QtWidgets.QLabel("Peak: —")
         footer.addWidget(self.status_message)
         footer.addWidget(self.fps_label)
+        footer.addWidget(self.saturation_label)
         footer.addStretch(1)
         ctrl.addLayout(footer)
 
         splitter.addWidget(self.controls_panel)
+        self.recent_panel = self._build_recent_panel()
+        splitter.addWidget(self.recent_panel)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 1)
         self.controls_panel.setVisible(not self._compact)
+
+    def _build_recent_panel(self) -> QtWidgets.QWidget:
+        panel = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(panel)
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(QtWidgets.QLabel("Recent captures"))
+        self.btn_clear_recent = QtWidgets.QToolButton()
+        self.btn_clear_recent.setText("Clear")
+        self.btn_clear_recent.setToolTip("Clear the recent capture list")
+        header.addWidget(self.btn_clear_recent)
+        header.addStretch(1)
+        layout.addLayout(header)
+
+        self.recent_list = QtWidgets.QListWidget()
+        self.recent_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.recent_list.setAlternatingRowColors(True)
+        layout.addWidget(self.recent_list, 1)
+
+        self.recent_meta = QtWidgets.QLabel("No captures yet")
+        self.recent_meta.setWordWrap(True)
+        layout.addWidget(self.recent_meta)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.btn_use_reference = QtWidgets.QPushButton("Use as reference")
+        self.btn_use_reference.setToolTip("Apply the selected capture as reference")
+        self.btn_use_dark = QtWidgets.QPushButton("Use as dark")
+        self.btn_use_dark.setToolTip("Apply the selected capture as dark")
+        btn_row.addWidget(self.btn_use_reference)
+        btn_row.addWidget(self.btn_use_dark)
+        layout.addLayout(btn_row)
+        return panel
 
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
@@ -341,12 +445,23 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self.integration_slider.valueChanged.connect(self.integration_spin.setValue)
         self.integration_spin.valueChanged.connect(self.integration_slider.setValue)
+        self.integration_spin.valueChanged.connect(lambda _=None: self._persist_acquisition_settings())
+        self.averages_spin.valueChanged.connect(lambda _=None: self._persist_acquisition_settings())
+        self.smoothing_spin.valueChanged.connect(lambda _=None: self._persist_acquisition_settings())
         self.btn_single.clicked.connect(self._capture_once)
         self.btn_start.clicked.connect(self._start_continuous)
         self.btn_stop.clicked.connect(self._stop_continuous)
         self.btn_capture_dark.clicked.connect(self._capture_dark)
+        self.dark_chk.toggled.connect(lambda _=None: self._persist_acquisition_settings())
         self.compact_toggle.toggled.connect(self._toggle_compact)
         self.btn_modes.clicked.connect(self._open_modes_dialog)
+        self.btn_clear_recent.clicked.connect(self._clear_recent)
+        self.recent_list.itemSelectionChanged.connect(self._on_recent_selected)
+        self.recent_list.itemChanged.connect(self._on_recent_item_changed)
+        self.btn_use_reference.clicked.connect(lambda: self._apply_capture_as("reference"))
+        self.btn_use_dark.clicked.connect(lambda: self._apply_capture_as("dark"))
+        self.btn_save_selected.clicked.connect(self._save_selected_capture)
+        self.data_dir_edit.editingFinished.connect(self._persist_data_dir)
 
         self.btn_shelly_connect.clicked.connect(self._connect_dimmer_async)
         self.btn_shelly_disconnect.clicked.connect(self._disconnect_dimmer)
@@ -385,6 +500,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 self.restoreState(bytes.fromhex(state))
             except Exception:
                 pass
+        splitter_state = self.profiles.get("spectroscopy.splitter_state", "", expected_type=str)
+        if splitter_state:
+            try:
+                self.splitter.restoreState(bytes.fromhex(splitter_state))
+            except Exception:
+                pass
+        # acquisition defaults
+        self.integration_spin.setValue(float(self.profiles.get("spectroscopy.integration_ms", self.integration_spin.value(), expected_type=float)))
+        self.averages_spin.setValue(int(self.profiles.get("spectroscopy.averages", self.averages_spin.value(), expected_type=int)))
+        self.smoothing_spin.setValue(int(self.profiles.get("spectroscopy.smoothing", self.smoothing_spin.value(), expected_type=int)))
+        self.dark_chk.setChecked(bool(self.profiles.get("spectroscopy.subtract_dark", self.dark_chk.isChecked(), expected_type=bool)))
+        self.integration_slider.setValue(int(self.integration_spin.value()))
+        self.mode_label.setText(f"Mode: {self.current_mode}")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
         self.capture_timer.stop()
@@ -393,6 +521,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.profiles.set("spectroscopy.compact", self.compact_toggle.isChecked())
             self.profiles.set("spectroscopy.geometry", self.saveGeometry().hex())
             self.profiles.set("spectroscopy.window_state", self.saveState().hex())
+            self.profiles.set("spectroscopy.splitter_state", self.splitter.saveState().hex())
+            self._persist_acquisition_settings(save=False)
+            self._persist_data_dir(save=False)
+            self.profiles.set("spectroscopy.last_mode", self.current_mode)
+            self.profiles.set("spectroscopy.last_params", dict(self.session.mode_params))
             self.profiles.save()
         finally:
             super().closeEvent(event)
@@ -411,10 +544,41 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         series.setVisible(not series.isVisible())
         marker.setVisible(True)
 
+    def _remove_trace(self, key: str) -> None:
+        series = self._traces.pop(key, None)
+        if series:
+            self._chart.removeSeries(series)
+            self._trace_meta.pop(key, None)
+            self._install_legend_handlers()
+
     # ------------------------------------------------------------------
     def _toggle_compact(self, checked: bool) -> None:
         self.controls_panel.setVisible(not checked)
         self._compact = checked
+
+    def _persist_acquisition_settings(self, save: bool = True) -> None:
+        self.profiles.set("spectroscopy.integration_ms", float(self.integration_spin.value()))
+        self.profiles.set("spectroscopy.averages", int(self.averages_spin.value()))
+        self.profiles.set("spectroscopy.smoothing", int(self.smoothing_spin.value()))
+        self.profiles.set("spectroscopy.subtract_dark", bool(self.dark_chk.isChecked()))
+        if save:
+            self.profiles.save()
+
+    def _choose_data_dir(self) -> None:
+        directory = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Select spectroscopy data folder",
+            self.data_dir_edit.text() or self._data_dir or "",
+        )
+        if directory:
+            self.data_dir_edit.setText(directory)
+            self._persist_data_dir()
+
+    def _persist_data_dir(self, save: bool = True) -> None:
+        self._data_dir = (self.data_dir_edit.text() or "").strip()
+        self.profiles.set("spectroscopy.data_dir", self._data_dir)
+        if save:
+            self.profiles.save()
 
     # ------------------------------------------------------------------
     def _load_shelly_presets(self) -> Dict[str, ShellyState]:
@@ -491,7 +655,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.device_combo.blockSignals(False)
         if current:
             self._set_current_descriptor(current)
+        elif self._default_device:
+            self._apply_default_device(devices)
         self._update_status_from_selection()
+
+    def _apply_default_device(self, devices: list[SpectrometerDescriptor]) -> None:
+        for desc in devices:
+            if self._device_key(desc) == self._default_device:
+                self._set_current_descriptor(desc)
+                break
 
     def _current_descriptor(self) -> Optional[SpectrometerDescriptor]:
         idx = self.device_combo.currentIndex()
@@ -499,6 +671,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return None
         data = self.device_combo.currentData()
         return data if isinstance(data, SpectrometerDescriptor) else None
+
+    def _device_key(self, desc: SpectrometerDescriptor) -> str:
+        return f"{desc.vendor}:{desc.serial_number}:{desc.path}"
 
     def _set_current_descriptor(self, desc: SpectrometerDescriptor) -> None:
         for i in range(self.device_combo.count()):
@@ -717,6 +892,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             dev = self.spectrometer_manager.connect(desc)
             wavelengths = dev.get_wavelengths()
             self.session.set_wavelengths(wavelengths)
+            self._default_device = self._device_key(desc)
+            self.profiles.set("spectroscopy.default_device", self._default_device)
+            self.profiles.save()
         except Exception as exc:
             self.status_message.setText(f"Connect failed: {exc}")
             LOG.warning("Spectrometer connect failed: %s", exc)
@@ -728,6 +906,134 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._update_status_from_selection()
 
     # ------------------------------------------------------------------
+    def _record_capture(self, kind: str, data: np.ndarray, metadata: Optional[Dict[str, object]] = None) -> None:
+        if self.session.wavelengths is None or data is None:
+            return
+        ts = time.time()
+        metadata = metadata or {}
+        label = f"{datetime.fromtimestamp(ts).strftime('%H:%M:%S')} | {kind.title()}"
+        entry = CapturedSpectrum(
+            key=f"capture-{int(ts * 1000)}-{len(self._recent_captures)}",
+            label=label,
+            timestamp=ts,
+            data=np.asarray(data, dtype=float),
+            mode=self.current_mode,
+            metadata=metadata,
+            kind=kind,
+        )
+        self._recent_captures.insert(0, entry)
+        while len(self._recent_captures) > 25:
+            dropped = self._recent_captures.pop()
+            self._remove_trace(dropped.key)
+        self._refresh_recent_list()
+
+    def _refresh_recent_list(self) -> None:
+        checked: Dict[str, bool] = {}
+        for i in range(self.recent_list.count()):
+            item = self.recent_list.item(i)
+            checked[item.data(QtCore.Qt.UserRole)] = item.checkState() == QtCore.Qt.Checked
+        self.recent_list.blockSignals(True)
+        self.recent_list.clear()
+        for entry in self._recent_captures:
+            item = QtWidgets.QListWidgetItem(entry.label)
+            item.setData(QtCore.Qt.UserRole, entry.key)
+            item.setToolTip(
+                f"Mode: {entry.mode}\nIntegration: {entry.metadata.get('integration_ms', '—')} ms\n"
+                f"Averages: {entry.metadata.get('averages', '—')}\nSmoothing: {entry.metadata.get('smoothing', '—')}"
+            )
+            item.setCheckState(QtCore.Qt.Checked if checked.get(entry.key) else QtCore.Qt.Unchecked)
+            self.recent_list.addItem(item)
+        if self.recent_list.count() and not self.recent_list.selectedItems():
+            self.recent_list.setCurrentRow(0)
+        self.recent_list.blockSignals(False)
+        self._on_recent_selected()
+
+    def _on_recent_item_changed(self, item: QtWidgets.QListWidgetItem) -> None:
+        key = item.data(QtCore.Qt.UserRole)
+        entry = next((c for c in self._recent_captures if c.key == key), None)
+        if not entry:
+            return
+        if item.checkState() == QtCore.Qt.Checked:
+            color = self._recent_colors[self._recent_captures.index(entry) % len(self._recent_colors)]
+            self._plot_spectrum(entry.key, entry.data, color=color)
+        else:
+            self._remove_trace(entry.key)
+
+    def _on_recent_selected(self) -> None:
+        items = self.recent_list.selectedItems()
+        if not items:
+            self.recent_meta.setText("No captures yet")
+            return
+        key = items[0].data(QtCore.Qt.UserRole)
+        entry = next((c for c in self._recent_captures if c.key == key), None)
+        if not entry:
+            self.recent_meta.setText("No captures yet")
+            return
+        ts = datetime.fromtimestamp(entry.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        meta_parts = [
+            f"Timestamp: {ts}",
+            f"Mode: {entry.mode}",
+        ]
+        for label, key_name, suffix in (
+            ("Integration", "integration_ms", "ms"),
+            ("Averages", "averages", ""),
+            ("Smoothing", "smoothing", ""),
+        ):
+            if key_name in entry.metadata:
+                meta_parts.append(f"{label}: {entry.metadata[key_name]}{suffix}")
+        if entry.metadata.get("subtract_dark"):
+            meta_parts.append("Dark subtraction applied")
+        self.recent_meta.setText(" | ".join(meta_parts))
+
+    def _current_capture(self) -> Optional[CapturedSpectrum]:
+        items = self.recent_list.selectedItems()
+        if not items:
+            return None
+        key = items[0].data(QtCore.Qt.UserRole)
+        return next((c for c in self._recent_captures if c.key == key), None)
+
+    def _apply_capture_as(self, target: str) -> None:
+        capture = self._current_capture()
+        if not capture:
+            return
+        try:
+            if target == "reference":
+                self.session.set_reference(capture.data)
+                self.status_message.setText("Applied capture as reference")
+            else:
+                self.session.set_dark(capture.data)
+                self.status_message.setText("Applied capture as dark")
+        except Exception as exc:
+            self.status_message.setText(f"Failed to apply capture: {exc}")
+
+    def _save_selected_capture(self) -> None:
+        capture = self._current_capture()
+        if not capture:
+            self.status_message.setText("No capture selected to save")
+            return
+        if not self._data_dir:
+            self.status_message.setText("Set a data folder first")
+            return
+        if self.session.wavelengths is None:
+            self.status_message.setText("No wavelength axis available for export")
+            return
+        os.makedirs(self._data_dir, exist_ok=True)
+        safe_mode = capture.mode.replace(" ", "_").lower()
+        filename = f"{safe_mode}_{int(capture.timestamp)}.csv"
+        path = os.path.join(self._data_dir, filename)
+        try:
+            np.savetxt(path, np.column_stack([self.session.wavelengths, capture.data]), delimiter=",", header="wavelength_nm,intensity", comments="")
+            self.status_message.setText(f"Saved capture to {path}")
+        except Exception as exc:
+            self.status_message.setText(f"Save failed: {exc}")
+
+    def _clear_recent(self) -> None:
+        for entry in list(self._recent_captures):
+            self._remove_trace(entry.key)
+        self._recent_captures.clear()
+        self.recent_list.clear()
+        self.recent_meta.setText("No captures yet")
+
     def _capture_dark(self) -> None:
         dev = self.spectrometer_manager.active
         if dev is None:
@@ -740,6 +1046,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.session.set_dark(dark)
             self._plot_spectrum("dark", dark, color=QtGui.QColor("gray"))
             self.status_message.setText("Dark captured")
+            self._record_capture(
+                "dark",
+                dark,
+                {
+                    "integration_ms": float(self.integration_spin.value()),
+                    "averages": int(self.averages_spin.value()),
+                    "smoothing": int(self.smoothing_spin.value()),
+                },
+            )
         except Exception as exc:
             self.status_message.setText(f"Dark capture failed: {exc}")
 
@@ -763,6 +1078,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                     pass
             self._plot_spectrum("live", data, color=QtGui.QColor("deepskyblue"))
             self.status_message.setText("Captured spectrum")
+            metadata = {
+                "integration_ms": float(self.integration_spin.value()),
+                "averages": int(self.averages_spin.value()),
+                "smoothing": int(self.smoothing_spin.value()),
+                "subtract_dark": bool(self.dark_chk.isChecked()),
+            }
+            self._record_capture("measurement", data, metadata)
         except Exception as exc:
             self.status_message.setText(f"Capture failed: {exc}")
             self._stop_continuous()
@@ -771,6 +1093,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if duration > 0:
             fps = 1.0 / duration
             self.fps_label.setText(f"{fps:.1f} Hz")
+            if fps < 1:
+                self.status_message.setText(f"Capture slow ({fps:.2f} Hz)")
+        if raw is not None:
+            peak = float(np.nanmax(raw))
+            self.saturation_label.setText(f"Peak: {peak:.0f}")
+            if peak >= 60000:
+                self.status_message.setText("Warning: signal near saturation")
         self._last_capture_ts = time.time()
 
     def _start_continuous(self) -> None:
@@ -883,6 +1212,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if wizard.exec() == QtWidgets.QDialog.Accepted:
             self.current_mode = mode
             self.mode_label.setText(f"Mode: {mode}")
+            self.mode_params = dict(self.session.mode_params)
+            self.profiles.set("spectroscopy.last_mode", mode)
+            self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
+            self.profiles.save()
             self.status_message.setText(f"{mode} wizard completed")
         else:
             self.status_message.setText(f"{mode} wizard cancelled")
@@ -897,6 +1230,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             dev.set_integration_time_ms(integration)
             dev.set_averages(averages)
             spectrum = dev.capture()
+            self._record_capture(
+                kind,
+                spectrum,
+                {
+                    "integration_ms": float(integration),
+                    "averages": int(averages),
+                    "smoothing": int(self.smoothing_spin.value()),
+                },
+            )
             return spectrum
         except Exception as exc:
             self.status_message.setText(f"Capture failed: {exc}")
