@@ -13,6 +13,7 @@ from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_po
 from ..devices.camera_toupcam import create_camera, list_cameras
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
 from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
+from ..spectroscopy.io import default_data_directory
 
 from ..control.autofocus import FocusMetric, AutoFocus
 from ..control.raster import RasterRunner, RasterConfig
@@ -3490,6 +3491,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Filename contains illegal characters (\\ / : * ? \" < > |).",
             )
             return
+        spectrometer = self.spectrometer_manager.active
+        spec_lock = None
+        wavelengths = None
+        if spectrometer:
+            desc = self.spectrometer_manager.active_descriptor
+            if desc:
+                spec_lock = self.spectrometer_manager.acquisition_lock(desc)
+            try:
+                wavelengths = spectrometer.get_wavelengths()
+            except Exception:
+                wavelengths = None
+        spectral_dir = (
+            self.profiles.get("spectroscopy.data_dir", default_data_directory(), expected_type=str)
+            or default_data_directory()
+        )
 
         runner = RasterRunner(
             self.stage,
@@ -3507,6 +3523,12 @@ class MainWindow(QtWidgets.QMainWindow):
             lens_name=self.current_lens.name,
             lens_um_per_px=self.current_lens.um_per_px,
             scale_bar_um_per_px=self.current_lens.um_per_px if self.chk_scale_bar.isChecked() else None,
+            spectrometer=spectrometer,
+            spectrometer_lock=spec_lock,
+            spectrometer_integration_ms=self.profiles.get("spectroscopy.integration_ms", None, expected_type=float),
+            spectrometer_averages=self.profiles.get("spectroscopy.averages", None, expected_type=int),
+            wavelengths=wavelengths,
+            spectral_directory=spectral_dir,
         )
         self._raster_runner = runner
 
