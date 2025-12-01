@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -176,6 +177,172 @@ class CapturePage(BaseWizardPage):
         return bool(self.wizard_ref.state.get(f"{self.capture_key}_captured", False))
 
 
+class BeerLambertPage(BaseWizardPage):
+    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
+        super().__init__(wizard)
+        self.setTitle("Beer–Lambert calibration")
+        layout = QtWidgets.QFormLayout(self)
+        self.path_length = QtWidgets.QDoubleSpinBox()
+        self.path_length.setRange(0.01, 100.0)
+        self.path_length.setValue(float(wizard.mode_params.get("path_length_cm", 1.0)))
+        self.path_length.setSuffix(" cm")
+        self.concentration = QtWidgets.QDoubleSpinBox()
+        self.concentration.setRange(0.0, 1e6)
+        self.concentration.setDecimals(6)
+        self.concentration.setValue(float(wizard.mode_params.get("concentration_m", 0.0)))
+        self.concentration.setSuffix(" mol/L")
+        self.fit_checkbox = QtWidgets.QCheckBox("Compute molar absorptivity from captured sample")
+        self.fit_checkbox.setChecked(bool(wizard.mode_params.get("compute_ext_coeff", True)))
+        for widget in (self.path_length, self.concentration):
+            widget.valueChanged.connect(self._changed)
+        self.fit_checkbox.stateChanged.connect(self._changed)
+        layout.addRow("Path length", self.path_length)
+        layout.addRow("Concentration", self.concentration)
+        layout.addRow(self.fit_checkbox)
+
+    def _changed(self) -> None:
+        self.wizard_ref.mode_params.update(
+            path_length_cm=float(self.path_length.value()),
+            concentration_m=float(self.concentration.value()),
+            compute_ext_coeff=bool(self.fit_checkbox.isChecked()),
+        )
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self.mark_dirty()
+
+    def isComplete(self) -> bool:  # type: ignore[override]
+        return self.path_length.value() > 0 and self.concentration.value() >= 0
+
+
+class TransReflectPage(BaseWizardPage):
+    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
+        super().__init__(wizard)
+        self.setTitle(f"{wizard.mode} options")
+        layout = QtWidgets.QVBoxLayout(self)
+        self.percent_checkbox = QtWidgets.QCheckBox("Display result as percentage")
+        self.percent_checkbox.setChecked(bool(wizard.mode_params.get("as_percent", True)))
+        self.percent_checkbox.stateChanged.connect(self._changed)
+        self.offset_checkbox = QtWidgets.QCheckBox("Clamp negative values to zero")
+        self.offset_checkbox.setChecked(bool(wizard.mode_params.get("clamp_zero", True)))
+        self.offset_checkbox.stateChanged.connect(self._changed)
+        layout.addWidget(QtWidgets.QLabel("Configure how transmittance/reflectance is reported."))
+        layout.addWidget(self.percent_checkbox)
+        layout.addWidget(self.offset_checkbox)
+        layout.addStretch(1)
+
+    def _changed(self) -> None:
+        self.wizard_ref.mode_params.update(
+            as_percent=bool(self.percent_checkbox.isChecked()),
+            clamp_zero=bool(self.offset_checkbox.isChecked()),
+        )
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self.mark_dirty()
+
+    def isComplete(self) -> bool:  # type: ignore[override]
+        return True
+
+
+class IrradianceCalibrationPage(BaseWizardPage):
+    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
+        super().__init__(wizard)
+        self.setTitle("Relative irradiance calibration")
+        layout = QtWidgets.QFormLayout(self)
+        self.apply_checkbox = QtWidgets.QCheckBox("Apply response correction")
+        self.apply_checkbox.setChecked(bool(wizard.mode_params.get("apply_response", True)))
+        self.apply_checkbox.stateChanged.connect(self._changed)
+        self.cal_target = QtWidgets.QLineEdit()
+        self.cal_target.setPlaceholderText("Calibration source (e.g., halogen lamp)")
+        self.cal_target.setText(str(wizard.mode_params.get("calibration_target", "")))
+        self.cal_target.textChanged.connect(self._changed)
+        self.metric_centroid = QtWidgets.QCheckBox("Report centroid wavelength")
+        color_metrics = wizard.mode_params.get("color_metrics", ["centroid", "peak"])
+        self.metric_centroid.setChecked("centroid" in color_metrics)
+        self.metric_cct = QtWidgets.QCheckBox("Report peak wavelength")
+        self.metric_cct.setChecked("peak" in color_metrics)
+        for box in (self.metric_centroid, self.metric_cct):
+            box.stateChanged.connect(self._changed)
+        layout.addRow(self.apply_checkbox)
+        layout.addRow("Calibration target", self.cal_target)
+        layout.addRow(QtWidgets.QLabel("Color metric options"))
+        layout.addRow(self.metric_centroid)
+        layout.addRow(self.metric_cct)
+
+    def _changed(self) -> None:
+        metrics = []
+        if self.metric_centroid.isChecked():
+            metrics.append("centroid")
+        if self.metric_cct.isChecked():
+            metrics.append("peak")
+        self.wizard_ref.mode_params.update(
+            apply_response=bool(self.apply_checkbox.isChecked()),
+            calibration_target=self.cal_target.text(),
+            color_metrics=metrics,
+        )
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self.mark_dirty()
+
+    def isComplete(self) -> bool:  # type: ignore[override]
+        return True
+
+
+class FluorescenceMetadataPage(BaseWizardPage):
+    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
+        super().__init__(wizard)
+        self.setTitle("Fluorescence metadata")
+        layout = QtWidgets.QFormLayout(self)
+        self.excitation_spin = QtWidgets.QDoubleSpinBox()
+        self.excitation_spin.setRange(200, 1200)
+        self.excitation_spin.setSuffix(" nm")
+        self.excitation_spin.setValue(float(wizard.mode_params.get("excitation_nm", 405.0)))
+        self.emission_filter = QtWidgets.QLineEdit()
+        self.emission_filter.setPlaceholderText("Emission filter description")
+        self.emission_filter.setText(str(wizard.mode_params.get("emission_filter", "")))
+        self.excitation_spin.valueChanged.connect(self._changed)
+        self.emission_filter.textChanged.connect(self._changed)
+        layout.addRow("Excitation wavelength", self.excitation_spin)
+        layout.addRow("Emission filter", self.emission_filter)
+
+    def _changed(self) -> None:
+        self.wizard_ref.mode_params.update(
+            excitation_nm=float(self.excitation_spin.value()),
+            emission_filter=self.emission_filter.text(),
+        )
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self.mark_dirty()
+
+    def isComplete(self) -> bool:  # type: ignore[override]
+        return True
+
+
+class RamanConfigPage(BaseWizardPage):
+    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
+        super().__init__(wizard)
+        self.setTitle("Raman configuration")
+        layout = QtWidgets.QFormLayout(self)
+        self.excitation_spin = QtWidgets.QDoubleSpinBox()
+        self.excitation_spin.setRange(100.0, 2000.0)
+        self.excitation_spin.setSuffix(" nm")
+        self.excitation_spin.setValue(float(wizard.mode_params.get("excitation_nm", 532.0)))
+        self.shift_offset = QtWidgets.QDoubleSpinBox()
+        self.shift_offset.setRange(-5000.0, 5000.0)
+        self.shift_offset.setSuffix(" cm⁻¹")
+        self.shift_offset.setValue(float(wizard.mode_params.get("shift_offset", 0.0)))
+        for widget in (self.excitation_spin, self.shift_offset):
+            widget.valueChanged.connect(self._changed)
+        layout.addRow("Excitation wavelength", self.excitation_spin)
+        layout.addRow("Shift offset", self.shift_offset)
+
+    def _changed(self) -> None:
+        self.wizard_ref.mode_params.update(
+            excitation_nm=float(self.excitation_spin.value()),
+            shift_offset=float(self.shift_offset.value()),
+        )
+        self.session.set_mode_params(**self.wizard_ref.mode_params)
+        self.mark_dirty()
+
+    def isComplete(self) -> bool:  # type: ignore[override]
+        return self.excitation_spin.value() > 0
+
+
 class ModeConfigPage(BaseWizardPage):
     def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
         super().__init__(wizard)
@@ -298,11 +465,24 @@ class ResultsPage(BaseWizardPage):
         x_axis = self.chart.axisX()
         y_axis = self.chart.axisY()
         if x_axis:
-            x_axis.setRange(float(self.session.wavelengths.min()), float(self.session.wavelengths.max()))
+            if self.wizard_ref.mode == "Raman":
+                x_axis.setTitleText("Raman shift (cm⁻¹)")
+            else:
+                x_axis.setTitleText("Wavelength (nm)")
+        if x_axis:
+            x_axis.setRange(float(np.min(result[0])), float(np.max(result[0])))
         ymin, ymax = np.min(result[1]), np.max(result[1])
         if ymin == ymax:
             ymax += 1.0
         if y_axis:
+            if self.wizard_ref.mode == "Absorbance":
+                y_axis.setTitleText("Absorbance (AU)")
+            elif self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
+                y_axis.setTitleText("%" if self.wizard_ref.mode_params.get("as_percent", True) else "Ratio")
+            elif self.wizard_ref.mode == "Relative Irradiance":
+                y_axis.setTitleText("Irradiance")
+            elif self.wizard_ref.mode == "Raman":
+                y_axis.setTitleText("Intensity (a.u.)")
             y_axis.setRange(float(ymin), float(ymax))
         # current result
         series = self._series_from_data("Current", result[0], result[1], QtGui.QColor("deepskyblue"))
@@ -366,32 +546,56 @@ class ResultsPage(BaseWizardPage):
             if ref is None:
                 return None
             arr = processing.compute_absorbance(smoothed, ref)
-            metrics = np.max(arr)
-            self.wizard_ref.last_metrics = {"Max absorbance": metrics}
+            metrics: Dict[str, float] = {"Max absorbance": float(np.max(arr))}
+            path = float(params.get("path_length_cm", 1.0))
+            conc = float(params.get("concentration_m", 0.0))
+            if params.get("compute_ext_coeff") and path > 0 and conc > 0:
+                epsilon = float(np.max(arr) / (path * conc))
+                metrics["Molar absorptivity"] = epsilon
+            self.wizard_ref.last_metrics = metrics
             return wl, arr
         if self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
             if ref is None:
                 return None
             arr = processing.normalize_reference(smoothed, ref)
-            self.wizard_ref.last_metrics = {"Mean": float(np.mean(arr))}
+            if params.get("clamp_zero", True):
+                arr = np.clip(arr, 0.0, None)
+            if params.get("as_percent", True):
+                arr = arr * 100.0
+            self.wizard_ref.last_metrics = {
+                "Mean": float(np.mean(arr)),
+                "Peak": float(np.max(arr)),
+                "Min": float(np.min(arr)),
+            }
             return wl, arr
         if self.wizard_ref.mode == "Relative Irradiance":
             curve = self.session.calibration.response_curve
             arr = processing.compute_irradiance(
                 smoothed,
                 float(params.get("integration", 10.0)),
-                response_curve=curve,
+                response_curve=curve if params.get("apply_response", True) else None,
             )
-            self.wizard_ref.last_metrics = {"Total irradiance": float(np.trapz(arr, wl))}
+            centroid = float(np.average(wl, weights=arr)) if np.sum(arr) > 0 else float("nan")
+            metrics = {"Total irradiance": float(np.trapz(arr, wl)), "Peak": float(np.max(arr))}
+            if "centroid" in params.get("color_metrics", []):
+                metrics["Centroid nm"] = centroid
+            self.wizard_ref.last_metrics = metrics
             return wl, arr
         if self.wizard_ref.mode == "Fluorescence":
             area = float(np.trapz(smoothed, wl))
-            self.wizard_ref.last_metrics = {"Integrated intensity": area}
+            self.wizard_ref.last_metrics = {
+                "Integrated intensity": area,
+                "Peak": float(np.max(smoothed)),
+            }
             return wl, smoothed
         if self.wizard_ref.mode == "Raman":
             excitation = float(params.get("excitation_nm", 532.0))
             shift = processing.raman_shift_cm(wl, excitation)
-            self.wizard_ref.last_metrics = {"Max shift": float(np.max(shift))}
+            shift = shift - float(params.get("shift_offset", 0.0))
+            self.wizard_ref.last_metrics = {
+                "Max shift": float(np.max(shift)),
+                "Peak intensity": float(np.max(smoothed)),
+            }
             return shift, smoothed
         return wl, smoothed
 
@@ -425,11 +629,18 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
             fallback = self.preset_names[0]
             for key in ("dark", "reference", "raw"):
                 self.step_presets.setdefault(key, fallback)
-        self.mode_params: Dict[str, object] = {"mode": mode}
+        if session.mode_params.get("mode") == mode:
+            self.mode_params = dict(session.mode_params)
+        else:
+            self.mode_params = {"mode": mode}
+        if "rois" in self.mode_params:
+            with contextlib.suppress(Exception):
+                self.session._set_rois_from_iterable(self.mode_params.get("rois", []))
         self.state: Dict[str, bool] = {
             "dark_captured": session.dark_spectrum is not None,
             "reference_captured": session.reference_spectrum is not None,
             "raw_captured": session.raw_spectrum is not None,
+            "calibration_valid": session.calibration_valid,
         }
         self.last_metrics: Dict[str, float] = {}
         self.setWindowTitle(f"{mode} wizard")
@@ -441,7 +652,16 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.addPage(AcquisitionPage(self))
         self.addPage(CapturePage(self, "Capture dark", "dark"))
         self.addPage(CapturePage(self, "Capture reference", "reference"))
-        # mode specific config
+        if self.mode == "Absorbance":
+            self.addPage(BeerLambertPage(self))
+        elif self.mode in {"Transmittance", "Reflectance"}:
+            self.addPage(TransReflectPage(self))
+        elif self.mode == "Relative Irradiance":
+            self.addPage(IrradianceCalibrationPage(self))
+        elif self.mode == "Fluorescence":
+            self.addPage(FluorescenceMetadataPage(self))
+        elif self.mode == "Raman":
+            self.addPage(RamanConfigPage(self))
         self.addPage(ModeConfigPage(self))
         self.addPage(ResultsPage(self))
         self.button(QtWidgets.QWizard.FinishButton).setEnabled(False)
@@ -455,12 +675,14 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
                 page.completeChanged.connect(self._update_finish_state)
 
     def _persist_params(self) -> None:
+        self.mode_params["rois"] = [roi.as_tuple() for roi in self.session.rois]
         self.session.set_mode_params(**self.mode_params)
 
     def invalidate_results(self) -> None:
         self.state["raw_captured"] = False
         self.state["reference_captured"] = False
         self.state["dark_captured"] = False
+        self.state["calibration_valid"] = self.session.calibration_valid
 
     def invalidate_captures(self) -> None:
         self.state["raw_captured"] = False
@@ -482,10 +704,11 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         finish_enabled = all(
             (
                 self.state.get("raw_captured"),
-                self.state.get("reference_captured"),
-                self.state.get("dark_captured"),
-                self.session.reference_valid,
-                self.session.dark_valid,
+                (not self._requires_reference() or self.state.get("reference_captured")),
+                (not self._requires_dark() or self.state.get("dark_captured")),
+                (not self._requires_reference() or self.session.reference_valid),
+                (not self._requires_dark() or self.session.dark_valid),
+                (not self._requires_calibration() or self.session.calibration_valid),
             )
         )
         self.button(QtWidgets.QWizard.FinishButton).setEnabled(bool(finish_enabled))
@@ -495,7 +718,17 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
             self.state["dark_captured"] = False
         if not self.session.reference_valid:
             self.state["reference_captured"] = False
+        self.state["calibration_valid"] = self.session.calibration_valid
         self._update_finish_state()
+
+    def _requires_reference(self) -> bool:
+        return self.mode in {"Absorbance", "Transmittance", "Reflectance"}
+
+    def _requires_dark(self) -> bool:
+        return True
+
+    def _requires_calibration(self) -> bool:
+        return self.mode == "Relative Irradiance"
 
     def format_metrics(self, result: Tuple[np.ndarray, np.ndarray]) -> str:
         if not self.last_metrics:

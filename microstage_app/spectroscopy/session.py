@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 from PySide6 import QtCore
@@ -129,10 +129,15 @@ class SpectroscopySession(QtCore.QObject):
         self.validity_changed.emit()
 
     def set_mode_params(self, **params) -> None:
-        if params != self.mode_params:
-            self.mode_params = dict(params)
+        incoming = dict(params)
+        rois = incoming.pop("rois", None)
+        if rois is not None:
+            self._set_rois_from_iterable(rois)
+            incoming["rois"] = [roi.as_tuple() for roi in self.rois]
+        if incoming != self.mode_params:
+            self.mode_params = dict(incoming)
             self._invalidate_calibration()
-            self.mode_params_changed.emit(dict(params))
+            self.mode_params_changed.emit(dict(incoming))
             self.calibration_changed.emit(self.calibration)
             self.validity_changed.emit()
 
@@ -192,3 +197,9 @@ class SpectroscopySession(QtCore.QObject):
 
     def _invalidate_calibration(self) -> None:
         self.calibration_valid = False
+
+    # ------------------------------------------------------------------
+    def _set_rois_from_iterable(self, rois: Iterable[Tuple[float, float]]) -> None:
+        self.rois.clear()
+        for start, end in rois:
+            self.add_roi(float(start), float(end))
