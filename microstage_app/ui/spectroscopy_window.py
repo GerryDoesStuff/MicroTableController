@@ -13,11 +13,20 @@ from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
 
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
 from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerDevice, SpectrometerManager
+from ..spectroscopy.io import (
+    default_data_directory,
+    ensure_data_directory,
+    save_spectrum_csv,
+    save_spectrum_hdf5,
+    save_time_series_hdf5,
+    save_time_series_npz,
+)
 from ..spectroscopy.processing import smooth_boxcar, subtract_dark
 from ..spectroscopy.session import AcquisitionMetadata, SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
 from ..utils.log import LOG, log
 from ..utils.workers import run_async
+import matplotlib.pyplot as plt
 
 
 @dataclass
@@ -181,9 +190,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
         self._compact = bool(self.profiles.get("spectroscopy.compact", False, expected_type=bool))
         self._last_capture_ts = 0.0
-        self._data_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
+        stored_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
+        self._data_dir = ensure_data_directory(stored_dir or default_data_directory())
         self._default_device = str(self.profiles.get("spectroscopy.default_device", "", expected_type=str))
         self._recent_captures: List[CapturedSpectrum] = []
+        self._time_series_active = False
+        self._time_series_records: List[tuple[float, np.ndarray, Dict[str, object]]] = []
+        self._time_series_start = 0.0
         self._recent_colors = [
             QtGui.QColor("#1f77b4"),
             QtGui.QColor("#ff7f0e"),
@@ -383,6 +396,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_save_selected = QtWidgets.QPushButton("Save selected capture")
         self.btn_save_selected.setToolTip("Export the selected capture to CSV in the data folder")
         data_layout.addRow(self.btn_save_selected)
+        self.btn_start_timeseries = QtWidgets.QPushButton("Start time series")
+        self.btn_stop_timeseries = QtWidgets.QPushButton("Stop time series")
+        self.btn_stop_timeseries.setEnabled(False)
+        self.chk_plot_timeseries = QtWidgets.QCheckBox("Save intensity vs time plot")
+        self.chk_plot_spectrogram = QtWidgets.QCheckBox("Save spectrogram")
+        ts_row = QtWidgets.QHBoxLayout()
+        ts_row.addWidget(self.btn_start_timeseries)
+        ts_row.addWidget(self.btn_stop_timeseries)
+        data_layout.addRow("Time series", ts_row)
+        data_layout.addRow(self.chk_plot_timeseries)
+        data_layout.addRow(self.chk_plot_spectrogram)
         ctrl.addWidget(data_box)
 
         shelly_box = QtWidgets.QGroupBox("Shelly controls")
@@ -524,6 +548,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_use_reference.clicked.connect(lambda: self._apply_capture_as("reference"))
         self.btn_use_dark.clicked.connect(lambda: self._apply_capture_as("dark"))
         self.btn_save_selected.clicked.connect(self._save_selected_capture)
+        self.btn_start_timeseries.clicked.connect(self._start_time_series)
+        self.btn_stop_timeseries.clicked.connect(self._stop_time_series)
         self.data_dir_edit.editingFinished.connect(self._persist_data_dir)
 
         self.btn_shelly_connect.clicked.connect(self._connect_dimmer_async)
@@ -641,6 +667,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.validity_label.setStyleSheet(style)
         self.act_export.setEnabled(valid)
         self.btn_save_selected.setEnabled(valid and self.recent_list.count() > 0 and bool(self._data_dir))
+        can_record = valid and bool(self._data_dir)
+        self.btn_start_timeseries.setEnabled(can_record and not self._time_series_active)
+        self.btn_stop_timeseries.setEnabled(can_record and self._time_series_active)
 
     def _persist_acquisition_settings(self, save: bool = True) -> None:
         self.profiles.set("spectroscopy.integration_ms", float(self.integration_spin.value()))
@@ -671,7 +700,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._persist_data_dir()
 
     def _persist_data_dir(self, save: bool = True) -> None:
-        self._data_dir = (self.data_dir_edit.text() or "").strip()
+        entered = (self.data_dir_edit.text() or "").strip()
+        self._data_dir = ensure_data_directory(entered or default_data_directory())
         self.profiles.set("spectroscopy.data_dir", self._data_dir)
         self._refresh_validity_state()
         if save:
@@ -1152,13 +1182,25 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if self.session.wavelengths is None:
             self.status_message.setText("No wavelength axis available for export")
             return
-        os.makedirs(self._data_dir, exist_ok=True)
+        directory = ensure_data_directory(self._data_dir)
         safe_mode = capture.mode.replace(" ", "_").lower()
-        filename = f"{safe_mode}_{int(capture.timestamp)}.csv"
-        path = os.path.join(self._data_dir, filename)
+        base = os.path.join(directory, f"{safe_mode}_{int(capture.timestamp)}")
+        metadata = dict(capture.metadata)
+        metadata.update(
+            {
+                "mode": capture.mode,
+                "device_id": capture.metadata.get("device_id", self._current_device_id()),
+                "integration_ms": capture.metadata.get("integration_ms", self.integration_spin.value()),
+                "averages": capture.metadata.get("averages", self.averages_spin.value()),
+                "dark_applied": self.session.dark_valid,
+                "reference_applied": self.session.reference_valid,
+                "timestamp": capture.timestamp,
+            }
+        )
         try:
-            np.savetxt(path, np.column_stack([self.session.wavelengths, capture.data]), delimiter=",", header="wavelength_nm,intensity", comments="")
-            self.status_message.setText(f"Saved capture to {path}")
+            save_spectrum_csv(base + ".csv", self.session.wavelengths, capture.data, metadata)
+            save_spectrum_hdf5(base + ".h5", self.session.wavelengths, capture.data, metadata)
+            self.status_message.setText(f"Saved capture to {base}.[csv|h5]")
         except Exception as exc:
             self.status_message.setText(f"Save failed: {exc}")
 
@@ -1253,6 +1295,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 "subtract_dark": bool(job.subtract_dark),
             }
             self._record_capture("measurement", processed, metadata)
+            self._append_time_series(acquisition, processed, metadata)
             self.status_message.setText("Captured spectrum")
         if duration > 0:
             fps = 1.0 / duration
@@ -1303,6 +1346,100 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._capture_in_flight = False
         self._new_capture_token()
         self.status_message.setText("Stopped")
+
+    def _append_time_series(
+        self, acquisition: AcquisitionMetadata, spectrum: np.ndarray, metadata: Optional[Dict[str, object]] = None
+    ) -> None:
+        if not self._time_series_active:
+            return
+        if self._time_series_start <= 0:
+            self._time_series_start = acquisition.timestamp
+        rel_ts = float(acquisition.timestamp - self._time_series_start)
+        entry_meta = dict(metadata or {})
+        entry_meta.setdefault("device_id", acquisition.device_id)
+        entry_meta.setdefault("mode", acquisition.mode)
+        entry_meta.setdefault("integration_ms", acquisition.integration_ms)
+        entry_meta.setdefault("averages", acquisition.averages)
+        entry_meta.setdefault("timestamp", acquisition.timestamp)
+        entry_meta.setdefault("dark_applied", self.session.dark_valid)
+        entry_meta.setdefault("reference_applied", self.session.reference_valid)
+        self._time_series_records.append((rel_ts, np.asarray(spectrum, dtype=float), entry_meta))
+
+    def _start_time_series(self) -> None:
+        if self.session.wavelengths is None:
+            self.status_message.setText("Set wavelengths before recording time series")
+            return
+        self._time_series_records.clear()
+        self._time_series_start = time.time()
+        self._time_series_active = True
+        self.status_message.setText("Time series recording started")
+        self._refresh_validity_state()
+
+    def _stop_time_series(self) -> None:
+        if not self._time_series_active:
+            return
+        self._time_series_active = False
+        self.status_message.setText("Time series recording stopped")
+        self._persist_time_series()
+        self._refresh_validity_state()
+
+    def _persist_time_series(self) -> None:
+        if not self._time_series_records:
+            self.status_message.setText("No time series samples captured")
+            return
+        wavelengths = self.session.wavelengths
+        if wavelengths is None:
+            self.status_message.setText("No wavelength axis available for export")
+            return
+        directory = ensure_data_directory(self._data_dir)
+        times = np.array([t for t, _, _ in self._time_series_records], dtype=float)
+        spectra = np.vstack([np.asarray(s, dtype=float) for _, s, _ in self._time_series_records])
+        start_ts = float(self._time_series_start)
+        metadata: Dict[str, object] = {
+            "mode": self.current_mode,
+            "device_id": self._current_device_id(),
+            "integration_ms": float(self.integration_spin.value()),
+            "averages": int(self.averages_spin.value()),
+            "dark_applied": self.session.dark_valid,
+            "reference_applied": self.session.reference_valid,
+            "start_timestamp": start_ts,
+            "samples": len(self._time_series_records),
+        }
+        base = os.path.join(directory, f"time_series_{int(start_ts)}")
+        try:
+            save_time_series_npz(base + ".npz", wavelengths, spectra, times, metadata)
+            save_time_series_hdf5(base + ".h5", wavelengths, spectra, times, metadata)
+            if self.chk_plot_timeseries.isChecked():
+                fig, ax = plt.subplots()
+                ax.plot(times, spectra.mean(axis=1))
+                ax.set_xlabel("Time (s)")
+                ax.set_ylabel("Mean intensity (a.u.)")
+                ax.set_title("Intensity vs time")
+                fig.savefig(base + "_intensity.png", dpi=150, bbox_inches="tight")
+                plt.close(fig)
+            if self.chk_plot_spectrogram.isChecked():
+                fig, ax = plt.subplots()
+                t_min, t_max = float(times.min()), float(times.max())
+                if t_max <= t_min:
+                    t_max = t_min + 1e-6
+                w_min, w_max = float(wavelengths.min()), float(wavelengths.max())
+                if w_max <= w_min:
+                    w_max = w_min + 1e-6
+                im = ax.imshow(
+                    spectra.T,
+                    aspect="auto",
+                    origin="lower",
+                    extent=[t_min, t_max, w_min, w_max],
+                )
+                ax.set_xlabel("Time (s)")
+                ax.set_ylabel("Wavelength (nm)")
+                ax.set_title("Spectrogram")
+                fig.colorbar(im, ax=ax, label="Intensity (a.u.)")
+                fig.savefig(base + "_spectrogram.png", dpi=150, bbox_inches="tight")
+                plt.close(fig)
+            self.status_message.setText(f"Saved time series to {base}.[npz|h5]")
+        except Exception as exc:  # pragma: no cover - runtime safety
+            self.status_message.setText(f"Failed to save time series: {exc}")
 
     # ------------------------------------------------------------------
     def _plot_spectrum(self, key: str, data: np.ndarray, color: QtGui.QColor) -> None:
