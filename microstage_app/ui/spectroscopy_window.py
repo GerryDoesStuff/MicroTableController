@@ -14,7 +14,7 @@ from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
 from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerDevice, SpectrometerManager
 from ..spectroscopy.processing import smooth_boxcar, subtract_dark
-from ..spectroscopy.session import SpectroscopySession
+from ..spectroscopy.session import AcquisitionMetadata, SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
 from ..utils.log import LOG, log
 from ..utils.workers import run_async
@@ -24,6 +24,7 @@ from ..utils.workers import run_async
 class CaptureJob:
     token: object
     device: SpectrometerDevice
+    device_id: str
     lock: QtCore.QMutex
     integration_ms: float
     averages: int
@@ -232,6 +233,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._restore_geometry()
         self._connect_signals()
+        self._update_session_context()
+        self._refresh_validity_state()
 
         if self.mode_params:
             self.session.set_mode_params(**self.mode_params)
@@ -444,9 +447,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         footer = QtWidgets.QVBoxLayout()
         self.status_message = QtWidgets.QLabel("Idle")
+        self.validity_label = QtWidgets.QLabel("Baseline: unknown")
         self.fps_label = QtWidgets.QLabel("—")
         self.saturation_label = QtWidgets.QLabel("Peak: —")
         footer.addWidget(self.status_message)
+        footer.addWidget(self.validity_label)
         footer.addWidget(self.fps_label)
         footer.addWidget(self.saturation_label)
         footer.addStretch(1)
@@ -499,6 +504,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.device_combo.currentIndexChanged.connect(self._update_status_from_selection)
         self.spectrometer_manager.devices_changed.connect(self._on_devices_changed)
         self.spectrometer_manager.device_connected.connect(self._on_device_connected)
+        self.session.validity_changed.connect(self._refresh_validity_state)
 
         self.integration_slider.valueChanged.connect(self.integration_spin.setValue)
         self.integration_spin.valueChanged.connect(self.integration_slider.setValue)
@@ -617,13 +623,42 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.controls_panel.setVisible(not checked)
         self._compact = checked
 
+    def _refresh_validity_state(self) -> None:
+        if not hasattr(self, "validity_label"):
+            return
+        valid = not self.session.requires_recalibration()
+        dark_ok = self.session.dark_valid
+        ref_ok = self.session.reference_valid
+        cal_ok = self.session.calibration_valid
+        parts = []
+        parts.append("Dark ✓" if dark_ok else "Dark ✕")
+        parts.append("Reference ✓" if ref_ok else "Reference ✕")
+        parts.append("Calibration ✓" if cal_ok else "Calibration ✕")
+        status_text = " | ".join(parts)
+        prefix = "Baseline: "
+        self.validity_label.setText(prefix + status_text)
+        style = "color: green;" if valid else "color: orange;"
+        self.validity_label.setStyleSheet(style)
+        self.act_export.setEnabled(valid)
+        self.btn_save_selected.setEnabled(valid and self.recent_list.count() > 0 and bool(self._data_dir))
+
     def _persist_acquisition_settings(self, save: bool = True) -> None:
         self.profiles.set("spectroscopy.integration_ms", float(self.integration_spin.value()))
         self.profiles.set("spectroscopy.averages", int(self.averages_spin.value()))
         self.profiles.set("spectroscopy.smoothing", int(self.smoothing_spin.value()))
         self.profiles.set("spectroscopy.subtract_dark", bool(self.dark_chk.isChecked()))
+        self._update_session_context()
         if save:
             self.profiles.save()
+
+    def _update_session_context(self) -> None:
+        self.session.set_acquisition_context(
+            device_id=self._current_device_id(),
+            integration_ms=float(self.integration_spin.value()),
+            averages=int(self.averages_spin.value()),
+            mode=self.current_mode,
+            timestamp=time.time(),
+        )
 
     def _choose_data_dir(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(
@@ -638,6 +673,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _persist_data_dir(self, save: bool = True) -> None:
         self._data_dir = (self.data_dir_edit.text() or "").strip()
         self.profiles.set("spectroscopy.data_dir", self._data_dir)
+        self._refresh_validity_state()
         if save:
             self.profiles.save()
 
@@ -737,6 +773,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _device_key(self, desc: SpectrometerDescriptor) -> str:
         return f"{desc.vendor}:{desc.serial_number}:{desc.path}"
+
+    def _current_device_id(self) -> str:
+        desc = self._current_descriptor() or self.spectrometer_manager.active_descriptor
+        return self._device_key(desc) if desc else ""
 
     def _set_current_descriptor(self, desc: SpectrometerDescriptor) -> None:
         for i in range(self.device_combo.count()):
@@ -977,6 +1017,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(f"Connect failed: {exc}")
             LOG.warning("Spectrometer connect failed: %s", exc)
         self._update_status_from_selection()
+        self._update_session_context()
 
     def _disconnect(self) -> None:
         self._stop_continuous()
@@ -984,13 +1025,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         desc = self._current_descriptor()
         self.spectrometer_manager.disconnect(desc)
         self._update_status_from_selection()
+        self._update_session_context()
 
     # ------------------------------------------------------------------
     def _record_capture(self, kind: str, data: np.ndarray, metadata: Optional[Dict[str, object]] = None) -> None:
         if self.session.wavelengths is None or data is None:
             return
         ts = time.time()
-        metadata = metadata or {}
+        metadata = dict(metadata or {})
+        metadata.setdefault("device_id", self._current_device_id())
+        metadata.setdefault("mode", self.current_mode)
+        metadata.setdefault("timestamp", ts)
         label = f"{datetime.fromtimestamp(ts).strftime('%H:%M:%S')} | {kind.title()}"
         entry = CapturedSpectrum(
             key=f"capture-{int(ts * 1000)}-{len(self._recent_captures)}",
@@ -1027,6 +1072,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.recent_list.setCurrentRow(0)
         self.recent_list.blockSignals(False)
         self._on_recent_selected()
+        self._refresh_validity_state()
 
     def _on_recent_item_changed(self, item: QtWidgets.QListWidgetItem) -> None:
         key = item.data(QtCore.Qt.UserRole)
@@ -1054,6 +1100,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             f"Timestamp: {ts}",
             f"Mode: {entry.mode}",
         ]
+        if entry.metadata.get("device_id"):
+            meta_parts.append(f"Device: {entry.metadata['device_id']}")
         for label, key_name, suffix in (
             ("Integration", "integration_ms", "ms"),
             ("Averages", "averages", ""),
@@ -1076,12 +1124,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         capture = self._current_capture()
         if not capture:
             return
+        acquisition = AcquisitionMetadata(
+            device_id=str(capture.metadata.get("device_id", "")),
+            integration_ms=float(capture.metadata.get("integration_ms", 0.0)),
+            averages=int(capture.metadata.get("averages", 0)),
+            mode=str(capture.metadata.get("mode", self.current_mode)),
+            timestamp=float(capture.metadata.get("timestamp", capture.timestamp)),
+        )
         try:
             if target == "reference":
-                self.session.set_reference(capture.data)
+                self.session.set_reference(capture.data, acquisition=acquisition)
                 self.status_message.setText("Applied capture as reference")
             else:
-                self.session.set_dark(capture.data)
+                self.session.set_dark(capture.data, acquisition=acquisition)
                 self.status_message.setText("Applied capture as dark")
         except Exception as exc:
             self.status_message.setText(f"Failed to apply capture: {exc}")
@@ -1126,14 +1181,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _schedule_capture(self, kind: str) -> None:
         if self._capture_in_flight:
             return
-        dev, lock, _desc = self._active_device_with_lock()
+        dev, lock, desc = self._active_device_with_lock()
         if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             self._stop_continuous()
             return
+        self._update_session_context()
         job = CaptureJob(
             token=self._capture_token,
             device=dev,
+            device_id=self._device_key(desc) if desc else "",
             lock=lock,
             integration_ms=float(self.integration_spin.value()),
             averages=int(self.averages_spin.value()),
@@ -1169,8 +1226,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(self.capture_timer.interval(), self._trigger_continuous_capture)
             return
         self._last_capture_ts = now
+        acquisition = AcquisitionMetadata(
+            device_id=job.device_id,
+            integration_ms=float(job.integration_ms),
+            averages=int(job.averages),
+            mode=self.current_mode,
+            timestamp=job.timestamp,
+        )
         if job.kind == "dark":
-            self.session.set_dark(raw)
+            self.session.set_dark(raw, acquisition=acquisition)
             self._plot_spectrum("dark", raw, color=QtGui.QColor("gray"))
             meta = {
                 "integration_ms": float(job.integration_ms),
@@ -1343,6 +1407,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
             self.profiles.save()
             self.status_message.setText(f"{mode} wizard completed")
+            self._update_session_context()
         else:
             self.status_message.setText(f"{mode} wizard cancelled")
 
@@ -1351,12 +1416,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             return None
+        self._update_session_context()
         self._apply_step_preset(kind)
         try:
             with self._acquisition_context(lock):
                 dev.set_integration_time_ms(integration)
                 dev.set_averages(averages)
                 spectrum = dev.capture()
+            ts = time.time()
             self._record_capture(
                 kind,
                 spectrum,
@@ -1364,6 +1431,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                     "integration_ms": float(integration),
                     "averages": int(averages),
                     "smoothing": int(self.smoothing_spin.value()),
+                    "device_id": self._current_device_id(),
+                    "mode": self.current_mode,
+                    "timestamp": ts,
                 },
             )
             return spectrum
