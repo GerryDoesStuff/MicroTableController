@@ -69,6 +69,10 @@ class SpectrometerManager(QtCore.QObject):
         self._devices: List[SpectrometerDescriptor] = []
         self._active: Optional[SpectrometerDevice] = None
 
+    @property
+    def devices(self) -> List[SpectrometerDescriptor]:
+        return list(self._devices)
+
     def refresh(self) -> List[SpectrometerDescriptor]:
         devices: List[SpectrometerDescriptor] = []
         for provider in self._providers:
