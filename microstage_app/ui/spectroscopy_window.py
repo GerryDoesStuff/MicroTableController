@@ -8,11 +8,13 @@ from typing import Dict, Optional
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
 
+from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
 from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
 from ..spectroscopy.processing import smooth_boxcar, subtract_dark
 from ..spectroscopy.session import SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
-from ..utils.log import LOG
+from ..utils.log import LOG, log
+from ..utils.workers import run_async
 
 
 @dataclass
@@ -119,6 +121,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.current_mode = "Absorbance"
         self._compact = bool(self.profiles.get("spectroscopy.compact", False, expected_type=bool))
         self._last_capture_ts = 0.0
+
+        # Shelly dimmer state
+        self.dimmer: Optional[ShellyDimmer] = None
+        self._dimmer_conn_thread = None
+        self._dimmer_conn_worker = None
+        self._dimmer_op_thread = None
+        self._dimmer_op_worker = None
+        self._updating_dimmer_ui = False
+        self._shelly_presets: Dict[str, ShellyState] = self._load_shelly_presets()
+        self._step_presets: Dict[str, str] = self._load_step_presets()
 
         self._chart = QtCharts.QChart()
         self._chart.setAnimationOptions(QtCharts.QChart.AllAnimations)
@@ -247,7 +259,62 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         shelly_box = QtWidgets.QGroupBox("Shelly controls")
         shelly_layout = QtWidgets.QVBoxLayout(shelly_box)
-        shelly_layout.addWidget(QtWidgets.QLabel("Light controls coming soon."))
+        self.shelly_status = QtWidgets.QLabel("Illumination: —")
+        self.shelly_status.setTextFormat(QtCore.Qt.PlainText)
+        shelly_layout.addWidget(self.shelly_status)
+
+        host_row = QtWidgets.QHBoxLayout()
+        host_row.addWidget(QtWidgets.QLabel("Host:"))
+        self.shelly_host_edit = QtWidgets.QLineEdit(
+            self.profiles.get("illumination.dimmer.host", "", expected_type=str)
+        )
+        host_row.addWidget(self.shelly_host_edit, 1)
+        self.btn_shelly_connect = QtWidgets.QPushButton("Connect")
+        self.btn_shelly_disconnect = QtWidgets.QPushButton("Disconnect")
+        self.btn_shelly_disconnect.setEnabled(False)
+        host_row.addWidget(self.btn_shelly_connect)
+        host_row.addWidget(self.btn_shelly_disconnect)
+        shelly_layout.addLayout(host_row)
+
+        toggle_row = QtWidgets.QHBoxLayout()
+        self.shelly_toggle = QtWidgets.QCheckBox("On")
+        self.shelly_toggle.setChecked(bool(self.profiles.get("illumination.dimmer.on", False)))
+        self.shelly_toggle.setEnabled(False)
+        toggle_row.addWidget(self.shelly_toggle)
+        self.shelly_brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.shelly_brightness_slider.setRange(0, 100)
+        self.shelly_brightness_spin = QtWidgets.QSpinBox()
+        self.shelly_brightness_spin.setRange(0, 100)
+        self.shelly_brightness_spin.setValue(
+            int(self.profiles.get("illumination.dimmer.brightness", 0, expected_type=int, min_value=0, max_value=100))
+        )
+        self.shelly_brightness_slider.setValue(self.shelly_brightness_spin.value())
+        self.shelly_brightness_slider.setEnabled(False)
+        self.shelly_brightness_spin.setEnabled(False)
+        toggle_row.addWidget(self.shelly_brightness_slider, 1)
+        toggle_row.addWidget(self.shelly_brightness_spin)
+        shelly_layout.addLayout(toggle_row)
+
+        preset_row = QtWidgets.QHBoxLayout()
+        preset_row.addWidget(QtWidgets.QLabel("Preset:"))
+        self.shelly_preset_combo = QtWidgets.QComboBox()
+        self.step_presets: Dict[str, QtWidgets.QComboBox] = {}
+        self._refresh_preset_combo()
+        preset_row.addWidget(self.shelly_preset_combo, 1)
+        self.btn_apply_preset = QtWidgets.QPushButton("Apply")
+        self.btn_save_preset = QtWidgets.QPushButton("Save current")
+        preset_row.addWidget(self.btn_apply_preset)
+        preset_row.addWidget(self.btn_save_preset)
+        shelly_layout.addLayout(preset_row)
+
+        step_form = QtWidgets.QFormLayout()
+        for key, label in (("dark", "Dark step"), ("reference", "Reference"), ("raw", "Measurement")):
+            combo = QtWidgets.QComboBox()
+            combo.addItems(self._shelly_presets.keys())
+            combo.setCurrentText(self._step_presets.get(key, next(iter(self._shelly_presets), "")))
+            self.step_presets[key] = combo
+            step_form.addRow(label, combo)
+        shelly_layout.addLayout(step_form)
         ctrl.addWidget(shelly_box)
 
         footer = QtWidgets.QVBoxLayout()
@@ -281,6 +348,18 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.compact_toggle.toggled.connect(self._toggle_compact)
         self.btn_modes.clicked.connect(self._open_modes_dialog)
 
+        self.btn_shelly_connect.clicked.connect(self._connect_dimmer_async)
+        self.btn_shelly_disconnect.clicked.connect(self._disconnect_dimmer)
+        self.shelly_toggle.toggled.connect(self._on_shelly_toggle)
+        self.shelly_brightness_slider.valueChanged.connect(self.shelly_brightness_spin.setValue)
+        self.shelly_brightness_spin.valueChanged.connect(self.shelly_brightness_slider.setValue)
+        self.shelly_brightness_slider.sliderReleased.connect(self._on_shelly_brightness_changed)
+        self.shelly_brightness_spin.editingFinished.connect(self._on_shelly_brightness_changed)
+        self.btn_apply_preset.clicked.connect(self._apply_selected_preset)
+        self.btn_save_preset.clicked.connect(self._save_selected_preset)
+        for key, combo in self.step_presets.items():
+            combo.currentTextChanged.connect(lambda name, k=key: self._on_step_preset_changed(k, name))
+
         self.act_zoom_in.triggered.connect(self._chart.zoomIn)
         self.act_zoom_out.triggered.connect(self._chart.zoomOut)
         self.act_reset.triggered.connect(self._chart.zoomReset)
@@ -310,6 +389,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
         self.capture_timer.stop()
         try:
+            self._disconnect_dimmer()
             self.profiles.set("spectroscopy.compact", self.compact_toggle.isChecked())
             self.profiles.set("spectroscopy.geometry", self.saveGeometry().hex())
             self.profiles.set("spectroscopy.window_state", self.saveState().hex())
@@ -335,6 +415,64 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _toggle_compact(self, checked: bool) -> None:
         self.controls_panel.setVisible(not checked)
         self._compact = checked
+
+    # ------------------------------------------------------------------
+    def _load_shelly_presets(self) -> Dict[str, ShellyState]:
+        defaults = {
+            "Dark": ShellyState(on=False, brightness=0),
+            "Reference": ShellyState(on=True, brightness=25),
+            "Measurement": ShellyState(on=True, brightness=70),
+        }
+        stored = self.profiles.get("spectroscopy.shelly.presets", {}, expected_type=dict) or {}
+        presets: Dict[str, ShellyState] = dict(defaults)
+        for name, payload in stored.items():
+            if not isinstance(payload, dict):
+                continue
+            brightness = payload.get("brightness", presets.get(name, defaults["Dark"]).brightness)
+            on_state = payload.get("on", presets.get(name, defaults["Dark"]).on)
+            try:
+                presets[name] = ShellyState(on=bool(on_state), brightness=max(0, min(100, int(brightness))))
+            except Exception:
+                continue
+        return presets
+
+    def _save_shelly_presets(self) -> None:
+        payload = {name: {"on": state.on, "brightness": state.brightness} for name, state in self._shelly_presets.items()}
+        self.profiles.set("spectroscopy.shelly.presets", payload)
+        self.profiles.save()
+
+    def _load_step_presets(self) -> Dict[str, str]:
+        stored = self.profiles.get("spectroscopy.shelly.step_presets", {}, expected_type=dict) or {}
+        defaults = {"dark": "Dark", "reference": "Reference", "raw": "Measurement"}
+        result = {}
+        for key, default in defaults.items():
+            val = stored.get(key, default)
+            result[key] = val if val in self._shelly_presets else default
+        return result
+
+    def _save_step_presets(self) -> None:
+        self.profiles.set("spectroscopy.shelly.step_presets", dict(self._step_presets))
+        self.profiles.save()
+
+    def _refresh_preset_combo(self, select: Optional[str] = None) -> None:
+        self.shelly_preset_combo.blockSignals(True)
+        current = select or self.shelly_preset_combo.currentText()
+        self.shelly_preset_combo.clear()
+        for name in sorted(self._shelly_presets.keys()):
+            self.shelly_preset_combo.addItem(name)
+        if current:
+            idx = self.shelly_preset_combo.findText(current)
+            if idx >= 0:
+                self.shelly_preset_combo.setCurrentIndex(idx)
+        self.shelly_preset_combo.blockSignals(False)
+        self._refresh_step_presets_widgets()
+
+    def _refresh_step_presets_widgets(self) -> None:
+        for key, combo in self.step_presets.items():
+            with QtCore.QSignalBlocker(combo):
+                combo.clear()
+                combo.addItems(sorted(self._shelly_presets.keys()))
+                combo.setCurrentText(self._step_presets.get(key, ""))
 
     def _refresh_devices(self) -> None:
         devices = self.spectrometer_manager.refresh()
@@ -399,6 +537,177 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         else:
             self.status_led.setStyleSheet("color: red;")
             self.status_label.setText("No spectrometer")
+
+    # ------------------------------------------------------------------
+    def _update_dimmer_controls_enabled(self, enabled: bool) -> None:
+        for widget in (
+            self.shelly_toggle,
+            self.shelly_brightness_slider,
+            self.shelly_brightness_spin,
+            self.btn_apply_preset,
+            self.btn_save_preset,
+            self.shelly_preset_combo,
+            *self.step_presets.values(),
+        ):
+            widget.setEnabled(enabled)
+        self.btn_shelly_disconnect.setEnabled(enabled and self.dimmer is not None)
+
+    def _connect_dimmer_async(self) -> None:
+        host = (self.shelly_host_edit.text() or "").strip()
+        if not host:
+            self.shelly_status.setText("Illumination: host required")
+            return
+        self.shelly_status.setText("Illumination: connecting…")
+        self._update_dimmer_controls_enabled(False)
+        if self._dimmer_conn_thread:
+            self._dimmer_conn_thread.quit()
+            self._dimmer_conn_thread.wait()
+
+        def do_connect():
+            dimmer = ShellyDimmer(host)
+            state = dimmer.connect()
+            return dimmer, state
+
+        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect)
+        self._dimmer_conn_worker.finished.connect(self._on_dimmer_connect)
+
+    @QtCore.Slot(object, object)
+    def _on_dimmer_connect(self, result, err):
+        thread = self._dimmer_conn_thread
+        self._dimmer_conn_thread = self._dimmer_conn_worker = None
+        if err or result is None:
+            log(f"Shelly connect failed: {err}")
+            self._handle_dimmer_failure(err)
+        else:
+            dimmer, state = result
+            self.dimmer = dimmer
+            self._apply_dimmer_state(state)
+            self.btn_shelly_disconnect.setEnabled(True)
+            log(f"Shelly connected: {dimmer.base_url}")
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _disconnect_dimmer(self) -> None:
+        for attr in ("_dimmer_conn_thread", "_dimmer_op_thread"):
+            thread = getattr(self, attr)
+            worker_attr = f"{attr.replace('thread', 'worker')}"
+            if thread:
+                thread.quit()
+                thread.wait()
+            setattr(self, attr, None)
+            setattr(self, worker_attr, None)
+        self.dimmer = None
+        self._update_dimmer_controls_enabled(False)
+        try:
+            self._updating_dimmer_ui = True
+            self.shelly_toggle.setChecked(False)
+            self.shelly_brightness_slider.setValue(self.shelly_brightness_spin.value())
+        finally:
+            self._updating_dimmer_ui = False
+        self.shelly_status.setText("Illumination: disconnected")
+
+    def _run_dimmer_action(self, fn):
+        if not self.dimmer:
+            self.shelly_status.setText("Illumination: not connected")
+            return
+        self.shelly_status.setText("Illumination: updating…")
+        self._update_dimmer_controls_enabled(False)
+        if self._dimmer_op_thread:
+            self._dimmer_op_thread.quit()
+            self._dimmer_op_thread.wait()
+        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn)
+        self._dimmer_op_worker.finished.connect(self._on_dimmer_action_done)
+
+    @QtCore.Slot(object, object)
+    def _on_dimmer_action_done(self, state, err):
+        thread = self._dimmer_op_thread
+        self._dimmer_op_thread = self._dimmer_op_worker = None
+        if err or state is None:
+            log(f"Shelly command failed: {err}")
+            self._handle_dimmer_failure(err)
+        else:
+            self._apply_dimmer_state(state)
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _apply_dimmer_state(self, state: ShellyState):
+        if state is None:
+            self._handle_dimmer_failure("no state")
+            return
+        self._updating_dimmer_ui = True
+        try:
+            self.shelly_toggle.setChecked(state.on)
+            self.shelly_brightness_spin.setValue(state.brightness)
+            self.shelly_brightness_slider.setValue(state.brightness)
+        finally:
+            self._updating_dimmer_ui = False
+        status = "on" if state.on else "off"
+        self.shelly_status.setText(f"Illumination: {status} ({state.brightness}%)")
+        self._update_dimmer_controls_enabled(True)
+        self.btn_shelly_disconnect.setEnabled(True)
+        self.profiles.set("illumination.dimmer.on", state.on)
+        self.profiles.set("illumination.dimmer.brightness", state.brightness)
+        self.profiles.save()
+        log(f"Shelly state -> {status} @ {state.brightness}%")
+
+    def _on_shelly_toggle(self, checked: bool) -> None:
+        if self._updating_dimmer_ui:
+            return
+        log(f"Shelly toggle -> {'on' if checked else 'off'}")
+        self._run_dimmer_action(lambda: self.dimmer.set_on(checked) if self.dimmer else None)
+
+    def _on_shelly_brightness_changed(self) -> None:
+        if self._updating_dimmer_ui:
+            return
+        value = int(self.shelly_brightness_spin.value())
+        log(f"Shelly brightness -> {value}%")
+        self._run_dimmer_action(lambda: self.dimmer.set_brightness(value) if self.dimmer else None)
+
+    def _handle_dimmer_failure(self, err=None):
+        self._update_dimmer_controls_enabled(False)
+        if err:
+            self.shelly_status.setText(f"Illumination: error ({err})")
+        else:
+            self.shelly_status.setText("Illumination: unavailable")
+
+    def _apply_selected_preset(self) -> None:
+        name = self.shelly_preset_combo.currentText()
+        if name:
+            self._apply_preset(name)
+
+    def _apply_preset(self, name: str) -> None:
+        state = self._shelly_presets.get(name)
+        if state is None:
+            self.shelly_status.setText(f"Illumination: preset '{name}' missing")
+            return
+
+        def do_apply():
+            if not self.dimmer:
+                return None
+            self.dimmer.set_on(state.on)
+            return self.dimmer.set_brightness(state.brightness)
+
+        log(f"Applying Shelly preset '{name}' -> {state.brightness}% {'on' if state.on else 'off'}")
+        self._run_dimmer_action(do_apply)
+
+    def _save_selected_preset(self) -> None:
+        name = self.shelly_preset_combo.currentText() or "Preset"
+        state = ShellyState(on=self.shelly_toggle.isChecked(), brightness=int(self.shelly_brightness_spin.value()))
+        self._shelly_presets[name] = state
+        self._refresh_preset_combo(select=name)
+        self._save_shelly_presets()
+        log(f"Saved Shelly preset '{name}' -> {state.brightness}% {'on' if state.on else 'off'}")
+
+    def _on_step_preset_changed(self, step: str, preset: str) -> None:
+        self._step_presets[step] = preset
+        self._save_step_presets()
+        self._refresh_step_presets_widgets()
+        log(f"Wizard step '{step}' now uses preset '{preset}'")
+
+    def _apply_step_preset(self, step: str) -> None:
+        preset = self._step_presets.get(step)
+        if preset:
+            self._apply_preset(preset)
 
     def _connect_selected(self) -> None:
         desc = self._current_descriptor()
@@ -560,6 +869,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             mode,
             self.session,
             capture_callback=self._wizard_capture,
+            preset_names=sorted(self._shelly_presets.keys()),
+            apply_preset=self._apply_step_preset,
+            step_presets=dict(self._step_presets),
+            on_step_preset_changed=self._on_step_preset_changed,
             initial_acquisition={
                 "integration": float(self.integration_spin.value()),
                 "averages": int(self.averages_spin.value()),
@@ -579,6 +892,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if dev is None:
             self.status_message.setText("No spectrometer connected")
             return None
+        self._apply_step_preset(kind)
         try:
             dev.set_integration_time_ms(integration)
             dev.set_averages(averages)
