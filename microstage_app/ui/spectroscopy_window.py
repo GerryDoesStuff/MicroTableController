@@ -11,6 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets, QtCharts
 from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
 from ..spectroscopy.processing import smooth_boxcar, subtract_dark
 from ..spectroscopy.session import SpectroscopySession
+from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
 from ..utils.log import LOG
 
 
@@ -115,6 +116,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager = manager
         self.profiles = profiles
         self.session = SpectroscopySession()
+        self.current_mode = "Absorbance"
         self._compact = bool(self.profiles.get("spectroscopy.compact", False, expected_type=bool))
         self._last_capture_ts = 0.0
 
@@ -277,6 +279,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.btn_stop.clicked.connect(self._stop_continuous)
         self.btn_capture_dark.clicked.connect(self._capture_dark)
         self.compact_toggle.toggled.connect(self._toggle_compact)
+        self.btn_modes.clicked.connect(self._open_modes_dialog)
 
         self.act_zoom_in.triggered.connect(self._chart.zoomIn)
         self.act_zoom_out.triggered.connect(self._chart.zoomOut)
@@ -545,4 +548,43 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         img = self._chart_view.grab()
         img.save(path)
+
+    # ------------------------------------------------------------------
+    def _open_modes_dialog(self) -> None:
+        dlg = ModeSelectorDialog(self.MODES, parent=self)
+        if dlg.exec() == QtWidgets.QDialog.Accepted and dlg.selected_mode:
+            self._launch_wizard(dlg.selected_mode)
+
+    def _launch_wizard(self, mode: str) -> None:
+        wizard = SpectroscopyModeWizard(
+            mode,
+            self.session,
+            capture_callback=self._wizard_capture,
+            initial_acquisition={
+                "integration": float(self.integration_spin.value()),
+                "averages": int(self.averages_spin.value()),
+                "smoothing": int(self.smoothing_spin.value()),
+            },
+            parent=self,
+        )
+        if wizard.exec() == QtWidgets.QDialog.Accepted:
+            self.current_mode = mode
+            self.mode_label.setText(f"Mode: {mode}")
+            self.status_message.setText(f"{mode} wizard completed")
+        else:
+            self.status_message.setText(f"{mode} wizard cancelled")
+
+    def _wizard_capture(self, kind: str, integration: float, averages: int) -> Optional[np.ndarray]:
+        dev = self.spectrometer_manager.active
+        if dev is None:
+            self.status_message.setText("No spectrometer connected")
+            return None
+        try:
+            dev.set_integration_time_ms(integration)
+            dev.set_averages(averages)
+            spectrum = dev.capture()
+            return spectrum
+        except Exception as exc:
+            self.status_message.setText(f"Capture failed: {exc}")
+            return None
 
