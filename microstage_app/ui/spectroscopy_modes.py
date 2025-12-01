@@ -448,6 +448,7 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.currentIdChanged.connect(self._update_finish_state)
         self.finished.connect(self._persist_params)
         self._update_finish_state()
+        self.session.validity_changed.connect(self._on_session_validity_changed)
         for i in range(self.pageCount()):
             page = self.page(i)
             if page is not None:
@@ -483,9 +484,18 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
                 self.state.get("raw_captured"),
                 self.state.get("reference_captured"),
                 self.state.get("dark_captured"),
+                self.session.reference_valid,
+                self.session.dark_valid,
             )
         )
         self.button(QtWidgets.QWizard.FinishButton).setEnabled(bool(finish_enabled))
+
+    def _on_session_validity_changed(self) -> None:
+        if not self.session.dark_valid:
+            self.state["dark_captured"] = False
+        if not self.session.reference_valid:
+            self.state["reference_captured"] = False
+        self._update_finish_state()
 
     def format_metrics(self, result: Tuple[np.ndarray, np.ndarray]) -> str:
         if not self.last_metrics:

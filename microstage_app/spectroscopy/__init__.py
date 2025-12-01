@@ -9,7 +9,7 @@ from .devices import (
     MockSpectrometerProvider,
     OceanOpticsSpectrometerProvider,
 )
-from .session import SpectroscopySession, CalibrationData, ROI
+from .session import AcquisitionMetadata, SpectroscopySession, CalibrationData, ROI
 
 __all__ = [
     "SpectrometerDescriptor",
@@ -19,6 +19,7 @@ __all__ = [
     "MockSpectrometer",
     "MockSpectrometerProvider",
     "OceanOpticsSpectrometerProvider",
+    "AcquisitionMetadata",
     "SpectroscopySession",
     "CalibrationData",
     "ROI",

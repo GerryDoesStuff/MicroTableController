@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -178,6 +179,9 @@ def test_wizard_preconditions_and_invalidation():
 
     assert not finish_btn.isEnabled()
     wizard.state.update({"dark_captured": True, "reference_captured": True, "raw_captured": True})
+    window.session.set_acquisition_context("mock", 10.0, 1, "Absorbance", timestamp=time.time())
+    window.session.set_dark(np.ones_like(window.session.wavelengths))
+    window.session.set_reference(np.ones_like(window.session.wavelengths))
     wizard._update_finish_state()
     assert finish_btn.isEnabled()
 
