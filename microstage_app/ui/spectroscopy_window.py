@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 
@@ -657,6 +658,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._set_current_descriptor(current)
         elif self._default_device:
             self._apply_default_device(devices)
+        elif self.spectrometer_manager.active_descriptor:
+            self._set_current_descriptor(self.spectrometer_manager.active_descriptor)
         self._update_status_from_selection()
 
     def _apply_default_device(self, devices: list[SpectrometerDescriptor]) -> None:
@@ -682,28 +685,32 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 self.device_combo.setCurrentIndex(i)
                 break
 
-    def _on_device_connected(self, device) -> None:
+    def _on_device_connected(self, descriptor, device) -> None:
+        selected = self._current_descriptor()
         if device is None:
-            self.status_led.setStyleSheet("color: red;")
-            self.status_label.setText("Disconnected")
+            if selected == descriptor:
+                self.status_led.setStyleSheet("color: red;")
+                self.status_label.setText("Disconnected")
         else:
-            self.status_led.setStyleSheet("color: green;")
-            label = getattr(device, "descriptor", None)
-            self.status_label.setText(getattr(label, "label", lambda: "Connected")())
+            if descriptor and selected is None:
+                self._set_current_descriptor(descriptor)
+            if descriptor == self._current_descriptor():
+                self.status_led.setStyleSheet("color: green;")
+                self.status_label.setText(descriptor.label())
             try:
-                wavelengths = device.get_wavelengths()
-                self.session.set_wavelengths(wavelengths)
+                if descriptor == self._current_descriptor():
+                    wavelengths = device.get_wavelengths()
+                    self.session.set_wavelengths(wavelengths)
             except Exception as exc:
                 LOG.warning("Failed to read wavelengths: %s", exc)
         self._update_status_from_selection()
 
     def _update_status_from_selection(self) -> None:
-        active = self.spectrometer_manager.active
         desc = self._current_descriptor()
-        is_active = active and desc and getattr(active, "descriptor", None) == desc
-        self.btn_connect.setEnabled(bool(desc) and not is_active)
-        self.btn_disconnect.setEnabled(bool(active))
-        if is_active:
+        active = self.spectrometer_manager.get_active(desc) if desc else None
+        self.btn_connect.setEnabled(bool(desc) and active is None)
+        self.btn_disconnect.setEnabled(active is not None)
+        if active:
             self.status_led.setStyleSheet("color: green;")
             self.status_label.setText("Connected")
         elif desc:
@@ -712,6 +719,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         else:
             self.status_led.setStyleSheet("color: red;")
             self.status_label.setText("No spectrometer")
+
+    def _active_device_with_lock(self):
+        desc = self._current_descriptor() or self.spectrometer_manager.active_descriptor
+        if desc is None:
+            return None, None, None
+        device = self.spectrometer_manager.get_active(desc)
+        lock = self.spectrometer_manager.acquisition_lock(desc) if device else None
+        return device, lock, desc
+
+    def _acquisition_context(self, lock: Optional[QtCore.QMutex]):
+        return QtCore.QMutexLocker(lock) if lock is not None else contextlib.nullcontext()
 
     # ------------------------------------------------------------------
     def _update_dimmer_controls_enabled(self, enabled: bool) -> None:
@@ -902,7 +920,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _disconnect(self) -> None:
         self.capture_timer.stop()
-        self.spectrometer_manager.disconnect()
+        desc = self._current_descriptor()
+        self.spectrometer_manager.disconnect(desc)
         self._update_status_from_selection()
 
     # ------------------------------------------------------------------
@@ -1035,14 +1054,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.recent_meta.setText("No captures yet")
 
     def _capture_dark(self) -> None:
-        dev = self.spectrometer_manager.active
-        if dev is None:
+        dev, lock, _desc = self._active_device_with_lock()
+        if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             return
         try:
-            dev.set_integration_time_ms(self.integration_spin.value())
-            dev.set_averages(self.averages_spin.value())
-            dark = dev.capture()
+            with self._acquisition_context(lock):
+                dev.set_integration_time_ms(self.integration_spin.value())
+                dev.set_averages(self.averages_spin.value())
+                dark = dev.capture()
             self.session.set_dark(dark)
             self._plot_spectrum("dark", dark, color=QtGui.QColor("gray"))
             self.status_message.setText("Dark captured")
@@ -1059,16 +1079,18 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(f"Dark capture failed: {exc}")
 
     def _capture_once(self) -> None:
-        dev = self.spectrometer_manager.active
-        if dev is None:
+        dev, lock, _desc = self._active_device_with_lock()
+        if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             self._stop_continuous()
             return
         start = time.time()
+        raw = None
         try:
-            dev.set_integration_time_ms(self.integration_spin.value())
-            dev.set_averages(self.averages_spin.value())
-            raw = dev.capture()
+            with self._acquisition_context(lock):
+                dev.set_integration_time_ms(self.integration_spin.value())
+                dev.set_averages(self.averages_spin.value())
+                raw = dev.capture()
             self.session.set_raw(raw)
             data = smooth_boxcar(raw, window=self.smoothing_spin.value())
             if self.dark_chk.isChecked() and self.session.dark_spectrum is not None:
@@ -1221,15 +1243,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(f"{mode} wizard cancelled")
 
     def _wizard_capture(self, kind: str, integration: float, averages: int) -> Optional[np.ndarray]:
-        dev = self.spectrometer_manager.active
-        if dev is None:
+        dev, lock, _desc = self._active_device_with_lock()
+        if dev is None or lock is None:
             self.status_message.setText("No spectrometer connected")
             return None
         self._apply_step_preset(kind)
         try:
-            dev.set_integration_time_ms(integration)
-            dev.set_averages(averages)
-            spectrum = dev.capture()
+            with self._acquisition_context(lock):
+                dev.set_integration_time_ms(integration)
+                dev.set_averages(averages)
+                spectrum = dev.capture()
             self._record_capture(
                 kind,
                 spectrum,

@@ -2013,7 +2013,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _populate_spectrometer_list(self, devices):
         selection = self._current_spectrometer_descriptor()
-        active_desc = getattr(self.spectrometer_manager.active, "descriptor", None)
+        active_desc = self.spectrometer_manager.active_descriptor
         if selection is None and active_desc:
             selection = active_desc
         self.spectrometer_list.blockSignals(True)
@@ -2060,11 +2060,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_spectrometer_buttons()
 
     def _disconnect_spectrometer(self):
-        self.spectrometer_manager.disconnect()
+        desc = self._current_spectrometer_descriptor()
+        self.spectrometer_manager.disconnect(desc)
         self._update_spectrometer_buttons()
 
-    def _on_spectrometer_connected(self, device):
-        desc = getattr(device, "descriptor", None)
+    def _on_spectrometer_connected(self, desc, device):
         if desc:
             text = f"Spectrometer: {desc.label()}"
         else:
@@ -2075,8 +2075,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_spectrometer_buttons()
 
     def _update_spectrometer_buttons(self):
-        active = self.spectrometer_manager.active
-        has_selection = bool(self._current_spectrometer_descriptor())
+        desc = self._current_spectrometer_descriptor()
+        active = self.spectrometer_manager.get_active(desc) if desc else None
+        has_selection = bool(desc)
         self.btn_spec_connect.setEnabled(has_selection and active is None)
         self.btn_spec_disconnect.setEnabled(active is not None)
 

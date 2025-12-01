@@ -22,6 +22,7 @@ def test_mock_enumeration_and_acquisition():
 
     device = manager.connect(descriptor)
     assert manager.active is device
+    assert manager.get_active(descriptor) is device
     assert device.is_connected()
 
     wavelengths = device.get_wavelengths()
@@ -71,13 +72,31 @@ def test_manager_routes_multiple_spectrometers():
     assert devices == [first, second]
 
     dev_a = manager.connect(first)
-    assert manager.active is dev_a
+    assert manager.get_active(first) is dev_a
     assert dev_a.descriptor.serial_number == "A"
 
     dev_b = manager.connect(second)
-    assert manager.active is dev_b
+    assert manager.get_active(second) is dev_b
+    assert manager.get_active(first) is dev_a
     assert dev_b.descriptor.serial_number == "B"
     assert dev_a is not dev_b
 
+    manager.disconnect(first)
+    assert manager.get_active(first) is None
+    assert manager.get_active(second) is dev_b
     manager.disconnect()
     assert manager.active is None
+
+
+def test_manager_provides_per_device_locks():
+    first = SpectrometerDescriptor("MockSpectrometer", "L1", "mock://lock1")
+    second = SpectrometerDescriptor("MockSpectrometer", "L2", "mock://lock2")
+    provider = MockSpectrometerProvider([first, second])
+    manager = SpectrometerManager(providers=[provider])
+
+    lock_a = manager.acquisition_lock(first)
+    lock_b = manager.acquisition_lock(second)
+
+    assert lock_a is manager.acquisition_lock(first)
+    assert lock_b is manager.acquisition_lock(second)
+    assert lock_a is not lock_b
