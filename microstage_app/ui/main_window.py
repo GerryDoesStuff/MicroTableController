@@ -439,6 +439,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.max_illumination_rows = 5
         self.illumination_rows: list[dict[str, object]] = []
         self._updating_illumination_ui = False
+        self._illumination_dimmer_cache: dict[str, ShellyDimmer] = {}
+        self._illumination_conn_threads: dict[int, QtCore.QThread] = {}
+        self._illumination_conn_workers: dict[int, object] = {}
+        self._illumination_op_threads: dict[int, QtCore.QThread] = {}
+        self._illumination_op_workers: dict[int, object] = {}
 
         # profiles
         self.profiles = Profiles.load_or_create()
@@ -1230,12 +1235,14 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setColumnStretch(2, 0)
         layout.setColumnStretch(3, 1)
         layout.setColumnStretch(4, 0)
+        layout.setColumnStretch(5, 1)
         layout.setHorizontalSpacing(6)
 
         layout.addWidget(QtWidgets.QLabel("Name"), 0, 0)
         layout.addWidget(QtWidgets.QLabel("IP / Host"), 0, 1)
         layout.addWidget(QtWidgets.QLabel("Power"), 0, 2)
         layout.addWidget(QtWidgets.QLabel("Intensity"), 0, 3, 1, 2)
+        layout.addWidget(QtWidgets.QLabel("Status"), 0, 5)
 
         self.illumination_rows = []
         for idx in range(self.max_illumination_rows):
@@ -1261,11 +1268,15 @@ class MainWindow(QtWidgets.QMainWindow):
             spin.setValue(slider.value())
             spin.setToolTip("Numeric intensity entry for this light. Right-click to re-show.")
 
+            status_label = QtWidgets.QLabel("—")
+            status_label.setTextFormat(QtCore.Qt.PlainText)
+
             layout.addWidget(name_edit, idx + 1, 0)
             layout.addWidget(host_edit, idx + 1, 1)
             layout.addWidget(toggle, idx + 1, 2)
             layout.addWidget(slider, idx + 1, 3)
             layout.addWidget(spin, idx + 1, 4)
+            layout.addWidget(status_label, idx + 1, 5)
 
             row_data = {
                 "widgets": [name_edit, host_edit, toggle, slider, spin],
@@ -1275,6 +1286,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "slider": slider,
                 "spin": spin,
                 "active": False,
+                "status": status_label,
             }
             self.illumination_rows.append(row_data)
             self._set_illumination_row_active(row_data, idx == 0)
@@ -1316,6 +1328,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     slider.setValue(0)
                 if isinstance(spin, QtWidgets.QSpinBox):
                     spin.setValue(0)
+                status = row.get("status")
+                if isinstance(status, QtWidgets.QLabel):
+                    status.setText("—")
+                    status.setStyleSheet("")
         finally:
             self._updating_illumination_ui = False
 
@@ -1377,6 +1393,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     name_edit.setText(cfg.get("name", defaults[idx]["name"]))
                 if isinstance(host_edit, QtWidgets.QLineEdit):
                     host_edit.setText(cfg.get("host", defaults[idx]["host"]))
+                    row["last_host"] = host_edit.text().strip()
                 if isinstance(toggle, QtWidgets.QCheckBox):
                     toggle.setChecked(bool(cfg.get("enabled", False)))
                 brightness = int(cfg.get("brightness", 0))
@@ -1431,6 +1448,178 @@ class MainWindow(QtWidgets.QMainWindow):
         self.profiles.set("illumination.lights", lights)
         if save:
             self.profiles.save()
+
+    def _illumination_row_id(self, row: dict[str, object]) -> int:
+        try:
+            return self.illumination_rows.index(row)
+        except ValueError:
+            return -1
+
+    def _illumination_row_name(self, row: dict[str, object]) -> str:
+        name_edit = row.get("name")
+        if isinstance(name_edit, QtWidgets.QLineEdit):
+            text = name_edit.text().strip()
+            if text:
+                return text
+        return f"Light {self._illumination_row_id(row) + 1}"
+
+    def _set_illumination_status(self, row: dict[str, object], text: str, *, error: bool = False) -> None:
+        label = row.get("status")
+        if isinstance(label, QtWidgets.QLabel):
+            label.setText(text)
+            label.setStyleSheet("color: red" if error else "")
+        name = self._illumination_row_name(row)
+        self.dimmer_status.setText(f"Illumination ({name}): {text}")
+
+    def _get_row_host(self, row: dict[str, object]) -> str:
+        host_edit = row.get("host")
+        if isinstance(host_edit, QtWidgets.QLineEdit):
+            return host_edit.text().strip()
+        return ""
+
+    def _connect_illumination_row_async(self, row: dict[str, object], *, on_connected=None):
+        host = self._get_row_host(row)
+        row_id = self._illumination_row_id(row)
+        if not host:
+            self._set_illumination_status(row, "Host required", error=True)
+            return
+
+        self._set_illumination_status(row, "Connecting…")
+
+        def do_connect():
+            dimmer = self._illumination_dimmer_cache.get(host) or ShellyDimmer(host)
+            state = dimmer.connect()
+            return dimmer, state
+
+        thread = self._illumination_conn_threads.get(row_id)
+        if thread:
+            thread.quit()
+            thread.wait()
+
+        thread, worker = run_async(do_connect)
+        self._illumination_conn_threads[row_id] = thread
+        self._illumination_conn_workers[row_id] = worker
+        worker.finished.connect(
+            lambda result, err, r=row, cb=on_connected: self._on_illumination_row_connected(
+                r, result, err, cb
+            )
+        )
+
+    def _on_illumination_row_connected(self, row: dict[str, object], result, err, cb=None):
+        row_id = self._illumination_row_id(row)
+        thread = self._illumination_conn_threads.pop(row_id, None)
+        self._illumination_conn_workers.pop(row_id, None)
+        if err or not result:
+            log(f"UI: illumination row connect failed: {err}")
+            self._handle_illumination_row_failure(row, err)
+        else:
+            dimmer, state = result
+            host = getattr(dimmer, "host", None)
+            if host:
+                self._illumination_dimmer_cache[host] = dimmer
+            row["dimmer"] = dimmer
+            self._apply_illumination_row_state(row, state)
+            if cb:
+                cb()
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _run_illumination_row_action(self, row: dict[str, object], action_builder):
+        if self._updating_illumination_ui:
+            return
+        host = self._get_row_host(row)
+        if not host:
+            self._set_illumination_status(row, "Host required", error=True)
+            return
+        dimmer = row.get("dimmer")
+        if not dimmer or getattr(dimmer, "host", None) != host:
+            self._connect_illumination_row_async(
+                row, on_connected=lambda: self._run_illumination_row_action(row, action_builder)
+            )
+            return
+
+        row_id = self._illumination_row_id(row)
+        self._set_illumination_status(row, "Updating…")
+        thread = self._illumination_op_threads.get(row_id)
+        if thread:
+            thread.quit()
+            thread.wait()
+
+        def do_action():
+            return action_builder(dimmer) if dimmer else None
+
+        thread, worker = run_async(do_action)
+        self._illumination_op_threads[row_id] = thread
+        self._illumination_op_workers[row_id] = worker
+        worker.finished.connect(
+            lambda state, err, r=row: self._on_illumination_row_action_done(r, state, err)
+        )
+
+    def _on_illumination_row_action_done(self, row: dict[str, object], state, err):
+        row_id = self._illumination_row_id(row)
+        thread = self._illumination_op_threads.pop(row_id, None)
+        self._illumination_op_workers.pop(row_id, None)
+        if err or state is None:
+            log(f"UI: illumination command failed: {err}")
+            self._handle_illumination_row_failure(row, err)
+        else:
+            self._apply_illumination_row_state(row, state)
+        if thread and thread != QtCore.QThread.currentThread():
+            thread.wait()
+
+    def _apply_illumination_row_state(self, row: dict[str, object], state: ShellyState):
+        if state is None:
+            self._handle_illumination_row_failure(row, "no state")
+            return
+        self._updating_illumination_ui = True
+        try:
+            toggle = row.get("toggle")
+            spin = row.get("spin")
+            slider = row.get("slider")
+            if isinstance(toggle, QtWidgets.QCheckBox):
+                toggle.setChecked(state.on)
+            if isinstance(spin, QtWidgets.QSpinBox):
+                spin.setValue(state.brightness)
+            if isinstance(slider, QtWidgets.QSlider):
+                slider.setValue(state.brightness)
+        finally:
+            self._updating_illumination_ui = False
+        status = "on" if state.on else "off"
+        self._set_illumination_status(row, f"{status} ({state.brightness}%)")
+        self._persist_illumination_rows()
+
+    def _handle_illumination_row_failure(self, row: dict[str, object], err=None):
+        row["dimmer"] = None
+        if err:
+            self._set_illumination_status(row, f"error ({err})", error=True)
+        else:
+            self._set_illumination_status(row, "unavailable", error=True)
+
+    def _on_illumination_host_finished(self, row: dict[str, object]):
+        if self._updating_illumination_ui:
+            return
+        host = self._get_row_host(row)
+        if row.get("last_host") != host:
+            row["dimmer"] = None
+            row["last_host"] = host
+        if host:
+            self._connect_illumination_row_async(row)
+        else:
+            self._set_illumination_status(row, "Host required", error=True)
+
+    def _on_illumination_row_toggled(self, row: dict[str, object], checked: bool):
+        if self._updating_illumination_ui:
+            return
+        self._run_illumination_row_action(row, lambda dimmer: dimmer.set_on(checked) if dimmer else None)
+
+    def _on_illumination_brightness_changed(self, row: dict[str, object]):
+        if self._updating_illumination_ui:
+            return
+        spin = row.get("spin")
+        value = int(spin.value()) if isinstance(spin, QtWidgets.QSpinBox) else 0
+        self._run_illumination_row_action(
+            row, lambda dimmer: dimmer.set_brightness(value) if dimmer else None
+        )
 
     def _on_illumination_row_changed(self, row: dict[str, object]):
         if self._updating_illumination_ui:
@@ -1517,12 +1706,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 slider.valueChanged.connect(spin.setValue)
                 spin.valueChanged.connect(slider.setValue)
                 spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+                slider.sliderReleased.connect(lambda r=row: self._on_illumination_brightness_changed(r))
+                spin.editingFinished.connect(lambda r=row: self._on_illumination_brightness_changed(r))
             if isinstance(name_edit, QtWidgets.QLineEdit):
                 name_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
             if isinstance(host_edit, QtWidgets.QLineEdit):
                 host_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+                host_edit.editingFinished.connect(lambda r=row: self._on_illumination_host_finished(r))
             if isinstance(toggle, QtWidgets.QCheckBox):
                 toggle.toggled.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+                toggle.toggled.connect(lambda checked, r=row: self._on_illumination_row_toggled(r, checked))
 
         self._on_edf_toggled(self.chk_edf.isChecked())
 
