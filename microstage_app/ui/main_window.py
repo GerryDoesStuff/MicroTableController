@@ -1247,8 +1247,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.illumination_rows = []
         for idx in range(self.max_illumination_rows):
             name_edit = QtWidgets.QLineEdit()
-            name_edit.setPlaceholderText("Unassigned light")
+            name_edit.setPlaceholderText("<unassigned>")
             name_edit.setToolTip("Custom label for this light source. Right-click to re-show.")
+            name_edit.setReadOnly(True)
+            name_edit.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 
             host_edit = QtWidgets.QLineEdit()
             host_edit.setPlaceholderText("192.168.1.10")
@@ -1411,6 +1413,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if isinstance(slider, QtWidgets.QSlider):
                     slider.setValue(brightness)
 
+                self._update_illumination_name_state(row)
+
                 should_activate = (
                     idx < 2
                     or bool(
@@ -1472,6 +1476,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 return text
         return f"Light {self._illumination_row_id(row) + 1}"
 
+    def _illumination_device_assigned(self, row: dict[str, object]) -> bool:
+        return bool(self._get_row_host(row))
+
+    def _update_illumination_name_state(self, row: dict[str, object]) -> None:
+        name_edit = row.get("name")
+        if not isinstance(name_edit, QtWidgets.QLineEdit):
+            return
+        assigned = self._illumination_device_assigned(row)
+        name_edit.setReadOnly(not assigned)
+
     def _set_illumination_status(self, row: dict[str, object], text: str, *, error: bool = False) -> None:
         label = row.get("status")
         if isinstance(label, QtWidgets.QLabel):
@@ -1485,6 +1499,52 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(host_edit, QtWidgets.QLineEdit):
             return host_edit.text().strip()
         return ""
+
+    def _show_illumination_name_menu(self, row: dict[str, object], pos: QtCore.QPoint) -> None:
+        name_edit = row.get("name")
+        if not isinstance(name_edit, QtWidgets.QLineEdit):
+            return
+
+        menu = QtWidgets.QMenu(name_edit)
+        setup_action = menu.addAction("Setup")
+        setup_action.triggered.connect(lambda _=None, r=row: self._show_illumination_setup_dialog(r))
+
+        menu.exec(name_edit.mapToGlobal(pos))
+
+    def _show_illumination_setup_dialog(self, row: dict[str, object]) -> None:
+        name_edit = row.get("name")
+        host_edit = row.get("host")
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"{self._illumination_row_name(row)} Setup")
+
+        layout = QtWidgets.QFormLayout(dlg)
+        name_input = QtWidgets.QLineEdit()
+        host_input = QtWidgets.QLineEdit()
+        if isinstance(name_edit, QtWidgets.QLineEdit):
+            name_input.setText(name_edit.text())
+            name_input.setPlaceholderText(name_edit.placeholderText())
+        if isinstance(host_edit, QtWidgets.QLineEdit):
+            host_input.setText(host_edit.text())
+            host_input.setPlaceholderText(host_edit.placeholderText())
+
+        layout.addRow("Name", name_input)
+        layout.addRow("IP / Host", host_input)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, parent=dlg
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addRow(buttons)
+
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            if isinstance(name_edit, QtWidgets.QLineEdit):
+                name_edit.setText(name_input.text().strip())
+            if isinstance(host_edit, QtWidgets.QLineEdit):
+                host_edit.setText(host_input.text().strip())
+            self._update_illumination_name_state(row)
+            self._on_illumination_row_changed(row)
+            self._on_illumination_host_finished(row)
 
     def _connect_illumination_row_async(self, row: dict[str, object], *, on_connected=None):
         host = self._get_row_host(row)
@@ -1641,6 +1701,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_illumination_row_changed(self, row: dict[str, object]):
         if self._updating_illumination_ui:
             return
+        self._update_illumination_name_state(row)
         # activate the row if it currently holds user data
         has_data = False
         name_edit = row.get("name")
@@ -1727,6 +1788,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 spin.editingFinished.connect(lambda r=row: self._on_illumination_brightness_changed(r))
             if isinstance(name_edit, QtWidgets.QLineEdit):
                 name_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
+                name_edit.customContextMenuRequested.connect(
+                    lambda pos, r=row: self._show_illumination_name_menu(r, pos)
+                )
             if isinstance(host_edit, QtWidgets.QLineEdit):
                 host_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
                 host_edit.editingFinished.connect(lambda r=row: self._on_illumination_host_finished(r))
