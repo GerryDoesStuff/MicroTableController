@@ -9,6 +9,7 @@ import numpy as np
 from PySide6 import QtCore
 
 from ..utils.log import LOG
+from ..utils.workers import run_async
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,9 @@ class SpectrometerManager(QtCore.QObject):
         self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
         self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
         self._last_active: Optional[SpectrometerDescriptor] = None
+        self._poll_thread: Optional[QtCore.QThread] = None
+        self._poll_worker: Optional[QtCore.QObject] = None
+        self._poll_in_flight = False
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
@@ -89,7 +93,22 @@ class SpectrometerManager(QtCore.QObject):
         return devices
 
     def _poll_devices(self) -> None:
-        devices = self._enumerate_devices()
+        if self._poll_in_flight:
+            return
+        self._poll_in_flight = True
+        thread, worker = run_async(self._enumerate_devices, parent=self)
+        self._poll_thread = thread
+        self._poll_worker = worker
+        worker.finished.connect(self._on_polled_devices)
+
+    @QtCore.Slot(object, object)
+    def _on_polled_devices(self, devices, err) -> None:
+        self._poll_in_flight = False
+        self._poll_thread = None
+        self._poll_worker = None
+        if err:
+            LOG.warning("Spectrometer poll failed: %s", err)
+            return
         self._update_devices(devices)
 
     def _update_devices(self, devices: List[SpectrometerDescriptor]) -> None:
