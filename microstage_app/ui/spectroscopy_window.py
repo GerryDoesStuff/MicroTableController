@@ -61,19 +61,47 @@ class CaptureWorker(QtCore.QObject):
     capture_failed = QtCore.Signal(object, str)
     capture_started = QtCore.Signal(object)
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._stop_requested = False
+
+    @QtCore.Slot()
+    def request_stop(self) -> None:
+        self._stop_requested = True
+
+    def _cancel_if_requested(self, job: CaptureJob) -> bool:
+        if self._stop_requested:
+            self.capture_failed.emit(job, "Capture cancelled")
+            return True
+        return False
+
     @QtCore.Slot(object)
     def perform_capture(self, job: CaptureJob) -> None:
         self.capture_started.emit(job.token)
         start = time.time()
         try:
+            if self._cancel_if_requested(job):
+                return
             job.lock.lock()
             try:
+                if self._cancel_if_requested(job):
+                    return
                 job.device.set_integration_time_ms(job.integration_ms)
+                if self._cancel_if_requested(job):
+                    return
                 job.device.set_averages(job.averages)
+                if self._cancel_if_requested(job):
+                    return
                 raw = job.device.capture()
+                if self._cancel_if_requested(job):
+                    return
             finally:
                 job.lock.unlock()
+            if self._cancel_if_requested(job):
+                return
             processed = smooth_boxcar(np.asarray(raw, dtype=float), window=job.smoothing)
+            if self._cancel_if_requested(job):
+                return
             if job.subtract_dark and job.dark_spectrum is not None:
                 try:
                     processed = subtract_dark(processed, job.dark_spectrum)
@@ -81,6 +109,8 @@ class CaptureWorker(QtCore.QObject):
                     pass
             duration = time.time() - start
             peak = float(np.nanmax(raw)) if raw is not None else float("nan")
+            if self._cancel_if_requested(job):
+                return
             self.capture_ready.emit(job, processed, np.asarray(raw, dtype=float), duration, peak)
         except Exception as exc:  # pragma: no cover - runtime safety
             self.capture_failed.emit(job, str(exc))
@@ -731,9 +761,18 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
         self.capture_timer.stop()
         self._capture_token = object()
+        self._continuous = False
+        QtCore.QMetaObject.invokeMethod(
+            self._capture_worker, "request_stop", QtCore.Qt.QueuedConnection
+        )
         if self._capture_thread.isRunning():
             self._capture_thread.quit()
-            self._capture_thread.wait(1000)
+            stopped = self._capture_thread.wait(10000)
+            if stopped:
+                self._capture_worker.deleteLater()
+                self._capture_thread.deleteLater()
+            else:
+                LOG.warning("Capture thread did not finish before window closed")
         try:
             self.profiles.set("spectroscopy.geometry", self.saveGeometry().hex())
             self.profiles.set("spectroscopy.window_state", self.saveState().hex())
