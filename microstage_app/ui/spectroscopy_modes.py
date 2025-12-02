@@ -588,9 +588,13 @@ class ResultsPage(BaseWizardPage):
         self.chart = QtCharts.QChart()
         self.chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
         self.chart.legend().setVisible(True)
-        self.chart.createDefaultAxes()
-        self.chart.axisX().setTitleText("Wavelength (nm)")
-        self.chart.axisY().setTitleText("Intensity")
+        self.x_axis = QtCharts.QValueAxis()
+        self.y_axis = QtCharts.QValueAxis()
+        self.chart.addAxis(self.x_axis, QtCore.Qt.AlignBottom)
+        self.chart.addAxis(self.y_axis, QtCore.Qt.AlignLeft)
+        self.x_axis.setTitleText("Wavelength (nm)")
+        self.y_axis.setTitleText("Intensity")
+        self.secondary_axis: Optional[QtCharts.QCategoryAxis] = None
         self.chart_view = QtCharts.QChartView(self.chart)
         self.chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.history_list = QtWidgets.QListWidget()
@@ -641,44 +645,37 @@ class ResultsPage(BaseWizardPage):
         if result is None:
             self.metrics.setText("No result computed; capture sample, dark, and reference first.")
             return
-        x_axis = self.chart.axisX()
-        y_axis = self.chart.axisY()
         if self.wizard_ref.mode == "Raman":
-            if getattr(self, "secondary_axis", None) is None:
+            if self.secondary_axis is None:
                 self.secondary_axis = QtCharts.QCategoryAxis()
                 self.chart.addAxis(self.secondary_axis, QtCore.Qt.AlignTop)
         else:
-            if getattr(self, "secondary_axis", None):
+            if self.secondary_axis:
                 self.chart.removeAxis(self.secondary_axis)
             self.secondary_axis = None
-        if x_axis:
-            if self.wizard_ref.mode == "Raman":
-                x_axis.setTitleText("Raman shift (cm⁻¹)")
-            else:
-                x_axis.setTitleText("Wavelength (nm)")
-        if x_axis:
-            x_axis.setRange(float(np.min(result[0])), float(np.max(result[0])))
+        if self.wizard_ref.mode == "Raman":
+            self.x_axis.setTitleText("Raman shift (cm⁻¹)")
+        else:
+            self.x_axis.setTitleText("Wavelength (nm)")
+        self.x_axis.setRange(float(np.min(result[0])), float(np.max(result[0])))
         ymin, ymax = np.min(result[1]), np.max(result[1])
         if ymin == ymax:
             ymax += 1.0
-        if y_axis:
-            if self.wizard_ref.mode == "Absorbance":
-                y_axis.setTitleText("Absorbance (AU)")
-            elif self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
-                y_axis.setTitleText("%" if self.wizard_ref.mode_params.get("as_percent", True) else "Ratio")
-            elif self.wizard_ref.mode == "Relative Irradiance":
-                y_axis.setTitleText("Irradiance")
-            elif self.wizard_ref.mode == "Raman":
-                y_axis.setTitleText("Intensity (a.u.)")
-            y_axis.setRange(float(ymin), float(ymax))
+        if self.wizard_ref.mode == "Absorbance":
+            self.y_axis.setTitleText("Absorbance (AU)")
+        elif self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
+            self.y_axis.setTitleText("%" if self.wizard_ref.mode_params.get("as_percent", True) else "Ratio")
+        elif self.wizard_ref.mode == "Relative Irradiance":
+            self.y_axis.setTitleText("Irradiance")
+        elif self.wizard_ref.mode == "Raman":
+            self.y_axis.setTitleText("Intensity (a.u.)")
+        self.y_axis.setRange(float(ymin), float(ymax))
         # current result
         series = self._series_from_data("Current", result[0], result[1], QtGui.QColor("deepskyblue"))
         self.chart.addSeries(series)
-        if x_axis:
-            series.attachAxis(x_axis)
-        if y_axis:
-            series.attachAxis(y_axis)
-        if getattr(self, "secondary_axis", None):
+        series.attachAxis(self.x_axis)
+        series.attachAxis(self.y_axis)
+        if self.secondary_axis:
             series.attachAxis(self.secondary_axis)
             self._configure_raman_secondary_axis(result[0])
         item = QtWidgets.QListWidgetItem("Current result")
@@ -706,12 +703,8 @@ class ResultsPage(BaseWizardPage):
             return
         series = self._series_from_data(name, self.session.wavelengths, data, color)
         self.chart.addSeries(series)
-        x_axis = self.chart.axisX()
-        y_axis = self.chart.axisY()
-        if x_axis:
-            series.attachAxis(x_axis)
-        if y_axis:
-            series.attachAxis(y_axis)
+        series.attachAxis(self.x_axis)
+        series.attachAxis(self.y_axis)
         item = QtWidgets.QListWidgetItem(name)
         item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
         item.setCheckState(QtCore.Qt.Unchecked)
