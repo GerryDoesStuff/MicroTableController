@@ -439,9 +439,12 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         ts_layout = QtWidgets.QVBoxLayout(ts_group)
         self._ts_chart = QtCharts.QChart()
         self._ts_chart.legend().setVisible(True)
-        self._ts_chart.createDefaultAxes()
-        self._ts_chart.axisX().setTitleText("Time (s)")
-        self._ts_chart.axisY().setTitleText("Intensity (a.u.)")
+        axis_x = QtCharts.QValueAxis()
+        axis_x.setTitleText("Time (s)")
+        axis_y = QtCharts.QValueAxis()
+        axis_y.setTitleText("Intensity (a.u.)")
+        self._ts_chart.addAxis(axis_x, QtCore.Qt.AlignBottom)
+        self._ts_chart.addAxis(axis_y, QtCore.Qt.AlignLeft)
         self._ts_chart_view = QtCharts.QChartView(self._ts_chart)
         self._ts_chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
         ts_layout.addWidget(self._ts_chart_view, 1)
@@ -1785,6 +1788,21 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         spectra = np.vstack([np.asarray(s, dtype=float) for _, s, _ in self._time_series_records])
 
         if self.chk_show_timeseries.isChecked():
+            axis_x = self._ts_chart.axisX()
+            axis_y = self._ts_chart.axisY()
+            if axis_x is None:
+                axis_x = QtCharts.QValueAxis()
+                axis_x.setTitleText("Time (s)")
+                self._ts_chart.addAxis(axis_x, QtCore.Qt.AlignBottom)
+            if axis_y is None:
+                axis_y = QtCharts.QValueAxis()
+                axis_y.setTitleText("Intensity (a.u.)")
+                self._ts_chart.addAxis(axis_y, QtCore.Qt.AlignLeft)
+            for series in self._ts_traces.values():
+                if axis_x and axis_x not in series.attachedAxes():
+                    series.attachAxis(axis_x)
+                if axis_y and axis_y not in series.attachedAxes():
+                    series.attachAxis(axis_y)
             desired = self._selected_wavelengths(wavelengths)
             keep_keys = set()
             for wl in desired:
@@ -1794,12 +1812,6 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                     series = QtCharts.QLineSeries()
                     series.setName(key)
                     self._ts_chart.addSeries(series)
-                    axis_x = self._ts_chart.axisX()
-                    axis_y = self._ts_chart.axisY()
-                    if axis_x is None or axis_y is None:
-                        self._ts_chart.createDefaultAxes()
-                        axis_x = self._ts_chart.axisX()
-                        axis_y = self._ts_chart.axisY()
                     if axis_x:
                         series.attachAxis(axis_x)
                     if axis_y:
@@ -2069,4 +2081,3 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             self.status_message.setText(f"Capture failed: {exc}")
             return None
-
