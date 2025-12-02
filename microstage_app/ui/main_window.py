@@ -80,6 +80,102 @@ def _load_feed_limits():
         return None
 
 
+class IlluminationSetupDialog(QtWidgets.QDialog):
+    """Modal dialog for configuring and connecting an illumination device."""
+
+    def __init__(self, *, name: str = "", host: str = "", parent=None):
+        super().__init__(parent)
+        self.setModal(True)
+
+        self.connected_result: tuple[ShellyDimmer, ShellyState] | None = None
+
+        self.name_input = QtWidgets.QLineEdit(name)
+        self.host_input = QtWidgets.QLineEdit(host)
+
+        self.status_label = QtWidgets.QLabel("Not connected")
+        self.status_label.setTextFormat(QtCore.Qt.PlainText)
+
+        self.connect_button = QtWidgets.QPushButton("Connect")
+        self.connect_button.clicked.connect(self._on_connect)
+
+        self.cancel_button = QtWidgets.QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow("Name", self.name_input)
+        form.addRow("IP / Host", self.host_input)
+        form.addRow("Status", self.status_label)
+
+        buttons = QtWidgets.QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self.connect_button)
+        buttons.addWidget(self.cancel_button)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+        self._connect_thread: QtCore.QThread | None = None
+        self._connect_worker = None
+
+    def _set_status(self, text: str, *, success: bool = False, error: bool = False):
+        color = ""
+        if success:
+            color = "green"
+        elif error:
+            color = "red"
+        self.status_label.setText(text)
+        self.status_label.setStyleSheet(f"color: {color}" if color else "")
+
+    def _on_connect(self):
+        host = self.host_input.text().strip()
+        if not host:
+            self._set_status("Host required", error=True)
+            return
+
+        self._cleanup_worker()
+        self._set_status("Connecting…")
+        self.connect_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+
+        def do_connect():
+            dimmer = ShellyDimmer(host)
+            state = dimmer.connect()
+            return dimmer, state
+
+        thread, worker = run_async(do_connect, parent=self)
+        self._connect_thread = thread
+        self._connect_worker = worker
+        worker.finished.connect(lambda result, err, h=host: self._on_connected(h, result, err))
+
+    def _on_connected(self, host: str, result, err):
+        self._cleanup_worker()
+        if err or not result:
+            self._set_status(f"Error: {err}", error=True)
+            self.connect_button.setEnabled(True)
+            self.cancel_button.setEnabled(True)
+            return
+
+        self.connected_result = result
+        self.host_input.setText(host)
+        self._set_status("Connected", success=True)
+        self.connect_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        QtCore.QTimer.singleShot(2000, self.accept)
+
+    def _cleanup_worker(self):
+        thread = self._connect_thread
+        if thread:
+            thread.quit()
+            thread.wait()
+        self._connect_thread = None
+        self._connect_worker = None
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self._cleanup_worker()
+        return super().closeEvent(event)
+
+
 class MeasureView(QtWidgets.QGraphicsView):
     calibration_measured = QtCore.Signal(float)
 
@@ -1514,37 +1610,31 @@ class MainWindow(QtWidgets.QMainWindow):
     def _show_illumination_setup_dialog(self, row: dict[str, object]) -> None:
         name_edit = row.get("name")
         host_edit = row.get("host")
-        dlg = QtWidgets.QDialog(self)
+        name = name_edit.text() if isinstance(name_edit, QtWidgets.QLineEdit) else ""
+        host = host_edit.text() if isinstance(host_edit, QtWidgets.QLineEdit) else ""
+        dlg = IlluminationSetupDialog(name=name, host=host, parent=self)
         dlg.setWindowTitle(f"{self._illumination_row_name(row)} Setup")
-
-        layout = QtWidgets.QFormLayout(dlg)
-        name_input = QtWidgets.QLineEdit()
-        host_input = QtWidgets.QLineEdit()
         if isinstance(name_edit, QtWidgets.QLineEdit):
-            name_input.setText(name_edit.text())
-            name_input.setPlaceholderText(name_edit.placeholderText())
+            dlg.name_input.setPlaceholderText(name_edit.placeholderText())
         if isinstance(host_edit, QtWidgets.QLineEdit):
-            host_input.setText(host_edit.text())
-            host_input.setPlaceholderText(host_edit.placeholderText())
+            dlg.host_input.setPlaceholderText(host_edit.placeholderText())
 
-        layout.addRow("Name", name_input)
-        layout.addRow("IP / Host", host_input)
-
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, parent=dlg
-        )
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addRow(buttons)
-
-        if dlg.exec() == QtWidgets.QDialog.Accepted:
+        if dlg.exec() == QtWidgets.QDialog.Accepted and dlg.connected_result:
+            device_name = dlg.name_input.text().strip()
+            host_text = dlg.host_input.text().strip()
             if isinstance(name_edit, QtWidgets.QLineEdit):
-                name_edit.setText(name_input.text().strip())
+                name_edit.setText(device_name)
             if isinstance(host_edit, QtWidgets.QLineEdit):
-                host_edit.setText(host_input.text().strip())
+                host_edit.setText(host_text)
+            row["last_host"] = host_text
+
+            dimmer, state = dlg.connected_result
+            row["dimmer"] = dimmer
+            self._illumination_dimmer_cache[host_text] = dimmer
+
             self._update_illumination_name_state(row)
+            self._apply_illumination_row_state(row, state)
             self._on_illumination_row_changed(row)
-            self._on_illumination_host_finished(row)
 
     def _connect_illumination_row_async(self, row: dict[str, object], *, on_connected=None):
         host = self._get_row_host(row)
