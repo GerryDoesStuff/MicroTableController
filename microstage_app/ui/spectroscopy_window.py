@@ -1046,6 +1046,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         try:
             dev = self.spectrometer_manager.connect(desc)
+            if dev is None:
+                self.status_message.setText("Connect failed: no device available")
+                self._update_status_from_selection()
+                self._update_session_context()
+                return
             wavelengths = dev.get_wavelengths()
             self.session.set_wavelengths(wavelengths)
             self._default_device = self._device_key(desc)
