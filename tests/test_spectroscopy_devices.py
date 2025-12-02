@@ -3,6 +3,7 @@ import numpy as np
 from microstage_app.spectroscopy.devices import (
     MockSpectrometerProvider,
     OceanOpticsSpectrometer,
+    OceanOpticsSpectrometerProvider,
     SpectrometerDescriptor,
     SpectrometerManager,
 )
@@ -131,3 +132,23 @@ def test_ocean_optics_connect_handles_missing_backend(monkeypatch):
 
     assert spec.connect() is None
     assert not spec.is_connected()
+
+
+def test_ocean_optics_enumeration_handles_list_failure(monkeypatch):
+    class _FailingBackend:
+        @staticmethod
+        def list_devices():
+            raise OSError("USB enumeration failed")
+
+    monkeypatch.setattr(
+        OceanOpticsSpectrometer, "_get_backend", staticmethod(lambda: _FailingBackend)
+    )
+
+    provider = OceanOpticsSpectrometerProvider()
+    manager = SpectrometerManager(providers=[provider])
+
+    assert OceanOpticsSpectrometer.enumerate() == []
+
+    devices = manager.refresh()
+
+    assert devices == []

@@ -268,7 +268,12 @@ class OceanOpticsSpectrometer:
         if backend is None:
             return []
         descriptors: List[SpectrometerDescriptor] = []
-        for dev in backend.list_devices():
+        try:
+            devices = backend.list_devices()
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
+            return []
+        for dev in devices:
             descriptors.append(
                 SpectrometerDescriptor(
                     model=getattr(dev, "model", "OceanOptics"),
@@ -312,7 +317,12 @@ class OceanOpticsSpectrometer:
             return None
         desired_serial = str(self.descriptor.serial_number or "")
         desired_path = str(self.descriptor.path or "")
-        for dev in backend.list_devices():
+        try:
+            devices = backend.list_devices()
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
+            return None
+        for dev in devices:
             dev_serial = str(getattr(dev, "serial_number", ""))
             dev_path = str(getattr(dev, "path", getattr(dev, "device_node", "")))
             if desired_serial and dev_serial == desired_serial:
