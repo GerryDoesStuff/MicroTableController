@@ -618,6 +618,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Left column: device + profiles
         leftw = QtWidgets.QWidget()
         left = QtWidgets.QVBoxLayout(leftw)
+        left.setSpacing(10)
         self.stage_status = QtWidgets.QLabel("Stage: —")
         self.stage_status.setTextFormat(QtCore.Qt.PlainText)
         self.stage_pos = QtWidgets.QLabel("Pos: —")
@@ -642,45 +643,33 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addWidget(self.dimmer_status)
         left.addWidget(self.spectrometer_status)
 
-        # Illumination controls
-        illum_box = QtWidgets.QGroupBox("Illumination")
-        il = QtWidgets.QGridLayout(illum_box)
-        il.setColumnStretch(1, 1)
-        il.setColumnStretch(2, 0)
-        row = 0
-        self.dimmer_host_edit = QtWidgets.QLineEdit(self.dimmer_host_default)
-        self.btn_dimmer_connect = QtWidgets.QPushButton("Connect")
-        self.btn_dimmer_disconnect = QtWidgets.QPushButton("Disconnect")
+        # Legacy single-dimmer controls kept hidden; illumination now configured on the
+        # Camera tab.
+        self.dimmer_host_edit = QtWidgets.QLineEdit(self.dimmer_host_default, leftw)
+        self.btn_dimmer_connect = QtWidgets.QPushButton("Connect", leftw)
+        self.btn_dimmer_disconnect = QtWidgets.QPushButton("Disconnect", leftw)
         self.btn_dimmer_disconnect.setEnabled(False)
-        il.addWidget(QtWidgets.QLabel("Host:"), row, 0)
-        il.addWidget(self.dimmer_host_edit, row, 1)
-        row += 1
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 0)
-        btn_row.setSpacing(6)
-        btn_row.addWidget(self.btn_dimmer_connect)
-        btn_row.addWidget(self.btn_dimmer_disconnect)
-        il.addLayout(btn_row, row, 0, 1, 3)
-        row += 1
-        self.dimmer_toggle = QtWidgets.QCheckBox("On")
+        self.dimmer_toggle = QtWidgets.QCheckBox("On", leftw)
         self.dimmer_toggle.setChecked(self.dimmer_on_default)
         self.dimmer_toggle.setEnabled(False)
-        il.addWidget(self.dimmer_toggle, row, 0)
-        row += 1
-        self.dimmer_brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.dimmer_brightness_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, leftw)
         self.dimmer_brightness_slider.setRange(0, 100)
-        self.dimmer_brightness_spin = QtWidgets.QSpinBox()
+        self.dimmer_brightness_spin = QtWidgets.QSpinBox(leftw)
         self.dimmer_brightness_spin.setRange(0, 100)
         self.dimmer_brightness_spin.setValue(self.dimmer_brightness_default)
         self.dimmer_brightness_slider.setValue(self.dimmer_brightness_spin.value())
         self.dimmer_brightness_slider.setEnabled(False)
         self.dimmer_brightness_spin.setEnabled(False)
-        il.addWidget(QtWidgets.QLabel("Brightness:"), row, 0)
-        il.addWidget(self.dimmer_brightness_slider, row, 1)
-        il.addWidget(self.dimmer_brightness_spin, row, 2)
-        row += 1
-        il.setRowStretch(row, 1)
-        left.addWidget(illum_box)
+        for w in (
+            self.dimmer_host_edit,
+            self.btn_dimmer_connect,
+            self.btn_dimmer_disconnect,
+            self.dimmer_toggle,
+            self.dimmer_brightness_slider,
+            self.dimmer_brightness_spin,
+        ):
+            w.hide()
+
         # Homing controls
         home_box = QtWidgets.QGroupBox("Homing")
         hl = QtWidgets.QVBoxLayout(home_box)
