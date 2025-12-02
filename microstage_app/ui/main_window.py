@@ -2554,10 +2554,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 text += f"\n{uuid}"
             self.stage_status.setText(text)
             try:
-                self.stage_bounds = self.stage.get_bounds()
+                bounds = self.stage.get_bounds()
+                if bounds:
+                    self.stage_bounds = bounds
             except Exception as e:
                 log(f"Stage: failed to get bounds: {e}")
-            self.stage_bounds = None
             log("UI: stage connected (async)")
             self._attach_stage_worker()
         self._update_stage_buttons()
