@@ -52,7 +52,7 @@ class _SpectrometerProvider(Protocol):
     def list_devices(self) -> List[SpectrometerDescriptor]:
         ...
 
-    def connect(self, descriptor: SpectrometerDescriptor) -> SpectrometerDevice:
+    def connect(self, descriptor: SpectrometerDescriptor) -> Optional[SpectrometerDevice]:
         ...
 
 
@@ -151,25 +151,53 @@ class SpectrometerManager(QtCore.QObject):
         self._update_devices(devices)
         return list(self._devices)
 
-    def connect(self, descriptor: SpectrometerDescriptor) -> SpectrometerDevice:
+    def connect(self, descriptor: SpectrometerDescriptor) -> Optional[SpectrometerDevice]:
         if descriptor in self._active:
             device = self._active[descriptor]
             if not device.is_connected():
-                device.connect()
+                try:
+                    device.connect()
+                except Exception as exc:
+                    LOG.warning("Failed to connect spectrometer %s: %s", descriptor.label(), exc)
+                    self.device_connected.emit(descriptor, None)
+                    return None
             self._last_active = descriptor
             self.device_connected.emit(descriptor, device)
             return device
         for provider in self._providers:
-            for candidate in provider.list_devices():
+            try:
+                candidates = provider.list_devices()
+            except Exception as exc:  # pragma: no cover - defensive
+                LOG.warning("Failed to enumerate spectrometers: %s", exc)
+                continue
+            for candidate in candidates:
                 if candidate == descriptor:
-                    device = provider.connect(descriptor)
-                    device.connect()
+                    try:
+                        device = provider.connect(descriptor)
+                    except Exception as exc:
+                        LOG.warning(
+                            "Failed to create spectrometer %s: %s", descriptor.label(), exc
+                        )
+                        device = None
+                    if device is None:
+                        self.device_connected.emit(descriptor, None)
+                        return None
+                    try:
+                        device.connect()
+                    except Exception as exc:
+                        LOG.warning(
+                            "Failed to connect spectrometer %s: %s", descriptor.label(), exc
+                        )
+                        self.device_connected.emit(descriptor, None)
+                        return None
                     self._active[descriptor] = device
                     self._locks.setdefault(descriptor, QtCore.QMutex())
                     self._last_active = descriptor
                     self.device_connected.emit(descriptor, device)
                     return device
-        raise RuntimeError("Device not found: %s" % descriptor.label())
+        LOG.warning("Device not found: %s", descriptor.label())
+        self.device_connected.emit(descriptor, None)
+        return None
 
     def disconnect(self, descriptor: Optional[SpectrometerDescriptor] = None) -> None:
         targets = [descriptor] if descriptor else list(self._active.keys())
@@ -221,10 +249,18 @@ class OceanOpticsSpectrometer:
 
     @staticmethod
     def _get_backend():
-        spec = importlib.util.find_spec("seabreeze.spectrometers")
+        try:
+            spec = importlib.util.find_spec("seabreeze.spectrometers")
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning("Failed to check for seabreeze backend: %s", exc)
+            return None
         if spec is None:
             return None
-        return importlib.import_module("seabreeze.spectrometers")
+        try:
+            return importlib.import_module("seabreeze.spectrometers")
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning("Failed to import seabreeze backend: %s", exc)
+            return None
 
     @classmethod
     def enumerate(cls) -> List[SpectrometerDescriptor]:
@@ -242,18 +278,33 @@ class OceanOpticsSpectrometer:
             )
         return descriptors
 
-    def connect(self) -> None:
+    def connect(self) -> Optional[object]:
         backend = self._get_backend()
         if backend is None:
-            raise RuntimeError("seabreeze backend unavailable for OceanOptics spectrometers")
+            LOG.warning("seabreeze backend unavailable for OceanOptics spectrometers")
+            return None
         if self._device is not None:
             self.disconnect()
-        target = self._find_matching_device()
+        try:
+            target = self._find_matching_device()
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning(
+                "Failed to locate OceanOptics spectrometer %s: %s", self.descriptor.label(), exc
+            )
+            return None
         if target is None:
-            raise RuntimeError(f"Spectrometer not found: {self.descriptor.label()}")
-        self._device = backend.Spectrometer(target)
-        self._connected = True
-        self._device.integration_time_micros(int(self._integration_time_ms * 1000))
+            LOG.warning("Spectrometer not found: %s", self.descriptor.label())
+            return None
+        try:
+            self._device = backend.Spectrometer(target)
+            self._connected = True
+            self._device.integration_time_micros(int(self._integration_time_ms * 1000))
+            return self._device
+        except Exception as exc:  # pragma: no cover - defensive
+            LOG.warning("Failed to connect OceanOptics spectrometer %s: %s", self.descriptor.label(), exc)
+            self._device = None
+            self._connected = False
+            return None
 
     def _find_matching_device(self):
         backend = self._get_backend()
@@ -284,6 +335,8 @@ class OceanOpticsSpectrometer:
     def get_wavelengths(self) -> np.ndarray:
         if self._device is None:
             self.connect()
+        if self._device is None:
+            raise RuntimeError("Spectrometer is not connected")
         return np.asarray(self._device.wavelengths(), dtype=float)
 
     def capture(self) -> np.ndarray:

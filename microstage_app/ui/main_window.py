@@ -2415,6 +2415,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             dev = self.spectrometer_manager.connect(desc)
+            if dev is None:
+                self.spectrometer_status.setText(
+                    "Spectrometer: Unable to connect (missing drivers or device?)"
+                )
+                return
             wavelengths = dev.get_wavelengths()
             if self.spectroscopy_window:
                 self.spectroscopy_window.session.set_wavelengths(wavelengths)

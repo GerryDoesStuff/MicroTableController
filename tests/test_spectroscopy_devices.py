@@ -2,6 +2,7 @@ import numpy as np
 
 from microstage_app.spectroscopy.devices import (
     MockSpectrometerProvider,
+    OceanOpticsSpectrometer,
     SpectrometerDescriptor,
     SpectrometerManager,
 )
@@ -100,3 +101,33 @@ def test_manager_provides_per_device_locks():
     assert lock_a is manager.acquisition_lock(first)
     assert lock_b is manager.acquisition_lock(second)
     assert lock_a is not lock_b
+
+
+def test_manager_handles_provider_connect_errors(monkeypatch):
+    descriptor = SpectrometerDescriptor("OceanOptics", "ERR", "mock://err")
+
+    class _FailingProvider:
+        def list_devices(self):
+            return [descriptor]
+
+        def connect(self, _descriptor):
+            raise ImportError("seabreeze not installed")
+
+    manager = SpectrometerManager(providers=[_FailingProvider()])
+
+    device = manager.connect(descriptor)
+
+    assert device is None
+    assert manager.get_active(descriptor) is None
+
+
+def test_ocean_optics_connect_handles_missing_backend(monkeypatch):
+    descriptor = SpectrometerDescriptor("OceanOptics", "ERR2", "mock://err2")
+    spec = OceanOpticsSpectrometer(descriptor)
+
+    monkeypatch.setattr(
+        OceanOpticsSpectrometer, "_get_backend", staticmethod(lambda: None)
+    )
+
+    assert spec.connect() is None
+    assert not spec.is_connected()
