@@ -13,9 +13,12 @@ class FuncWorker(QtCore.QObject):
         except Exception as e:
             self.finished.emit(None, e)
 
-def run_async(fn, *args, **kwargs):
-    """Run fn(*) on a fresh QThread; return (thread, worker). Caller must keep refs until finished."""
-    thread = QtCore.QThread()
+def run_async(fn, *args, parent: QtCore.QObject | None = None, **kwargs):
+    """Run fn(*) on a fresh QThread (optionally parented); return (thread, worker).
+
+    Caller must keep refs until finished.
+    """
+    thread = QtCore.QThread(parent)
     worker = FuncWorker(fn, *args, **kwargs)
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
