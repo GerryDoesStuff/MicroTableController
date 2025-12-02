@@ -1865,7 +1865,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dimmer_toggle.toggled.connect(self._on_dimmer_toggle)
         self.dimmer_brightness_slider.valueChanged.connect(self.dimmer_brightness_spin.setValue)
         self.dimmer_brightness_spin.valueChanged.connect(self.dimmer_brightness_slider.setValue)
-        self.dimmer_brightness_spin.valueChanged.connect(self._on_dimmer_brightness_changed)
+        self.dimmer_brightness_slider.sliderReleased.connect(self._on_dimmer_brightness_changed)
+        self.dimmer_brightness_spin.editingFinished.connect(self._on_dimmer_brightness_changed)
         self.btn_add_illumination.clicked.connect(self._show_next_illumination_row)
         self.btn_remove_illumination.clicked.connect(self._hide_last_illumination_row)
         for row in self.illumination_rows:
@@ -1878,7 +1879,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 slider.valueChanged.connect(spin.setValue)
                 spin.valueChanged.connect(slider.setValue)
                 spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
-                spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_brightness_changed(r))
+                slider.sliderReleased.connect(lambda r=row: self._on_illumination_brightness_changed(r))
+                spin.editingFinished.connect(lambda r=row: self._on_illumination_brightness_changed(r))
             if isinstance(name_edit, QtWidgets.QLineEdit):
                 name_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
                 name_edit.customContextMenuRequested.connect(
