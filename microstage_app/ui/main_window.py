@@ -1496,7 +1496,7 @@ class MainWindow(QtWidgets.QMainWindow):
             thread.quit()
             thread.wait()
 
-        thread, worker = run_async(do_connect)
+        thread, worker = run_async(do_connect, parent=self)
         self._illumination_conn_threads[row_id] = thread
         self._illumination_conn_workers[row_id] = worker
         worker.finished.connect(
@@ -1548,7 +1548,7 @@ class MainWindow(QtWidgets.QMainWindow):
         def do_action():
             return action_builder(dimmer) if dimmer else None
 
-        thread, worker = run_async(do_action)
+        thread, worker = run_async(do_action, parent=self)
         self._illumination_op_threads[row_id] = thread
         self._illumination_op_workers[row_id] = worker
         worker.finished.connect(
@@ -1594,6 +1594,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_illumination_status(row, f"error ({err})", error=True)
         else:
             self._set_illumination_status(row, "unavailable", error=True)
+
+    def _stop_illumination_threads(self):
+        for mapping in (self._illumination_conn_threads, self._illumination_op_threads):
+            for thread in list(mapping.values()):
+                if thread:
+                    thread.quit()
+                    thread.wait()
+            mapping.clear()
 
     def _on_illumination_host_finished(self, row: dict[str, object]):
         if self._updating_illumination_ui:
@@ -2020,7 +2028,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._dimmer_conn_thread:
             self._dimmer_conn_thread.quit()
             self._dimmer_conn_thread.wait()
-        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect)
+        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect, parent=self)
         self._dimmer_conn_worker.finished.connect(self._on_dimmer_connect)
 
     @QtCore.Slot(object, object)
@@ -2069,7 +2077,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._dimmer_op_thread:
             self._dimmer_op_thread.quit()
             self._dimmer_op_thread.wait()
-        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn)
+        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn, parent=self)
         self._dimmer_op_worker.finished.connect(self._on_dimmer_action_done)
 
     @QtCore.Slot(object, object)
@@ -3896,6 +3904,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.spectroscopy_window.close()
             self.spectrometer_manager.disconnect()
             self._stop_all()
+            self._stop_illumination_threads()
             self._disconnect_dimmer()
             if self._raster_thread:
                 self._raster_thread.quit()

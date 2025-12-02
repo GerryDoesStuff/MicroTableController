@@ -1119,7 +1119,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             state = dimmer.connect()
             return dimmer, state
 
-        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect)
+        self._dimmer_conn_thread, self._dimmer_conn_worker = run_async(do_connect, parent=self)
         self._dimmer_conn_worker.finished.connect(self._on_dimmer_connect)
 
     @QtCore.Slot(object, object)
@@ -1166,7 +1166,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if self._dimmer_op_thread:
             self._dimmer_op_thread.quit()
             self._dimmer_op_thread.wait()
-        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn)
+        self._dimmer_op_thread, self._dimmer_op_worker = run_async(fn, parent=self)
         self._dimmer_op_worker.finished.connect(self._on_dimmer_action_done)
 
     @QtCore.Slot(object, object)
