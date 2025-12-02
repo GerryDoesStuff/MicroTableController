@@ -79,6 +79,32 @@ class SpectrometerManager(QtCore.QObject):
         self._monitor_timer.timeout.connect(self._poll_devices)
         self._monitor_timer.start()
 
+    def shutdown(self) -> None:
+        """Stop monitoring timers and ensure background polls are finished."""
+        try:
+            self._monitor_timer.timeout.disconnect(self._poll_devices)
+        except (TypeError, RuntimeError):
+            pass
+        self._monitor_timer.stop()
+
+        worker = self._poll_worker
+        if worker is not None:
+            try:
+                worker.finished.disconnect(self._on_polled_devices)
+            except (TypeError, RuntimeError):
+                pass
+
+        thread = self._poll_thread
+        if thread is not None:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait()
+            self._poll_thread = None
+        self._poll_worker = None
+        self._poll_in_flight = False
+
+    close = shutdown
+
     @property
     def devices(self) -> List[SpectrometerDescriptor]:
         return list(self._devices)

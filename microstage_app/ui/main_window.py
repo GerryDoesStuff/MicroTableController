@@ -4114,6 +4114,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.spectroscopy_window:
                 self.spectroscopy_window.close()
             self.spectrometer_manager.disconnect()
+            self.spectrometer_manager.shutdown()
             self._stop_all()
             self._stop_illumination_threads()
             self._disconnect_dimmer()
