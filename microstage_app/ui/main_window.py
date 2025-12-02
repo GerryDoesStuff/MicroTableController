@@ -1246,8 +1246,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.illumination_rows = []
         for idx in range(self.max_illumination_rows):
-            name_edit = QtWidgets.QLineEdit(f"Light {idx + 1}")
-            name_edit.setPlaceholderText("Light label")
+            name_edit = QtWidgets.QLineEdit()
+            name_edit.setPlaceholderText("Unassigned light")
             name_edit.setToolTip("Custom label for this light source. Right-click to re-show.")
 
             host_edit = QtWidgets.QLineEdit()
@@ -1289,7 +1289,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "status": status_label,
             }
             self.illumination_rows.append(row_data)
-            self._set_illumination_row_active(row_data, idx == 0)
+            self._set_illumination_row_active(row_data, idx < 2)
 
         controls_row = self.max_illumination_rows + 1
         btn_row = QtWidgets.QHBoxLayout()
@@ -1389,8 +1389,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 slider = row.get("slider")
                 spin = row.get("spin")
 
+                name_value = cfg.get("name", defaults[idx]["name"]) if isinstance(cfg, dict) else ""
                 if isinstance(name_edit, QtWidgets.QLineEdit):
-                    name_edit.setText(cfg.get("name", defaults[idx]["name"]))
+                    if (
+                        name_value == defaults[idx]["name"]
+                        and not cfg.get("host")
+                        and not cfg.get("enabled")
+                        and not cfg.get("brightness")
+                    ):
+                        name_edit.clear()
+                    else:
+                        name_edit.setText(name_value)
                 if isinstance(host_edit, QtWidgets.QLineEdit):
                     host_edit.setText(cfg.get("host", defaults[idx]["host"]))
                     row["last_host"] = host_edit.text().strip()
@@ -1403,12 +1412,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     slider.setValue(brightness)
 
                 should_activate = (
-                    idx == 0
+                    idx < 2
                     or bool(
                         cfg.get("host")
                         or cfg.get("enabled")
                         or cfg.get("brightness")
-                        or cfg.get("name")
+                        or (cfg.get("name") and cfg.get("name") != defaults[idx]["name"])
                     )
                 )
                 self._set_illumination_row_active(row, should_activate, clear=False)
