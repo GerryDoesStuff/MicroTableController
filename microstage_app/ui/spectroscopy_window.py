@@ -327,9 +327,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._chart = QtCharts.QChart()
         self._chart.setAnimationOptions(QtCharts.QChart.AllAnimations)
         self._chart.legend().setVisible(True)
-        self._chart.createDefaultAxes()
-        self._chart.axisX().setTitleText("Wavelength (nm)")
-        self._chart.axisY().setTitleText("Intensity (a.u.)")
+        self._axis_x = QtCharts.QValueAxis()
+        self._axis_x.setTitleText("Wavelength (nm)")
+        self._chart.addAxis(self._axis_x, QtCore.Qt.AlignBottom)
+
+        self._axis_y = QtCharts.QValueAxis()
+        self._axis_y.setTitleText("Intensity (a.u.)")
+        self._chart.addAxis(self._axis_y, QtCore.Qt.AlignLeft)
 
         self._chart_view = SpectrumChartView(self._chart)
         self._traces: Dict[str, QtCharts.QLineSeries] = {}
@@ -1900,22 +1904,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             series.setName(meta.label)
             series.setColor(meta.color)
             self._chart.addSeries(series)
-            axis_x = self._chart.axisX()
-            axis_y = self._chart.axisY()
-            if axis_x is None or axis_y is None:
-                self._chart.createDefaultAxes()
-                axis_x = self._chart.axisX()
-                axis_y = self._chart.axisY()
-            if axis_x:
-                series.attachAxis(axis_x)
-            if axis_y:
-                series.attachAxis(axis_y)
+            if self._axis_x:
+                series.attachAxis(self._axis_x)
+            if self._axis_y:
+                series.attachAxis(self._axis_y)
             self._traces[key] = series
             self._trace_meta[key] = meta
             self._install_legend_handlers()
         series.replace([QtCore.QPointF(float(x), float(y)) for x, y in zip(axis_arr, data_arr)])
-        axis_x = self._chart.axisX()
-        axis_y = self._chart.axisY()
+        axis_x = self._axis_x
+        axis_y = self._axis_y
         if axis_x:
             axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
             if self.current_mode == "Raman":
