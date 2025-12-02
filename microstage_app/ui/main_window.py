@@ -2147,6 +2147,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_camera()
         self._connect_stage_async()
         self._connect_dimmer_async()
+        self._connect_active_illumination_rows_async()
+
+    def _connect_active_illumination_rows_async(self) -> None:
+        for row in self._active_illumination_rows():
+            if self._get_row_host(row):
+                self._connect_illumination_row_async(row)
 
     def _attach_stage_worker(self):
         if not self.stage or self.stage_thread:
