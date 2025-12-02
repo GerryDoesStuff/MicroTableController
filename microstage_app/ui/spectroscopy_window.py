@@ -773,6 +773,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 self._capture_thread.deleteLater()
             else:
                 LOG.warning("Capture thread did not finish before window closed")
+        self.spectrometer_manager.shutdown()
+        self.spectrometer_manager.disconnect()
         try:
             self.profiles.set("spectroscopy.geometry", self.saveGeometry().hex())
             self.profiles.set("spectroscopy.window_state", self.saveState().hex())
