@@ -44,6 +44,11 @@ import threading
 # Preferred lens display order
 PRESET_LENS_ORDER = ["5x", "10x", "20x", "50x"]
 
+# Limit the amount of data pushed through the UI preview pipeline; larger frames
+# are downsampled before color conversion/QImage upload to keep the event loop
+# responsive.
+PREVIEW_MAX_EDGE_PX = 1280
+
 
 def _load_stage_bounds():
     cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
@@ -2441,6 +2446,34 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
+    def _apply_preview_defaults(self):
+        """Request a lighter preview workload before populating controls."""
+        if not self.camera:
+            return
+        try:
+            bins = sorted(self.camera.list_binning_factors())
+            current_bin = int(self.camera.get_binning()) if hasattr(self.camera, "get_binning") else 1
+            target_bin = next((b for b in bins if b >= 2), None)
+            if target_bin and current_bin < target_bin:
+                self.camera.set_binning(int(target_bin))
+        except Exception:
+            pass
+
+        try:
+            res_list = list(self.camera.list_resolutions())
+            if res_list:
+                try:
+                    self.camera.resolutions = res_list
+                except Exception:
+                    pass
+                smallest_idx, _, _ = min(res_list, key=lambda r: r[1] * r[2])
+                current_idx = int(self.camera.get_resolution_index())
+                if current_idx != smallest_idx:
+                    self.camera.set_resolution_index(int(smallest_idx))
+                    self._update_lens_for_resolution()
+        except Exception:
+            pass
+
     def _connect_camera(self, dev_id=None):
         if self.camera is not None:
             log("UI: camera already connected; skip re-open")
@@ -2450,6 +2483,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.camera = cam
             self.cam_status.setText(f"Camera: {self.camera.name()}")
             self.camera.start_stream()
+            self._apply_preview_defaults()
             self._populate_speed_levels()
             self._apply_speed()
             # populate after stream start so all options are available
@@ -2601,35 +2635,45 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # --------------------------- PREVIEW ---------------------------
 
+    def _downsample_frame_for_preview(self, frame):
+        """Resize frames before UI upload to avoid large allocations."""
+        try:
+            h, w = frame.shape[:2]
+            max_edge = PREVIEW_MAX_EDGE_PX
+            if max(w, h) <= max_edge:
+                return frame
+            scale = max_edge / float(max(w, h))
+            nw = max(1, int(w * scale))
+            nh = max(1, int(h * scale))
+            return cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_AREA)
+        except Exception:
+            return frame
+
+    def _convert_frame_to_rgb(self, frame):
+        """Convert a frame to RGB, preferring GPU if available."""
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            return frame
+        try:
+            has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
+        except Exception:
+            has_cuda = False
+        if has_cuda:
+            try:
+                gpu = cv2.cuda_GpuMat()
+                gpu.upload(frame)
+                gpu = cv2.cuda.cvtColor(gpu, cv2.COLOR_BGR2RGB)
+                return gpu.download()
+            except Exception:
+                pass
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
     def _on_preview(self):
         if not self.camera:
             return
         frame = self.camera.get_latest_frame()
         if frame is not None:
-            processed = frame
-            try:
-                has_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
-            except Exception:
-                has_cuda = False
-            if has_cuda:
-                try:
-                    gpu = cv2.cuda_GpuMat()
-                    gpu.upload(frame)
-                    if frame.ndim == 3 and frame.shape[2] == 3:
-                        gpu = cv2.cuda.cvtColor(gpu, cv2.COLOR_BGR2RGB)
-                    processed = gpu.download()
-                except Exception:
-                    processed = (
-                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        if frame.ndim == 3 and frame.shape[2] == 3
-                        else frame
-                    )
-            else:
-                processed = (
-                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    if frame.ndim == 3 and frame.shape[2] == 3
-                    else frame
-                )
+            processed = self._downsample_frame_for_preview(frame)
+            processed = self._convert_frame_to_rgb(processed)
             qimg = numpy_to_qimage(processed)
             self.measure_view.set_image(qimg)
 
