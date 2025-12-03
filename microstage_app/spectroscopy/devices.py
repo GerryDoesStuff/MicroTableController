@@ -114,7 +114,7 @@ class SpectrometerManager(QtCore.QObject):
         for provider in self._providers:
             try:
                 devices.extend(provider.list_devices())
-            except Exception as exc:  # pragma: no cover - defensive
+            except BaseException as exc:  # pragma: no cover - defensive
                 LOG.warning("Failed to enumerate spectrometers: %s", exc)
         return devices
 
@@ -157,7 +157,7 @@ class SpectrometerManager(QtCore.QObject):
             if not device.is_connected():
                 try:
                     device.connect()
-                except Exception as exc:
+                except BaseException as exc:
                     LOG.warning("Failed to connect spectrometer %s: %s", descriptor.label(), exc)
                     self.device_connected.emit(descriptor, None)
                     return None
@@ -167,14 +167,14 @@ class SpectrometerManager(QtCore.QObject):
         for provider in self._providers:
             try:
                 candidates = provider.list_devices()
-            except Exception as exc:  # pragma: no cover - defensive
+            except BaseException as exc:  # pragma: no cover - defensive
                 LOG.warning("Failed to enumerate spectrometers: %s", exc)
                 continue
             for candidate in candidates:
                 if candidate == descriptor:
                     try:
                         device = provider.connect(descriptor)
-                    except Exception as exc:
+                    except BaseException as exc:
                         LOG.warning(
                             "Failed to create spectrometer %s: %s", descriptor.label(), exc
                         )
@@ -184,7 +184,7 @@ class SpectrometerManager(QtCore.QObject):
                         return None
                     try:
                         device.connect()
-                    except Exception as exc:
+                    except BaseException as exc:
                         LOG.warning(
                             "Failed to connect spectrometer %s: %s", descriptor.label(), exc
                         )
@@ -208,7 +208,10 @@ class SpectrometerManager(QtCore.QObject):
                 self.device_connected.emit(desc, None)
                 continue
             try:
-                device.disconnect()
+                try:
+                    device.disconnect()
+                except BaseException as exc:  # pragma: no cover - defensive
+                    LOG.warning("Failed to disconnect spectrometer %s: %s", desc.label(), exc)
             finally:
                 self.device_connected.emit(desc, None)
         if descriptor is None:
@@ -251,14 +254,14 @@ class OceanOpticsSpectrometer:
     def _get_backend():
         try:
             spec = importlib.util.find_spec("seabreeze.spectrometers")
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning("Failed to check for seabreeze backend: %s", exc)
             return None
         if spec is None:
             return None
         try:
             return importlib.import_module("seabreeze.spectrometers")
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning("Failed to import seabreeze backend: %s", exc)
             return None
 
@@ -270,7 +273,7 @@ class OceanOpticsSpectrometer:
         descriptors: List[SpectrometerDescriptor] = []
         try:
             devices = backend.list_devices()
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return []
         for dev in devices:
@@ -292,7 +295,7 @@ class OceanOpticsSpectrometer:
             self.disconnect()
         try:
             target = self._find_matching_device()
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning(
                 "Failed to locate OceanOptics spectrometer %s: %s", self.descriptor.label(), exc
             )
@@ -305,7 +308,7 @@ class OceanOpticsSpectrometer:
             self._connected = True
             self._device.integration_time_micros(int(self._integration_time_ms * 1000))
             return self._device
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning("Failed to connect OceanOptics spectrometer %s: %s", self.descriptor.label(), exc)
             self._device = None
             self._connected = False
@@ -319,7 +322,7 @@ class OceanOpticsSpectrometer:
         desired_path = str(self.descriptor.path or "")
         try:
             devices = backend.list_devices()
-        except Exception as exc:  # pragma: no cover - defensive
+        except BaseException as exc:  # pragma: no cover - defensive
             LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return None
         for dev in devices:
