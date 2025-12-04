@@ -2163,6 +2163,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage_thread = QtCore.QThread(self)
         self.stage_worker = SerialWorker(self.stage)
         self.stage_worker.moveToThread(self.stage_thread)
+        self.stage_worker.errored.connect(self._on_stage_worker_error)
         self.stage_worker.result.connect(self._dispatch_stage_result)
         self.stage_thread.started.connect(self.stage_worker.loop)
         self.stage_thread.start()
@@ -2170,6 +2171,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _dispatch_stage_result(self, cb, res):
         if cb:
             QtCore.QTimer.singleShot(0, lambda r=res: cb(r))
+
+    @QtCore.Slot(str)
+    def _on_stage_worker_error(self, text: str) -> None:
+        err_text = f"Stage error: {text}"
+        LOG.error(err_text)
+        self.stage_status.setText(err_text)
 
     # --------------------------- DIMMER ---------------------------
 
@@ -2574,6 +2581,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._conn_thread = None
             self._conn_worker = None
         if self.stage_worker:
+            try:
+                self.stage_worker.errored.disconnect(self._on_stage_worker_error)
+            except Exception:
+                pass
             self.stage_worker.stop()
         if self.stage_thread:
             self.stage_thread.quit()
