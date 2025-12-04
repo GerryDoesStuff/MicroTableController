@@ -39,6 +39,7 @@ import time
 import math
 import datetime
 import threading
+import traceback
 
 
 # Preferred lens display order
@@ -2538,7 +2539,11 @@ class MainWindow(QtWidgets.QMainWindow):
             p = port or find_marlin_port()
             if not p:
                 return None
-            return StageMarlin(p)
+            try:
+                return StageMarlin(p)
+            except Exception:
+                log(f"UI: stage connect failed on {p}\n{traceback.format_exc()}")
+                raise
 
         self._conn_thread, self._conn_worker = run_async(connect_stage)
         self._conn_worker.finished.connect(self._on_stage_connect)
@@ -2547,7 +2552,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_stage_connect(self, stage, err):
         if err or not stage:
             if err:
-                log(f"UI: stage connect failed: {err}")
+                tb_text = "".join(traceback.format_exception(err))
+                log(f"UI: stage connect failed: {err}\n{tb_text}")
             else:
                 log("UI: stage not found")
             self.stage_status.setText("Stage: not found")
