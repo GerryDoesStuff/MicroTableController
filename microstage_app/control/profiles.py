@@ -7,7 +7,7 @@ DEFAULT_ILLUMINATION_LIGHTS = [
 ]
 
 DEFAULTS = {
-    'version': 10,
+    'version': 11,
     'stage': {'feed_mm_s': 50.0 / 60.0, 'settle_ms': 30},
     'camera': {
         'exposure_ms': 10.0,
@@ -73,6 +73,7 @@ DEFAULTS = {
     },
     'ui': {
         'dark_mode': False,
+        'auto_connect_on_start': True,
     },
     'spectroscopy': {
         'geometry': '',
