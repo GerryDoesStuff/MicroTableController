@@ -471,11 +471,13 @@ class MeasureView(QtWidgets.QGraphicsView):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, *, auto_connect_on_start: Optional[bool] = None):
         super().__init__()
         self.setWindowTitle("MicroStage App v0.1")
         self.resize(1400, 900)
         self._default_style = QtWidgets.QApplication.instance().style().objectName()
+
+        self._auto_connect_on_start_override = auto_connect_on_start
 
         # device handles
         self.stage = None
@@ -667,6 +669,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 val = self.profiles.get(path, w.text(), expected_type=str)
                 w.setText(val)
 
+        if self._auto_connect_on_start_override is not None:
+            self.auto_connect_checkbox.setChecked(self._auto_connect_on_start_override)
+
         # ensure sliders match spins after loading persisted values
         self.brightness_slider.setValue(self.brightness_spin.value())
         self.contrast_slider.setValue(self.contrast_spin.value())
@@ -694,7 +699,10 @@ class MainWindow(QtWidgets.QMainWindow):
         LOG.message.connect(self._append_log)
 
         # show window first, then connect devices asynchronously
-        QtCore.QTimer.singleShot(0, self._auto_connect_async)
+        if self._should_auto_connect():
+            QtCore.QTimer.singleShot(0, self._auto_connect_async)
+        else:
+            log("UI: skipping auto-connect on startup (disabled)")
         QtCore.QTimer.singleShot(0, self._refresh_spectrometers)
 
     # --------------------------- UI BUILD ---------------------------
@@ -736,6 +744,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dimmer_status = QtWidgets.QLabel("Illumination: —")
         self.dimmer_status.setTextFormat(QtCore.Qt.PlainText)
         self.spectrometer_status = QtWidgets.QLabel("Spectrometer: —")
+        self.auto_connect_checkbox = QtWidgets.QCheckBox("Auto-connect devices on startup")
+        self.auto_connect_checkbox.setChecked(True)
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
@@ -749,6 +759,7 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addWidget(self.cam_status)
         left.addWidget(self.dimmer_status)
         left.addWidget(self.spectrometer_status)
+        left.addWidget(self.auto_connect_checkbox)
 
         # Legacy single-dimmer controls kept hidden; illumination now configured on the
         # Camera tab.
@@ -2146,6 +2157,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_view.appendPlainText(line)
 
     # --------------------------- CONNECT ---------------------------
+
+    def _should_auto_connect(self) -> bool:
+        if self._auto_connect_on_start_override is not None:
+            return self._auto_connect_on_start_override
+        return self.auto_connect_checkbox.isChecked()
 
     def _auto_connect_async(self):
         self._connect_camera()
@@ -4100,6 +4116,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.speed_spin, "camera.usb_speed"),
             (self.lens_combo, "measurement.current_lens"),
             (self.chk_scale_bar, "ui.scale_bar"),
+            (self.auto_connect_checkbox, "ui.auto_connect_on_start"),
             (self.dimmer_host_edit, "illumination.dimmer.host"),
             (self.dimmer_toggle, "illumination.dimmer.on"),
             (self.dimmer_brightness_spin, "illumination.dimmer.brightness"),
