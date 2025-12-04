@@ -21,7 +21,7 @@ DEFAULTS = {
         'raw': False,
         'color_depth': 8,
         'binning': 1,
-        'resolution_index': 1,
+        'resolution_index': 0,
         'usb_speed': 5,
     },
     'scan_presets': {
