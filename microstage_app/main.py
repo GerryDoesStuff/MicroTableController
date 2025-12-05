@@ -4,8 +4,11 @@ import sys
 from PySide6 import QtWidgets
 
 from .ui.main_window import MainWindow
+from .utils.log import setup_logging
 
 def main(argv=None):
+    setup_logging()
+
     argv = sys.argv[1:] if argv is None else list(argv)
     parser = argparse.ArgumentParser(description="MicroStage controller UI")
     parser.set_defaults(auto_connect_on_start=None)

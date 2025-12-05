@@ -5,11 +5,14 @@ from typing import Iterable, List, Optional, Protocol, Sequence
 
 import importlib
 import importlib.util
+import logging
 import numpy as np
 from PySide6 import QtCore
 
-from ..utils.log import LOG
 from ..utils.workers import run_async
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -115,7 +118,7 @@ class SpectrometerManager(QtCore.QObject):
             try:
                 devices.extend(provider.list_devices())
             except BaseException as exc:  # pragma: no cover - defensive
-                LOG.warning("Failed to enumerate spectrometers: %s", exc)
+                logger.warning("Failed to enumerate spectrometers: %s", exc)
         return devices
 
     def _poll_devices(self) -> None:
@@ -133,7 +136,7 @@ class SpectrometerManager(QtCore.QObject):
         self._poll_thread = None
         self._poll_worker = None
         if err:
-            LOG.warning("Spectrometer poll failed: %s", err)
+            logger.warning("Spectrometer poll failed: %s", err)
             return
         self._update_devices(devices)
 
@@ -158,7 +161,7 @@ class SpectrometerManager(QtCore.QObject):
                 try:
                     device.connect()
                 except BaseException as exc:
-                    LOG.warning("Failed to connect spectrometer %s: %s", descriptor.label(), exc)
+                    logger.warning("Failed to connect spectrometer %s: %s", descriptor.label(), exc)
                     self.device_connected.emit(descriptor, None)
                     return None
             self._last_active = descriptor
@@ -168,14 +171,14 @@ class SpectrometerManager(QtCore.QObject):
             try:
                 candidates = provider.list_devices()
             except BaseException as exc:  # pragma: no cover - defensive
-                LOG.warning("Failed to enumerate spectrometers: %s", exc)
+                logger.warning("Failed to enumerate spectrometers: %s", exc)
                 continue
             for candidate in candidates:
                 if candidate == descriptor:
                     try:
                         device = provider.connect(descriptor)
                     except BaseException as exc:
-                        LOG.warning(
+                        logger.warning(
                             "Failed to create spectrometer %s: %s", descriptor.label(), exc
                         )
                         device = None
@@ -185,7 +188,7 @@ class SpectrometerManager(QtCore.QObject):
                     try:
                         device.connect()
                     except BaseException as exc:
-                        LOG.warning(
+                        logger.warning(
                             "Failed to connect spectrometer %s: %s", descriptor.label(), exc
                         )
                         self.device_connected.emit(descriptor, None)
@@ -195,7 +198,7 @@ class SpectrometerManager(QtCore.QObject):
                     self._last_active = descriptor
                     self.device_connected.emit(descriptor, device)
                     return device
-        LOG.warning("Device not found: %s", descriptor.label())
+        logger.warning("Device not found: %s", descriptor.label())
         self.device_connected.emit(descriptor, None)
         return None
 
@@ -211,7 +214,7 @@ class SpectrometerManager(QtCore.QObject):
                 try:
                     device.disconnect()
                 except BaseException as exc:  # pragma: no cover - defensive
-                    LOG.warning("Failed to disconnect spectrometer %s: %s", desc.label(), exc)
+                    logger.warning("Failed to disconnect spectrometer %s: %s", desc.label(), exc)
             finally:
                 self.device_connected.emit(desc, None)
         if descriptor is None:
@@ -255,14 +258,14 @@ class OceanOpticsSpectrometer:
         try:
             spec = importlib.util.find_spec("seabreeze.spectrometers")
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning("Failed to check for seabreeze backend: %s", exc)
+            logger.warning("Failed to check for seabreeze backend: %s", exc)
             return None
         if spec is None:
             return None
         try:
             return importlib.import_module("seabreeze.spectrometers")
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning("Failed to import seabreeze backend: %s", exc)
+            logger.warning("Failed to import seabreeze backend: %s", exc)
             return None
 
     @classmethod
@@ -274,7 +277,7 @@ class OceanOpticsSpectrometer:
         try:
             devices = backend.list_devices()
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return []
         for dev in devices:
             descriptors.append(
@@ -289,19 +292,19 @@ class OceanOpticsSpectrometer:
     def connect(self) -> Optional[object]:
         backend = self._get_backend()
         if backend is None:
-            LOG.warning("seabreeze backend unavailable for OceanOptics spectrometers")
+            logger.warning("seabreeze backend unavailable for OceanOptics spectrometers")
             return None
         if self._device is not None:
             self.disconnect()
         try:
             target = self._find_matching_device()
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning(
+            logger.warning(
                 "Failed to locate OceanOptics spectrometer %s: %s", self.descriptor.label(), exc
             )
             return None
         if target is None:
-            LOG.warning("Spectrometer not found: %s", self.descriptor.label())
+            logger.warning("Spectrometer not found: %s", self.descriptor.label())
             return None
         try:
             self._device = backend.Spectrometer(target)
@@ -309,7 +312,9 @@ class OceanOpticsSpectrometer:
             self._device.integration_time_micros(int(self._integration_time_ms * 1000))
             return self._device
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning("Failed to connect OceanOptics spectrometer %s: %s", self.descriptor.label(), exc)
+            logger.warning(
+                "Failed to connect OceanOptics spectrometer %s: %s", self.descriptor.label(), exc
+            )
             self._device = None
             self._connected = False
             return None
@@ -323,7 +328,7 @@ class OceanOpticsSpectrometer:
         try:
             devices = backend.list_devices()
         except BaseException as exc:  # pragma: no cover - defensive
-            LOG.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return None
         for dev in devices:
             dev_serial = str(getattr(dev, "serial_number", ""))

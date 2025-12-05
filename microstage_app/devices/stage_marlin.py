@@ -1,9 +1,11 @@
+import logging
 import time
 import re
 import serial
 from serial.tools import list_ports
-from ..utils.log import log
 from ..config import EXPECTED_MACHINE_NAME, EXPECTED_MACHINE_UUID
+
+logger = logging.getLogger(__name__)
 
 BAUD = 250000  # fixed baud
 
@@ -17,7 +19,7 @@ def list_marlin_ports(time_wait: float = 2.0, machine_name: str = EXPECTED_MACHI
         if not p.device:
             continue
         try:
-            log(f"Stage: probing {p.device} @ {BAUD}")
+            logger.info("Stage: probing %s @ %s", p.device, BAUD)
             with serial.Serial(p.device, baudrate=BAUD, timeout=1.0, write_timeout=1.0) as ser:
                 time.sleep(time_wait)
                 ser.reset_input_buffer()
@@ -69,7 +71,7 @@ def find_marlin_port(
         if not p.device:
             continue
         try:
-            log(f"Stage: probing {p.device} @ {BAUD}")
+            logger.info("Stage: probing %s @ %s", p.device, BAUD)
             with serial.Serial(p.device, baudrate=BAUD, timeout=1.0, write_timeout=1.0) as ser:
                 time.sleep(time_wait)  # Arduino auto-reset on open; give it time
                 ser.reset_input_buffer()
@@ -78,46 +80,52 @@ def find_marlin_port(
                 resp = ser.read(4096).decode(errors="ignore")
                 low = resp.lower()
                 if "firmware_name:marlin" not in low:
-                    log(f"Stage: {p.device} not Marlin (got {resp[:120]!r})")
+                    logger.info("Stage: %s not Marlin (got %s)", p.device, resp[:120])
                     continue
 
                 if machine_name and machine_name.lower() not in low:
-                    log(
-                        f"Stage: {p.device} Marlin but machine name mismatch (got {resp[:120]!r})"
+                    logger.warning(
+                        "Stage: %s Marlin but machine name mismatch (got %s)",
+                        p.device,
+                        resp[:120],
                     )
                     continue
 
                 if machine_uuid and machine_uuid.lower() in low:
-                    log(
-                        f"Stage: Marlin detected on {p.device} @ {BAUD} "
-                        f"(name={machine_name}, uuid={machine_uuid})"
+                    logger.info(
+                        "Stage: Marlin detected on %s @ %s (name=%s, uuid=%s)",
+                        p.device,
+                        BAUD,
+                        machine_name,
+                        machine_uuid,
                     )
                     return p.device
 
                 if fallback is None:
-                    log(
-                        f"Stage: {p.device} has matching machine name but UUID mismatch "
-                        f"(got {resp[:120]!r})"
+                    logger.warning(
+                        "Stage: %s has matching machine name but UUID mismatch (got %s)",
+                        p.device,
+                        resp[:120],
                     )
                     fallback = p.device
         except Exception as e:
-            log(f"Stage: probe error {p.device}@{BAUD}: {e}")
+            logger.warning("Stage: probe error %s@%s: %s", p.device, BAUD, e)
 
     if fallback:
-        log(
-            f"Stage: using {fallback} with matching machine name despite UUID mismatch"
+        logger.info(
+            "Stage: using %s with matching machine name despite UUID mismatch",
+            fallback,
         )
         return fallback
 
-    log("Stage: no Marlin device found")
+    logger.info("Stage: no Marlin device found")
     return None
 
 class StageMarlin:
     def __init__(self, port, baud=BAUD, timeout=1.0):
-        from ..utils.log import log
         self._port = port
         self.ser = serial.Serial(port, baudrate=baud, timeout=timeout, write_timeout=timeout)
-        log(f"Stage: opened {port} @ {baud}")
+        logger.info("Stage: opened %s @ %s", port, baud)
         time.sleep(2.0)  # give the board time after auto-reset
         self._drain_input()
         self._send_log("M110 N0")  # reset line numbers
@@ -131,13 +139,13 @@ class StageMarlin:
         try:
             junk = self.ser.read(8192)
             if junk:
-                log(f"Stage RX (drain) {len(junk)}B")
+                logger.debug("Stage RX (drain) %dB", len(junk))
         except Exception:
             pass
 
     def _send_log(self, cmd):
         line = cmd.strip()
-        log(f"TX >> {line}")
+        logger.debug("TX >> %s", line)
         self._write(line)
 
     def _write(self, cmd):

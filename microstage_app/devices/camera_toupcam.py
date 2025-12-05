@@ -1,10 +1,13 @@
 from __future__ import annotations
 import importlib
+import logging
 import threading
 import time
 import ctypes
 import numpy as np
-from ..utils.log import log
+
+logger = logging.getLogger(__name__)
+log = logger.info
 
 try:
     import cv2
