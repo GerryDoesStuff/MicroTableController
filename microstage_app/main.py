@@ -2,7 +2,6 @@ import argparse
 import logging
 import sys
 import threading
-import traceback
 
 from PySide6 import QtWidgets
 
@@ -12,8 +11,7 @@ from .utils.log import setup_logging
 
 def _log_uncaught(exc_type, exc_value, exc_traceback):  # pragma: no cover - global hook
     logger = logging.getLogger("microstage_app")
-    formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    logger.critical("Uncaught exception:\n%s", formatted)
+    logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
 def main(argv=None):

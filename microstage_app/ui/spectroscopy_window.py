@@ -685,6 +685,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.device_combo.currentIndexChanged.connect(self._update_status_from_selection)
         self.spectrometer_manager.devices_changed.connect(self._on_devices_changed)
         self.spectrometer_manager.device_connected.connect(self._on_device_connected)
+        self.spectrometer_manager.connect_failed.connect(self._on_connect_failed)
         self.session.validity_changed.connect(self._refresh_validity_state)
 
         self.integration_slider.valueChanged.connect(self.integration_spin.setValue)
@@ -1055,6 +1056,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 LOG.warning("Failed to read wavelengths: %s", exc)
         self._update_status_from_selection()
 
+    @QtCore.Slot(object, str)
+    def _on_connect_failed(self, descriptor, message: str) -> None:
+        if isinstance(descriptor, SpectrometerDescriptor):
+            label = descriptor.label()
+        else:
+            label = "Unknown spectrometer"
+        self.status_message.setText(f"Connect failed for {label}: {message}")
+        if isinstance(descriptor, SpectrometerDescriptor) and self._current_descriptor() is None:
+            self._set_current_descriptor(descriptor)
+        self._update_status_from_selection()
+
     def _update_status_from_selection(self) -> None:
         desc = self._current_descriptor()
         active = self.spectrometer_manager.get_active(desc) if desc else None
@@ -1089,7 +1101,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         try:
             dev = self.spectrometer_manager.connect(desc)
             if dev is None:
-                self.status_message.setText("Connect failed: no device available")
+                if not self.status_message.text().startswith("Connect failed"):
+                    self.status_message.setText("Connect failed: no device available")
                 self._update_status_from_selection()
                 self._update_session_context()
                 return
