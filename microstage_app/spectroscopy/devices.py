@@ -68,7 +68,12 @@ class SpectrometerManager(QtCore.QObject):
     devices_changed = QtCore.Signal(list)
     device_connected = QtCore.Signal(object, object)
 
-    def __init__(self, providers: Optional[Sequence[_SpectrometerProvider]] = None):
+    def __init__(
+        self,
+        providers: Optional[Sequence[_SpectrometerProvider]] = None,
+        *,
+        auto_start: bool = True,
+    ):
         super().__init__()
         self._providers: Sequence[_SpectrometerProvider] = (
             providers
@@ -85,7 +90,13 @@ class SpectrometerManager(QtCore.QObject):
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
-        self._monitor_timer.start()
+        if auto_start:
+            self.start_monitoring()
+
+    def start_monitoring(self) -> None:
+        """Start periodic device polling if not already running."""
+        if not self._monitor_timer.isActive():
+            self._monitor_timer.start()
 
     def shutdown(self) -> None:
         """Stop monitoring timers and ensure background polls are finished."""
