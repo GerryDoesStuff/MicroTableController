@@ -1,10 +1,20 @@
 import argparse
+import logging
 import sys
+import threading
+import traceback
 
 from PySide6 import QtWidgets
 
 from .ui.main_window import MainWindow
 from .utils.log import setup_logging
+
+
+def _log_uncaught(exc_type, exc_value, exc_traceback):  # pragma: no cover - global hook
+    logger = logging.getLogger("microstage_app")
+    formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    logger.critical("Uncaught exception:\n%s", formatted)
+
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
@@ -32,6 +42,8 @@ def main(argv=None):
     args, qt_args = parser.parse_known_args(argv)
 
     setup_logging(level=args.log_level)
+    sys.excepthook = _log_uncaught
+    threading.excepthook = lambda args: _log_uncaught(args.exc_type, args.exc_value, args.exc_traceback)
 
     app = QtWidgets.QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("MicroStage App")
