@@ -204,15 +204,18 @@ class SpectrometerManager(QtCore.QObject):
         self._devices = list(devices)
         self.devices_changed.emit(list(devices))
 
-    def refresh(self) -> List[SpectrometerDescriptor]:
+    def refresh(self, *, start_monitoring: bool = False) -> List[SpectrometerDescriptor]:
         was_paused = self._monitor_paused_for_active
         if was_paused:
             self._monitor_paused_for_active = False
-        self.start_monitoring(force=True)
+        if start_monitoring:
+            self.start_monitoring(force=True)
         devices = self._enumerate_devices()
         self._update_devices(devices)
         if was_paused and self._active:
             self._pause_monitoring_for_active_use()
+        elif not start_monitoring:
+            self.stop_monitoring()
         return list(self._devices)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> Optional[SpectrometerDevice]:
