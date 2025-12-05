@@ -1,4 +1,5 @@
 import numpy as np
+from PySide6 import QtCore
 
 from microstage_app.spectroscopy.devices import (
     MockSpectrometerProvider,
@@ -152,3 +153,18 @@ def test_ocean_optics_enumeration_handles_list_failure(monkeypatch):
     devices = manager.refresh()
 
     assert devices == []
+
+
+def test_manager_respects_auto_start_flag():
+    QtCore.QCoreApplication.instance() or QtCore.QCoreApplication([])
+
+    provider = MockSpectrometerProvider([])
+    manager = SpectrometerManager(providers=[provider], auto_start=False)
+
+    assert not manager._monitor_timer.isActive()
+
+    manager.start_monitoring()
+    assert manager._monitor_timer.isActive()
+
+    manager.shutdown()
+    assert not manager._monitor_timer.isActive()
