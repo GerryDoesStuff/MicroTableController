@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Protocol, Sequence
 import importlib
 import importlib.util
 import logging
+import traceback
 import numpy as np
 from PySide6 import QtCore
 
@@ -13,6 +14,10 @@ from ..utils.workers import run_async
 
 
 logger = logging.getLogger(__name__)
+
+
+def _format_exception(exc: BaseException) -> str:
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
 
 @dataclass(frozen=True)
@@ -118,7 +123,7 @@ class SpectrometerManager(QtCore.QObject):
             try:
                 devices.extend(provider.list_devices())
             except BaseException as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to enumerate spectrometers: %s", exc)
+                logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
         return devices
 
     def _poll_devices(self) -> None:
@@ -136,7 +141,7 @@ class SpectrometerManager(QtCore.QObject):
         self._poll_thread = None
         self._poll_worker = None
         if err:
-            logger.warning("Spectrometer poll failed: %s", err)
+            logger.warning("Spectrometer poll failed: %s\n%s", err, _format_exception(err))
             return
         self._update_devices(devices)
 
@@ -161,7 +166,12 @@ class SpectrometerManager(QtCore.QObject):
                 try:
                     device.connect()
                 except BaseException as exc:
-                    logger.warning("Failed to connect spectrometer %s: %s", descriptor.label(), exc)
+                    logger.warning(
+                        "Failed to connect spectrometer %s: %s\n%s",
+                        descriptor.label(),
+                        exc,
+                        traceback.format_exc(),
+                    )
                     self.device_connected.emit(descriptor, None)
                     return None
             self._last_active = descriptor
@@ -171,7 +181,7 @@ class SpectrometerManager(QtCore.QObject):
             try:
                 candidates = provider.list_devices()
             except BaseException as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to enumerate spectrometers: %s", exc)
+                logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
                 continue
             for candidate in candidates:
                 if candidate == descriptor:
@@ -179,7 +189,10 @@ class SpectrometerManager(QtCore.QObject):
                         device = provider.connect(descriptor)
                     except BaseException as exc:
                         logger.warning(
-                            "Failed to create spectrometer %s: %s", descriptor.label(), exc
+                            "Failed to create spectrometer %s: %s\n%s",
+                            descriptor.label(),
+                            exc,
+                            traceback.format_exc(),
                         )
                         device = None
                     if device is None:
@@ -189,7 +202,10 @@ class SpectrometerManager(QtCore.QObject):
                         device.connect()
                     except BaseException as exc:
                         logger.warning(
-                            "Failed to connect spectrometer %s: %s", descriptor.label(), exc
+                            "Failed to connect spectrometer %s: %s\n%s",
+                            descriptor.label(),
+                            exc,
+                            traceback.format_exc(),
                         )
                         self.device_connected.emit(descriptor, None)
                         return None
