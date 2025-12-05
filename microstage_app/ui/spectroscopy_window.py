@@ -56,6 +56,9 @@ class CaptureJob:
     timestamp: float
 
 
+QtCore.qRegisterMetaType(CaptureJob, "CaptureJob")
+
+
 class CaptureWorker(QtCore.QObject):
     capture_ready = QtCore.Signal(object, np.ndarray, np.ndarray, float, float)
     capture_failed = QtCore.Signal(object, str)
@@ -75,7 +78,7 @@ class CaptureWorker(QtCore.QObject):
             return True
         return False
 
-    @QtCore.Slot(object)
+    @QtCore.Slot(CaptureJob)
     def perform_capture(self, job: CaptureJob) -> None:
         self.capture_started.emit(job.token)
         start = time.time()
@@ -1348,7 +1351,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._capture_worker,
             "perform_capture",
             QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(object, job),
+            QtCore.Q_ARG(CaptureJob, job),
         )
 
     @QtCore.Slot(object)
