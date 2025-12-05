@@ -890,8 +890,8 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.finished.connect(self._persist_params)
         self._update_finish_state()
         self.session.validity_changed.connect(self._on_session_validity_changed)
-        for i in range(self.pageCount()):
-            page = self.page(i)
+        for page_id in self.pageIds():
+            page = self.page(page_id)
             if page is not None:
                 page.completeChanged.connect(self._update_finish_state)
 
