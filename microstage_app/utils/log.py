@@ -57,11 +57,22 @@ def _qt_message_handler(mode, context, message):  # pragma: no cover - Qt callba
     logger.log(level, "%s: %s", prefix, message)
 
 
-def setup_logging(level: int = logging.INFO) -> None:
+def _normalize_level(level: int | str) -> int:
+    if isinstance(level, str):
+        resolved_level = logging.getLevelName(level.upper())
+        if isinstance(resolved_level, str):
+            raise ValueError(f"Invalid log level: {level}")
+        return resolved_level
+    return level
+
+
+def setup_logging(level: int | str = logging.INFO) -> None:
     """Configure Python logging to forward to stdout and the UI log bus."""
 
+    normalized_level = _normalize_level(level)
+
     root = logging.getLogger()
-    root.setLevel(level)
+    root.setLevel(normalized_level)
     root.handlers.clear()
 
     fmt = logging.Formatter(

@@ -40,6 +40,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```bash
    python -m microstage_app
    ```
+   Use `--log-level` to adjust verbosity (defaults to INFO):
+   ```bash
+   python -m microstage_app --log-level DEBUG
+   ```
    On Windows you can also double-click `quicklaunch.cmd`, which delegates to the
    new Python launcher discussed below so the GUI starts without a console
    window.

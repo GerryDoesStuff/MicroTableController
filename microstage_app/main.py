@@ -7,8 +7,6 @@ from .ui.main_window import MainWindow
 from .utils.log import setup_logging
 
 def main(argv=None):
-    setup_logging()
-
     argv = sys.argv[1:] if argv is None else list(argv)
     parser = argparse.ArgumentParser(description="MicroStage controller UI")
     parser.set_defaults(auto_connect_on_start=None)
@@ -25,7 +23,15 @@ def main(argv=None):
         action="store_false",
         help="Skip auto-connecting devices on startup.",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging verbosity for stdout and the UI log panel.",
+    )
     args, qt_args = parser.parse_known_args(argv)
+
+    setup_logging(level=args.log_level)
 
     app = QtWidgets.QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("MicroStage App")
