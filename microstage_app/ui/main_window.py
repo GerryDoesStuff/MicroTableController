@@ -2841,10 +2841,68 @@ class MainWindow(QtWidgets.QMainWindow):
             self.res_combo.setCurrentIndex(pos)
         self.res_combo.blockSignals(False)
 
+    @staticmethod
+    def _normalize_combo_value(val):
+        if isinstance(val, float) and val.is_integer():
+            return int(val)
+        return val
+
+    def _cleanup_profile_combobox_values(self, entries: list[tuple[QtWidgets.QComboBox, str]]):
+        """Reset profile values that are no longer present in combo-box data.
+
+        Parameters
+        ----------
+        entries: list[tuple[QtWidgets.QComboBox, str]]
+            Pairs of combo boxes and their associated profile paths.
+        """
+
+        corrected: list[tuple[str, object, object]] = []
+
+        for combo, path in entries:
+            if combo.count() == 0:
+                continue
+
+            default_val = combo.currentData()
+            if default_val is None:
+                default_val = combo.currentText()
+
+            normalized_default = self._normalize_combo_value(default_val)
+            stored = self.profiles.get(path, default_val, expected_type=(int, float, str))
+            normalized_stored = self._normalize_combo_value(stored)
+
+            def _matches(value):
+                for idx in range(combo.count()):
+                    data_val = self._normalize_combo_value(combo.itemData(idx))
+                    if value == data_val:
+                        return True
+                    if isinstance(value, str) and value == combo.itemText(idx):
+                        return True
+                return False
+
+            if normalized_stored is None:
+                continue
+            if _matches(normalized_stored):
+                continue
+
+            self.profiles.set(path, default_val)
+            corrected.append((path, stored, normalized_default))
+
+        if corrected:
+            self.profiles.save()
+            summary = "; ".join(
+                f"{path} reset to {new!r} (was {old!r})" for path, old, new in corrected
+            )
+            log(f"Profiles: corrected invalid saved options: {summary}")
+
     def _apply_camera_profile(self):
         if not self.camera:
             return
         p = self.profiles
+        self._cleanup_profile_combobox_values([
+            (self.depth_combo, "camera.color_depth"),
+            (self.bin_combo, "camera.binning"),
+            (self.res_combo, "camera.resolution_index"),
+        ])
         # Exposure and auto-exposure
         auto = p.get('camera.auto_exposure', self.autoexp_chk.isChecked(), expected_type=bool)
         ms = p.get('camera.exposure_ms', self.exp_spin.value(), expected_type=(int, float))
