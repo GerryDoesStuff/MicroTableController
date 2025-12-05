@@ -92,9 +92,14 @@ def main(argv: list[str] | None = None) -> int:
             intensities = device.capture()
             sample_count = min(5, len(intensities))
             sample_pairs = list(zip(wavelengths, intensities))[:sample_count]
+            print("Capture     : captured spectrum")
             print(
-                "Sample wavelengths/intensities (nm, counts):",
-                sample_pairs,
+                "Wavelength range: %.2f - %.2f nm"
+                % (min(wavelengths), max(wavelengths))
+            )
+            print(
+                "First %d wavelength/intensity pairs (nm, counts): %s"
+                % (sample_count, sample_pairs)
             )
         else:
             print("Capture     : skipped (use --capture to measure)")
