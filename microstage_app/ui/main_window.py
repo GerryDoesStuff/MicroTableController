@@ -483,7 +483,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stage = None
         self.camera = None
         self.dimmer: ShellyDimmer | None = None
-        self.spectrometer_manager = SpectrometerManager()
+        self.spectrometer_manager: SpectrometerManager | None = None
+        self._spectrometer_signals_connected = False
         self.spectroscopy_window: SpectroscopyWindow | None = None
         self.stage_bounds = _load_stage_bounds()
         self._stage_bounds_fallback = self.stage_bounds.copy() if self.stage_bounds else None
@@ -703,7 +704,6 @@ class MainWindow(QtWidgets.QMainWindow):
             QtCore.QTimer.singleShot(0, self._auto_connect_async)
         else:
             log("UI: skipping auto-connect on startup (disabled)")
-        QtCore.QTimer.singleShot(0, self._refresh_spectrometers)
 
     # --------------------------- UI BUILD ---------------------------
 
@@ -1957,8 +1957,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spectrometer_list.itemDoubleClicked.connect(
             lambda *_: self._connect_spectrometer_from_list()
         )
-        self.spectrometer_manager.devices_changed.connect(self._on_spectrometers_changed)
-        self.spectrometer_manager.device_connected.connect(self._on_spectrometer_connected)
 
     def _init_persistent_fields(self):
         def bind(spin, key):
@@ -2394,26 +2392,42 @@ class MainWindow(QtWidgets.QMainWindow):
             self._connect_stage_async(port)
         dlg.accept()
 
+    def _ensure_spectrometer_manager(self) -> SpectrometerManager:
+        if self.spectrometer_manager is None:
+            self.spectrometer_manager = SpectrometerManager()
+        if not self._spectrometer_signals_connected:
+            self.spectrometer_manager.devices_changed.connect(self._on_spectrometers_changed)
+            self.spectrometer_manager.device_connected.connect(self._on_spectrometer_connected)
+            self._spectrometer_signals_connected = True
+        return self.spectrometer_manager
+
     def _open_spectroscopy(self):
         if self.spectroscopy_window is None:
+            manager = self._ensure_spectrometer_manager()
             self.spectroscopy_window = SpectroscopyWindow(
-                self.spectrometer_manager, self.profiles, self
+                manager, self.profiles, self
             )
             self.spectroscopy_window.destroyed.connect(
                 lambda: setattr(self, "spectroscopy_window", None)
             )
+            self._refresh_spectrometers()
         self.spectroscopy_window.show()
         self.spectroscopy_window.raise_()
         self.spectroscopy_window.activateWindow()
 
     def _refresh_spectrometers(self):
-        devices = self.spectrometer_manager.refresh()
+        manager = self._ensure_spectrometer_manager()
+        devices = manager.refresh()
         self._populate_spectrometer_list(devices)
 
     def _on_spectrometers_changed(self, devices):
         self._populate_spectrometer_list(devices)
 
     def _populate_spectrometer_list(self, devices):
+        if self.spectrometer_manager is None:
+            self.spectrometer_list.clear()
+            self._update_spectrometer_buttons()
+            return
         selection = self._current_spectrometer_descriptor()
         active_desc = self.spectrometer_manager.active_descriptor
         if selection is None and active_desc:
@@ -2449,11 +2463,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 break
 
     def _connect_spectrometer_from_list(self):
+        manager = self._ensure_spectrometer_manager()
         desc = self._current_spectrometer_descriptor()
         if not desc:
             return
         try:
-            dev = self.spectrometer_manager.connect(desc)
+            dev = manager.connect(desc)
             if dev is None:
                 self.spectrometer_status.setText(
                     "Spectrometer: Unable to connect (missing drivers or device?)"
@@ -2468,7 +2483,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _disconnect_spectrometer(self):
         desc = self._current_spectrometer_descriptor()
-        self.spectrometer_manager.disconnect(desc)
+        if self.spectrometer_manager:
+            self.spectrometer_manager.disconnect(desc)
         self._update_spectrometer_buttons()
 
     def _on_spectrometer_connected(self, desc, device):
@@ -2482,8 +2498,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_spectrometer_buttons()
 
     def _update_spectrometer_buttons(self):
+        manager = self.spectrometer_manager
+        if manager is None:
+            self.btn_spec_connect.setEnabled(False)
+            self.btn_spec_disconnect.setEnabled(False)
+            return
         desc = self._current_spectrometer_descriptor()
-        active = self.spectrometer_manager.get_active(desc) if desc else None
+        active = manager.get_active(desc) if desc else None
         has_selection = bool(desc)
         self.btn_spec_connect.setEnabled(has_selection and active is None)
         self.btn_spec_disconnect.setEnabled(active is not None)
@@ -4066,7 +4087,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Filename contains illegal characters (\\ / : * ? \" < > |).",
             )
             return
-        spectrometer = self.spectrometer_manager.active
+        spectrometer = self.spectrometer_manager.active if self.spectrometer_manager else None
         spec_lock = None
         wavelengths = None
         if spectrometer:
@@ -4288,8 +4309,9 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             if self.spectroscopy_window:
                 self.spectroscopy_window.close()
-            self.spectrometer_manager.disconnect()
-            self.spectrometer_manager.shutdown()
+            if self.spectrometer_manager:
+                self.spectrometer_manager.disconnect()
+                self.spectrometer_manager.shutdown()
             self._stop_all()
             self._stop_illumination_threads()
             self._disconnect_dimmer()
