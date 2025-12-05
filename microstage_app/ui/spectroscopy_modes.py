@@ -865,6 +865,10 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         }
         self.last_metrics: Dict[str, float] = {}
         self.setWindowTitle(f"{mode} wizard")
+        # Only block interaction with the spectroscopy window while the wizard is
+        # running so users can still access other windows (e.g. to toggle a
+        # Shelly light source) during setup.
+        self.setWindowModality(QtCore.Qt.WindowModal)
         self.setOption(QtWidgets.QWizard.NoBackButtonOnStartPage)
         self._build_pages()
 
