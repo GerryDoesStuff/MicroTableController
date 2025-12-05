@@ -1660,6 +1660,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_illumination_status(row, "Host required", error=True)
             return
 
+        log("UI: connecting illumination row %s at %s", row_id, host)
         self._set_illumination_status(row, "Connecting…")
 
         def do_connect():
@@ -2164,6 +2165,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return self.auto_connect_checkbox.isChecked()
 
     def _auto_connect_async(self):
+        log("UI: auto-connect starting (camera/stage/dimmer/illumination)")
         self._connect_camera()
         self._connect_stage_async()
         self._connect_dimmer_async()
@@ -2172,6 +2174,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _connect_active_illumination_rows_async(self) -> None:
         for row in self._active_illumination_rows():
             if self._get_row_host(row):
+                log(
+                    "UI: auto-connecting illumination row %s", self._illumination_row_id(row)
+                )
                 self._connect_illumination_row_async(row)
 
     def _attach_stage_worker(self):
@@ -2213,6 +2218,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.dimmer_status.setText("Illumination: host required")
             return
 
+        log("UI: connecting dimmer at %s", host)
         self.dimmer_status.setText("Illumination: connecting…")
         self._update_dimmer_controls_enabled(False)
 
@@ -2246,6 +2252,7 @@ class MainWindow(QtWidgets.QMainWindow):
             thread.wait()
 
     def _disconnect_dimmer(self):
+        log("UI: disconnecting dimmer")
         for attr in ("_dimmer_conn_thread", "_dimmer_op_thread"):
             thread = getattr(self, attr)
             worker_attr = f"{attr.replace('thread', 'worker')}"
@@ -2507,6 +2514,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.camera is not None:
             log("UI: camera already connected; skip re-open")
             return
+        log("UI: connecting camera%s", f" ({dev_id})" if dev_id else "")
         try:
             cam = create_camera(dev_id)
             self.camera = cam
@@ -2532,6 +2540,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _disconnect_camera(self):
         if not self.camera:
             return
+        log("UI: disconnecting camera")
         try:
             self.camera.stop_stream()
         except Exception:
@@ -2552,6 +2561,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         def connect_stage():
+            if port:
+                log("UI: connecting stage on %s", port)
+            else:
+                log("UI: probing for stage")
             p = port or find_marlin_port()
             if not p:
                 return None
@@ -2614,6 +2627,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.stage_thread = None
             self.stage_worker = None
         if self.stage:
+            log("UI: disconnecting stage")
             try:
                 self.stage.ser.close()
             except Exception:
