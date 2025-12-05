@@ -87,16 +87,35 @@ class SpectrometerManager(QtCore.QObject):
         self._poll_thread: Optional[QtCore.QThread] = None
         self._poll_worker: Optional[QtCore.QObject] = None
         self._poll_in_flight = False
+        self._monitor_paused_for_active = False
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
         if auto_start:
             self.start_monitoring()
 
-    def start_monitoring(self) -> None:
+    def start_monitoring(self, *, force: bool = False) -> None:
         """Start periodic device polling if not already running."""
+        if self._monitor_paused_for_active and not force:
+            return
         if not self._monitor_timer.isActive():
             self._monitor_timer.start()
+
+    def stop_monitoring(self) -> None:
+        """Stop periodic device polling."""
+        if self._monitor_timer.isActive():
+            self._monitor_timer.stop()
+
+    def _pause_monitoring_for_active_use(self) -> None:
+        """Pause monitoring while a device is actively connected."""
+        self._monitor_paused_for_active = True
+        self.stop_monitoring()
+
+    def _resume_monitoring_if_idle(self) -> None:
+        """Restart monitoring once all active devices are disconnected."""
+        if not self._active:
+            self._monitor_paused_for_active = False
+            self.start_monitoring()
 
     def shutdown(self) -> None:
         """Stop monitoring timers and ensure background polls are finished."""
@@ -104,7 +123,7 @@ class SpectrometerManager(QtCore.QObject):
             self._monitor_timer.timeout.disconnect(self._poll_devices)
         except (TypeError, RuntimeError):
             pass
-        self._monitor_timer.stop()
+        self.stop_monitoring()
 
         worker = self._poll_worker
         if worker is not None:
@@ -138,6 +157,8 @@ class SpectrometerManager(QtCore.QObject):
         return devices
 
     def _poll_devices(self) -> None:
+        if self._monitor_paused_for_active:
+            return
         if self._poll_in_flight:
             return
         self._poll_in_flight = True
@@ -166,8 +187,14 @@ class SpectrometerManager(QtCore.QObject):
         self.devices_changed.emit(list(devices))
 
     def refresh(self) -> List[SpectrometerDescriptor]:
+        was_paused = self._monitor_paused_for_active
+        if was_paused:
+            self._monitor_paused_for_active = False
+        self.start_monitoring(force=True)
         devices = self._enumerate_devices()
         self._update_devices(devices)
+        if was_paused and self._active:
+            self._pause_monitoring_for_active_use()
         return list(self._devices)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> Optional[SpectrometerDevice]:
@@ -186,6 +213,7 @@ class SpectrometerManager(QtCore.QObject):
                     self.device_connected.emit(descriptor, None)
                     return None
             self._last_active = descriptor
+            self._pause_monitoring_for_active_use()
             self.device_connected.emit(descriptor, device)
             return device
         for provider in self._providers:
@@ -223,6 +251,7 @@ class SpectrometerManager(QtCore.QObject):
                     self._active[descriptor] = device
                     self._locks.setdefault(descriptor, QtCore.QMutex())
                     self._last_active = descriptor
+                    self._pause_monitoring_for_active_use()
                     self.device_connected.emit(descriptor, device)
                     return device
         logger.warning("Device not found: %s", descriptor.label())
@@ -248,6 +277,7 @@ class SpectrometerManager(QtCore.QObject):
             self._last_active = None
         elif self._last_active == descriptor:
             self._last_active = next(iter(self._active), None)
+        self._resume_monitoring_if_idle()
 
     def get_active(self, descriptor: Optional[SpectrometerDescriptor] = None) -> Optional[SpectrometerDevice]:
         if descriptor is not None:
