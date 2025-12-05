@@ -155,6 +155,26 @@ def test_ocean_optics_enumeration_handles_list_failure(monkeypatch):
     assert devices == []
 
 
+def test_ocean_optics_enumeration_generates_path_fallback(monkeypatch):
+    class _PathlessDevice:
+        model = "USB2000"
+        serial_number = "TEST123"
+        path = ""
+        device_node = ""
+
+    class _Backend:
+        @staticmethod
+        def list_devices():
+            return [_PathlessDevice()]
+
+    monkeypatch.setattr(OceanOpticsSpectrometer, "_get_backend", staticmethod(lambda: _Backend))
+
+    descriptors = OceanOpticsSpectrometer.enumerate()
+
+    assert len(descriptors) == 1
+    assert descriptors[0].path == "usb://TEST123"
+
+
 def test_manager_respects_auto_start_flag():
     QtCore.QCoreApplication.instance() or QtCore.QCoreApplication([])
 

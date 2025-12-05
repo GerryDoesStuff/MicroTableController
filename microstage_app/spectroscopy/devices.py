@@ -337,11 +337,16 @@ class OceanOpticsSpectrometer:
             logger.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return []
         for dev in devices:
+            serial_number = str(getattr(dev, "serial_number", ""))
+            path = str(getattr(dev, "path", getattr(dev, "device_node", "")))
+            if not path:
+                serial_stub = serial_number or getattr(dev, "model", "unknown")
+                path = f"usb://{serial_stub}"
             descriptors.append(
                 SpectrometerDescriptor(
                     model=getattr(dev, "model", "OceanOptics"),
-                    serial_number=str(getattr(dev, "serial_number", "")),
-                    path=str(getattr(dev, "path", getattr(dev, "device_node", ""))),
+                    serial_number=serial_number,
+                    path=path,
                 )
             )
         return descriptors
