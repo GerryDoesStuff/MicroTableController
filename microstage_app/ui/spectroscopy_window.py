@@ -388,6 +388,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._capture_token = object()
         self._continuous = False
         self._rate_limit_ms = 150
+        self._last_refresh_successful = False
 
         self._build_ui()
         self._restore_geometry()
@@ -397,8 +398,6 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         if self.mode_params:
             self.session.set_mode_params(**self.mode_params)
-
-        QtCore.QTimer.singleShot(0, self._refresh_devices)
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
@@ -417,6 +416,12 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.device_combo.setToolTip("Select a spectrometer device to connect")
         self.btn_refresh = QtWidgets.QPushButton("Refresh")
         self.btn_refresh.setToolTip("Scan for connected spectrometers")
+        self.btn_toggle_monitor = QtWidgets.QPushButton("Start polling")
+        self.btn_toggle_monitor.setCheckable(True)
+        self.btn_toggle_monitor.setChecked(False)
+        self.btn_toggle_monitor.setToolTip(
+            "Enable or disable background polling for spectrometers (requires a manual refresh first)"
+        )
         self.btn_connect = QtWidgets.QPushButton("Connect")
         self.btn_connect.setToolTip("Connect to the selected spectrometer")
         self.btn_disconnect = QtWidgets.QPushButton("Disconnect")
@@ -429,6 +434,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         top.addWidget(QtWidgets.QLabel("Spectrometer:"))
         top.addWidget(self.device_combo, 1)
         top.addWidget(self.btn_refresh)
+        top.addWidget(self.btn_toggle_monitor)
         top.addWidget(self.btn_connect)
         top.addWidget(self.btn_disconnect)
         top.addWidget(self.status_led)
@@ -673,6 +679,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     def _connect_signals(self) -> None:
         self.btn_refresh.clicked.connect(self._refresh_devices)
+        self.btn_toggle_monitor.toggled.connect(self._on_monitor_toggled)
         self.btn_connect.clicked.connect(self._connect_selected)
         self.btn_disconnect.clicked.connect(self._disconnect)
         self.device_combo.currentIndexChanged.connect(self._update_status_from_selection)
@@ -932,8 +939,43 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.profiles.save()
 
     def _refresh_devices(self) -> None:
-        devices = self.spectrometer_manager.refresh()
+        devices = self.spectrometer_manager.refresh(start_monitoring=False)
+        self._last_refresh_successful = True
         self._populate_devices(devices)
+        self._apply_monitoring_state()
+
+    def _on_monitor_toggled(self, checked: bool) -> None:
+        if checked and not self._last_refresh_successful:
+            self.status_message.setText("Refresh devices before enabling polling")
+            self.btn_toggle_monitor.blockSignals(True)
+            self.btn_toggle_monitor.setChecked(False)
+            self.btn_toggle_monitor.blockSignals(False)
+            checked = False
+            self._update_monitor_button()
+            return
+        self._apply_monitoring_state()
+        if checked and self._last_refresh_successful:
+            self.status_message.setText("Background polling enabled")
+        elif not checked:
+            self.status_message.setText("Background polling stopped")
+
+    def _apply_monitoring_state(self) -> None:
+        enable_monitoring = self.btn_toggle_monitor.isChecked() and self._last_refresh_successful
+        if enable_monitoring:
+            self.spectrometer_manager.start_monitoring(force=True)
+        else:
+            self.spectrometer_manager.stop_monitoring()
+        self._update_monitor_button()
+
+    def _update_monitor_button(self) -> None:
+        if self.btn_toggle_monitor.isChecked():
+            self.btn_toggle_monitor.setText("Stop polling")
+            self.btn_toggle_monitor.setToolTip("Stop background polling for spectrometers")
+        else:
+            self.btn_toggle_monitor.setText("Start polling")
+            self.btn_toggle_monitor.setToolTip(
+                "Enable or disable background polling for spectrometers (requires a manual refresh first)"
+            )
 
     def _on_devices_changed(self, devices: list) -> None:
         previous = self._current_descriptor()

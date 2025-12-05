@@ -2403,8 +2403,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_spectroscopy(self):
         manager = self._ensure_spectrometer_manager()
-        manager.start_monitoring()
-        self._refresh_spectrometers()
+        self._refresh_spectrometers(start_monitoring=False)
         if self.spectroscopy_window is None:
             self.spectroscopy_window = SpectroscopyWindow(
                 manager, self.profiles, self
@@ -2416,9 +2415,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spectroscopy_window.raise_()
         self.spectroscopy_window.activateWindow()
 
-    def _refresh_spectrometers(self):
+    def _refresh_spectrometers(self, *, start_monitoring: bool = False):
         manager = self._ensure_spectrometer_manager()
-        devices = manager.refresh()
+        devices = manager.refresh(start_monitoring=start_monitoring)
         self._populate_spectrometer_list(devices)
 
     def _on_spectrometers_changed(self, devices):
