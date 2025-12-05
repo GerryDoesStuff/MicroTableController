@@ -2603,7 +2603,7 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 return StageMarlin(p)
             except Exception:
-                log(f"UI: stage connect failed on {p}\n{traceback.format_exc()}")
+                LOG.error("UI: stage connect failed on %s\n%s", p, traceback.format_exc())
                 raise
 
         self._conn_thread, self._conn_worker = run_async(connect_stage)
@@ -2614,7 +2614,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if err or not stage:
             if err:
                 tb_text = "".join(traceback.format_exception(err))
-                log(f"UI: stage connect failed: {err}\n{tb_text}")
+                LOG.error("UI: stage connect failed: %s\n%s", err, tb_text)
             else:
                 log("UI: stage not found")
             self.stage_status.setText("Stage: not found")
