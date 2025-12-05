@@ -4,7 +4,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 from typing import Iterable, Optional
+
+# Ensure repository root is on sys.path when running directly from a fresh checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from microstage_app.spectroscopy.devices import (
     SpectrometerDescriptor,
