@@ -6,6 +6,7 @@ from typing import Iterable, List, Optional, Protocol, Sequence
 import importlib
 import importlib.util
 import logging
+import threading
 import traceback
 import numpy as np
 from PySide6 import QtCore
@@ -67,6 +68,7 @@ class _SpectrometerProvider(Protocol):
 class SpectrometerManager(QtCore.QObject):
     devices_changed = QtCore.Signal(list)
     device_connected = QtCore.Signal(object, object)
+    connect_failed = QtCore.Signal(object, str)
 
     def __init__(
         self,
@@ -223,7 +225,20 @@ class SpectrometerManager(QtCore.QObject):
             device = self._active[descriptor]
             if not device.is_connected():
                 try:
+                    logger.info(
+                        "[thread=%s] Connecting active spectrometer via %s: %s (%s)",
+                        threading.get_ident(),
+                        type(device).__name__,
+                        descriptor.label(),
+                        descriptor.path,
+                    )
                     device.connect()
+                    logger.debug(
+                        "[thread=%s] Connected active spectrometer: %s (%s)",
+                        threading.get_ident(),
+                        descriptor.label(),
+                        descriptor.path,
+                    )
                 except BaseException as exc:
                     logger.warning(
                         "Failed to connect spectrometer %s: %s\n%s",
@@ -231,6 +246,7 @@ class SpectrometerManager(QtCore.QObject):
                         exc,
                         traceback.format_exc(),
                     )
+                    self.connect_failed.emit(descriptor, str(exc))
                     self.device_connected.emit(descriptor, None)
                     return None
             self._last_active = descriptor
@@ -246,7 +262,21 @@ class SpectrometerManager(QtCore.QObject):
             for candidate in candidates:
                 if candidate == descriptor:
                     try:
+                        logger.info(
+                            "[thread=%s] Provider %s connecting spectrometer: %s (%s)",
+                            threading.get_ident(),
+                            type(provider).__name__,
+                            descriptor.label(),
+                            descriptor.path,
+                        )
                         device = provider.connect(descriptor)
+                        logger.debug(
+                            "[thread=%s] Provider %s finished connect attempt for %s (%s)",
+                            threading.get_ident(),
+                            type(provider).__name__,
+                            descriptor.label(),
+                            descriptor.path,
+                        )
                     except BaseException as exc:
                         logger.warning(
                             "Failed to create spectrometer %s: %s\n%s",
@@ -254,8 +284,10 @@ class SpectrometerManager(QtCore.QObject):
                             exc,
                             traceback.format_exc(),
                         )
+                        self.connect_failed.emit(descriptor, str(exc))
                         device = None
                     if device is None:
+                        self.connect_failed.emit(descriptor, "Device unavailable after provider connect")
                         self.device_connected.emit(descriptor, None)
                         return None
                     try:
@@ -267,6 +299,7 @@ class SpectrometerManager(QtCore.QObject):
                             exc,
                             traceback.format_exc(),
                         )
+                        self.connect_failed.emit(descriptor, str(exc))
                         self.device_connected.emit(descriptor, None)
                         return None
                     self._active[descriptor] = device
@@ -276,6 +309,7 @@ class SpectrometerManager(QtCore.QObject):
                     self.device_connected.emit(descriptor, device)
                     return device
         logger.warning("Device not found: %s", descriptor.label())
+        self.connect_failed.emit(descriptor, "Device not found during connect")
         self.device_connected.emit(descriptor, None)
         return None
 
@@ -289,7 +323,20 @@ class SpectrometerManager(QtCore.QObject):
                 continue
             try:
                 try:
+                    logger.info(
+                        "[thread=%s] Disconnecting spectrometer via %s: %s (%s)",
+                        threading.get_ident(),
+                        type(device).__name__,
+                        desc.label(),
+                        desc.path,
+                    )
                     device.disconnect()
+                    logger.debug(
+                        "[thread=%s] Disconnected spectrometer: %s (%s)",
+                        threading.get_ident(),
+                        desc.label(),
+                        desc.path,
+                    )
                 except BaseException as exc:  # pragma: no cover - defensive
                     logger.warning("Failed to disconnect spectrometer %s: %s", desc.label(), exc)
             finally:
