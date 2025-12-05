@@ -218,21 +218,74 @@ class ToupcamCamera:
         ):
             return False
 
-        def do_set():
+        supported_formats = None
+        if hasattr(self._cam, "get_PixelFormatSupport"):
             try:
-                self._cam.put_Option(self._tp.TOUPCAM_OPTION_PIXEL_FORMAT, fmt)
+                count = int(self._cam.get_PixelFormatSupport(0xFF))
+                if count > 0:
+                    supported_formats = [
+                        int(self._cam.get_PixelFormatSupport(i)) for i in range(count)
+                    ]
+                else:
+                    # Option exposed but unavailable on this model
+                    return False
             except Exception as e:
-                log(f"Camera: pixel format not supported: {e}")
+                log(f"Camera: pixel format support query failed: {e}")
+
+        def is_supported(value):
+            return value is not None and (
+                supported_formats is None or value in supported_formats
+            )
+
+        def fallback_format():
+            candidate = (
+                getattr(self._tp, "TOUPCAM_PIXELFORMAT_RAW8", None)
+                if self._raw_mode
+                else getattr(self._tp, "TOUPCAM_PIXELFORMAT_RGB888", None)
+            )
+            return candidate if is_supported(candidate) else None
+
+        target_fmt = fmt
+        if supported_formats is not None and fmt not in supported_formats:
+            fb_fmt = fallback_format()
+            log_msg = f"Camera: pixel format {fmt} not supported; available {supported_formats}"
+            if fb_fmt is None or fb_fmt == fmt:
+                log(log_msg)
+                return False
+            log(f"{log_msg}; using fallback {fb_fmt}")
+            target_fmt = fb_fmt
+
+        result = {"ok": False}
+
+        def do_set():
+            success = False
             try:
-                self._update_dimensions()
-            except Exception:
-                pass
+                self._cam.put_Option(self._tp.TOUPCAM_OPTION_PIXEL_FORMAT, target_fmt)
+                success = True
+            except Exception as e:
+                log(f"Camera: pixel format {target_fmt} failed: {e}")
+                fb_fmt = fallback_format()
+                if fb_fmt is not None and fb_fmt != target_fmt:
+                    try:
+                        self._cam.put_Option(self._tp.TOUPCAM_OPTION_PIXEL_FORMAT, fb_fmt)
+                        success = True
+                    except Exception as e2:
+                        log(f"Camera: fallback pixel format {fb_fmt} failed: {e2}")
+
+            if success:
+                try:
+                    self._update_dimensions()
+                except Exception:
+                    pass
+            result["ok"] = success
 
         if self._cb_thread is not None and threading.current_thread() is self._cb_thread:
-            threading.Thread(target=do_set).start()
+            thread = threading.Thread(target=do_set)
+            thread.start()
+            thread.join()
         else:
             do_set()
-        return True
+        return bool(result["ok"])
 
     def _init_usb_and_speed(self):
         """Query USB type and maximize bandwidth if possible."""
