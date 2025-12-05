@@ -866,6 +866,46 @@ class ToupcamCamera:
                     pass
             log(f"Camera: RAW8 fast mono={'ON' if self._raw_mode else 'OFF'}")
 
+    def pixel_format_capabilities(self):
+        """Return current pixel format and supported alternatives."""
+        if not hasattr(self._cam, "get_Option") or not hasattr(self._tp, "TOUPCAM_OPTION_PIXEL_FORMAT"):
+            return None
+
+        info = {"current": None, "supported": [], "names": {}}
+
+        try:
+            info["current"] = int(self._cam.get_Option(self._tp.TOUPCAM_OPTION_PIXEL_FORMAT))
+        except Exception:
+            pass
+
+        supported = None
+        if hasattr(self._cam, "get_PixelFormatSupport"):
+            try:
+                count = int(self._cam.get_PixelFormatSupport(0xFF))
+                if count > 0:
+                    supported = [int(self._cam.get_PixelFormatSupport(i)) for i in range(count)]
+            except Exception:
+                supported = None
+        info["supported"] = supported or []
+
+        def _name(fmt: int):
+            try:
+                val = self._tp.PixelFormatName(fmt)
+                if isinstance(val, bytes):
+                    val = val.decode(errors="ignore")
+                return str(val)
+            except Exception:
+                return None
+
+        for fmt in [info["current"], *info["supported"]]:
+            if fmt is None or fmt in info["names"]:
+                continue
+            nm = _name(fmt)
+            if nm:
+                info["names"][fmt] = nm
+
+        return info
+
     def set_speed_level(self, level: int):
         try:
             # Some SDKs expose put_Speed / get_Speed; others via put_Option

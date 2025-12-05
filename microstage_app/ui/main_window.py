@@ -1104,6 +1104,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.depth_combo = QtWidgets.QComboBox()
         c.addWidget(QtWidgets.QLabel("Color depth:"), row, 0); c.addWidget(self.depth_combo, row, 1, 1, 2); row += 1
 
+        self.pixel_format_status = QtWidgets.QLabel("Pixel format: —")
+        small = self.pixel_format_status.font()
+        small.setPointSizeF(small.pointSizeF() * 0.9)
+        self.pixel_format_status.setFont(small)
+        self.pixel_format_status.setStyleSheet("color: gray")
+        self.pixel_format_status.setWordWrap(True)
+        c.addWidget(self.pixel_format_status, row, 0, 1, 3); row += 1
+
         self.raw_chk = QtWidgets.QCheckBox("RAW8 fast mono (triples bandwidth efficiency)")
         c.addWidget(self.raw_chk, row, 0, 1, 3); row += 1
 
@@ -2553,6 +2561,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.res_combo.clear()
         self.bin_combo.clear()
         self.depth_combo.clear()
+        if hasattr(self, "pixel_format_status"):
+            self.pixel_format_status.setText("Pixel format: —")
+            self.pixel_format_status.setToolTip("")
         self._update_cam_buttons()
 
     def _connect_stage_async(self, port=None):
@@ -2774,6 +2785,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.camera or not hasattr(self.camera, "list_color_depths"):
             self.depth_combo.clear()
             self.depth_combo.setEnabled(False)
+            self._update_pixel_format_status()
             return
         self.depth_combo.blockSignals(True)
         self.depth_combo.clear()
@@ -2795,6 +2807,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
         self.depth_combo.setEnabled(self.depth_combo.count() > 0)
         self.depth_combo.blockSignals(False)
+        self._update_pixel_format_status()
 
     def _populate_binning(self):
         if not self.camera or not hasattr(self.camera, "list_binning_factors"):
@@ -2840,6 +2853,54 @@ class MainWindow(QtWidgets.QMainWindow):
         if pos >= 0:
             self.res_combo.setCurrentIndex(pos)
         self.res_combo.blockSignals(False)
+
+    def _pixel_format_label(self, fmt: int, names: dict[int, str]) -> str:
+        name = names.get(fmt)
+        return f"{name} ({fmt})" if name and fmt is not None else (name or str(fmt))
+
+    def _update_pixel_format_status(self):
+        label = getattr(self, "pixel_format_status", None)
+        if label is None:
+            return
+        label.setText("Pixel format: —")
+        label.setToolTip("")
+        if not self.camera:
+            return
+
+        formats_text = []
+        tooltip_lines = []
+
+        try:
+            caps = self.camera.pixel_format_capabilities() if hasattr(self.camera, "pixel_format_capabilities") else None
+        except Exception:
+            caps = None
+
+        if caps:
+            current = caps.get("current")
+            supported = caps.get("supported") or []
+            names = caps.get("names", {})
+            if current is not None:
+                formats_text.append(f"Pixel format: {self._pixel_format_label(int(current), names)}")
+            if supported:
+                alt = ", ".join(self._pixel_format_label(int(fmt), names) for fmt in supported)
+                tooltip_lines.append(f"Supported formats: {alt}")
+
+        try:
+            cur_depth = None
+            if hasattr(self.camera, "get_color_depth"):
+                cur_depth = self.camera.get_color_depth()
+            depths = self.camera.list_color_depths() if hasattr(self.camera, "list_color_depths") else []
+            if cur_depth is not None:
+                formats_text.append(f"Depth: {int(cur_depth)}-bit")
+            if depths:
+                tooltip_lines.append("Available depths: " + ", ".join(f"{int(d)}-bit" for d in depths))
+        except Exception:
+            pass
+
+        if formats_text:
+            label.setText("; ".join(formats_text))
+        if tooltip_lines:
+            label.setToolTip("\n".join(tooltip_lines))
 
     @staticmethod
     def _normalize_combo_value(val):
@@ -3165,10 +3226,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.camera.set_color_depth(int(depth))
         except Exception:
             pass
+        self._update_pixel_format_status()
 
     def _apply_raw(self, on: bool):
         if not self.camera: return
         self.camera.set_raw_fast_mono(bool(on))
+        self._update_pixel_format_status()
 
     def _apply_binning(self, i: int):
         if not self.camera: return
