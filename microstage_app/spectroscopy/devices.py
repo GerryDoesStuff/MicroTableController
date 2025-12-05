@@ -156,26 +156,44 @@ class SpectrometerManager(QtCore.QObject):
                 logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
         return devices
 
+    def _reset_poll_state(self, *, stop_thread: bool = False) -> None:
+        thread = self._poll_thread
+        self._poll_thread = None
+        self._poll_worker = None
+        self._poll_in_flight = False
+        if stop_thread and thread is not None and thread.isRunning():
+            try:
+                thread.quit()
+                thread.wait()
+            except BaseException:  # pragma: no cover - defensive
+                logger.error("Failed to stop spectrometer poll thread:\n%s", traceback.format_exc())
+
     def _poll_devices(self) -> None:
         if self._monitor_paused_for_active:
             return
         if self._poll_in_flight:
             return
         self._poll_in_flight = True
-        thread, worker = run_async(self._enumerate_devices, parent=self)
-        self._poll_thread = thread
-        self._poll_worker = worker
-        worker.finished.connect(self._on_polled_devices)
+        try:
+            thread, worker = run_async(self._enumerate_devices, parent=self)
+            self._poll_thread = thread
+            self._poll_worker = worker
+            worker.finished.connect(self._on_polled_devices)
+        except BaseException:
+            logger.error("Unhandled error starting spectrometer poll:\n%s", traceback.format_exc())
+            self._reset_poll_state(stop_thread=True)
 
     @QtCore.Slot(object, object)
     def _on_polled_devices(self, devices, err) -> None:
-        self._poll_in_flight = False
-        self._poll_thread = None
-        self._poll_worker = None
-        if err:
-            logger.warning("Spectrometer poll failed: %s\n%s", err, _format_exception(err))
-            return
-        self._update_devices(devices)
+        try:
+            if err:
+                logger.error("Spectrometer poll failed: %s\n%s", err, _format_exception(err))
+                return
+            self._update_devices(devices)
+        except BaseException:
+            logger.error("Unhandled error handling polled devices:\n%s", traceback.format_exc())
+        finally:
+            self._reset_poll_state()
 
     def _update_devices(self, devices: List[SpectrometerDescriptor]) -> None:
         if devices == self._devices:
