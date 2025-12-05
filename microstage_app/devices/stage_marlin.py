@@ -145,7 +145,7 @@ class StageMarlin:
 
     def _send_log(self, cmd):
         line = cmd.strip()
-        logger.debug("TX >> %s", line)
+        logger.info("Stage TX >> %s", line)
         self._write(line)
 
     def _write(self, cmd):
@@ -160,6 +160,7 @@ class StageMarlin:
             buf += chunk
             if 'ok' in chunk.lower():
                 return buf
+        logger.warning("Stage: timeout waiting for ok after command; response=%s", buf[:120])
         return buf
 
     def send(self, cmd, wait_ok=True):
