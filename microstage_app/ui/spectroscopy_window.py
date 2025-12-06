@@ -56,7 +56,13 @@ class CaptureJob:
     timestamp: float
 
 
-QtCore.qRegisterMetaType(CaptureJob, "CaptureJob")
+_register_meta_type = getattr(QtCore, "qRegisterMetaType", None)
+if callable(_register_meta_type):
+    with contextlib.suppress(Exception):
+        _register_meta_type(CaptureJob, "CaptureJob")
+elif hasattr(QtCore, "QMetaType") and hasattr(QtCore.QMetaType, "registerType"):
+    with contextlib.suppress(Exception):
+        QtCore.QMetaType.registerType(CaptureJob)
 
 
 class CaptureWorker(QtCore.QObject):
@@ -78,7 +84,7 @@ class CaptureWorker(QtCore.QObject):
             return True
         return False
 
-    @QtCore.Slot(CaptureJob)
+    @QtCore.Slot(object)
     def perform_capture(self, job: CaptureJob) -> None:
         self.capture_started.emit(job.token)
         start = time.time()
