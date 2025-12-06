@@ -358,6 +358,7 @@ class SpectrumChartView(QtCharts.QChartView):
 
 
 class SpectroscopyWindow(QtWidgets.QMainWindow):
+    capture_requested = QtCore.Signal(object)
     MODES = [
         "Absorbance",
         "Transmittance",
@@ -428,6 +429,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._capture_worker.capture_ready.connect(self._on_capture_ready)
         self._capture_worker.capture_failed.connect(self._on_capture_failed)
         self._capture_worker.capture_started.connect(self._on_capture_started)
+        self.capture_requested.connect(
+            self._capture_worker.perform_capture, QtCore.Qt.QueuedConnection
+        )
         self._capture_thread.start()
         self._capture_in_flight = False
         self._capture_token = object()
