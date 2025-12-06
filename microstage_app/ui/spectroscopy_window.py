@@ -420,7 +420,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._secondary_axis: Optional[QtCharts.QCategoryAxis] = None
 
         self.capture_timer = QtCore.QTimer(self)
-        self.capture_timer.setInterval(150)
+        self.capture_timer.setInterval(250)
         self.capture_timer.timeout.connect(self._trigger_continuous_capture)
 
         self._capture_thread = QtCore.QThread(self)
@@ -436,7 +436,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._capture_in_flight = False
         self._capture_token = object()
         self._continuous = False
-        self._rate_limit_ms = 100
+        self._rate_limit_ms = 250
         self._last_refresh_successful = False
 
         self._build_ui()
