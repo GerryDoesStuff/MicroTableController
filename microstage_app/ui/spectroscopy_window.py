@@ -531,8 +531,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         info.addWidget(self.roi_label)
         info.addStretch(1)
         chart_layout.addLayout(info)
-        ts_group = QtWidgets.QGroupBox("Time series views")
-        ts_layout = QtWidgets.QVBoxLayout(ts_group)
+        self.ts_group = QtWidgets.QGroupBox("Time series views")
+        ts_layout = QtWidgets.QVBoxLayout(self.ts_group)
         self._ts_chart = QtCharts.QChart()
         self._ts_chart.legend().setVisible(True)
         axis_x = QtCharts.QValueAxis()
@@ -548,7 +548,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrogram_label.setAlignment(QtCore.Qt.AlignCenter)
         self.spectrogram_label.setMinimumHeight(120)
         ts_layout.addWidget(self.spectrogram_label)
-        chart_layout.addWidget(ts_group)
+        self.ts_group.setVisible(False)
+        chart_layout.addWidget(self.ts_group)
 
         splitter_vertical = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         self.recent_panel = self._build_recent_panel()
@@ -1660,6 +1661,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrogram_label.setText("Spectrogram hidden")
 
     def _update_time_series_views(self) -> None:
+        show_views = self.chk_show_timeseries.isChecked() or self.chk_show_spectrogram.isChecked()
+        has_data = bool(self._time_series_records) or self._time_series_active
+        if hasattr(self, "ts_group"):
+            self.ts_group.setVisible(show_views and has_data)
+
         if not self._time_series_records:
             self._clear_time_series_views()
             if self._time_series_active:
