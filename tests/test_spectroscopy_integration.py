@@ -1,6 +1,8 @@
 import os
+import os
 import sys
 import time
+import logging
 import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -170,6 +172,49 @@ def test_single_and_continuous_acquisition_with_mock_device():
     assert any(entry.metadata.get("integration_ms") == 5.0 for entry in window._recent_captures)
 
     device.disconnect()
+
+
+def test_schedule_capture_falls_back_when_meta_unavailable(monkeypatch, caplog):
+    from microstage_app.ui import spectroscopy_window
+
+    caplog.set_level(logging.INFO, logger="microstage_app")
+    window, _device = _build_window_with_mock()
+    monkeypatch.setattr(spectroscopy_window, "_CAPTURE_JOB_META_REGISTERED", False)
+
+    captured_types = []
+
+    def fake_q_arg(arg_type, value):
+        captured_types.append(arg_type)
+
+        class _Arg:
+            def __init__(self, v):
+                self.value = v
+
+        return _Arg(value)
+
+    def fake_invoke(_obj, _method, _conn, _arg):
+        return True
+
+    monkeypatch.setattr(spectroscopy_window.QtCore, "Q_ARG", fake_q_arg)
+    monkeypatch.setattr(spectroscopy_window.QtCore.QMetaObject, "invokeMethod", fake_invoke)
+
+    window._schedule_capture("measurement")
+
+    assert captured_types[-1] is object
+    assert any("generic object payloads" in rec.message for rec in caplog.records)
+
+
+def test_continuous_capture_triggers_scheduling(monkeypatch):
+    window, _device = _build_window_with_mock()
+    calls: list[str] = []
+
+    def _fake_schedule(self, kind: str):
+        calls.append(kind)
+
+    monkeypatch.setattr(window, "_schedule_capture", _fake_schedule.__get__(window, window.__class__))
+
+    window._start_continuous()
+    assert "measurement" in calls
 
 
 def test_wizard_preconditions_and_invalidation():
