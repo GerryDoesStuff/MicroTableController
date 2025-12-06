@@ -793,9 +793,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager.shutdown()
         self.spectrometer_manager.disconnect()
         try:
-            self.profiles.set("spectroscopy.geometry", self.saveGeometry().hex())
-            self.profiles.set("spectroscopy.window_state", self.saveState().hex())
-            self.profiles.set("spectroscopy.splitter_state", self.splitter.saveState().hex())
+            self.profiles.set(
+                "spectroscopy.geometry", bytes(self.saveGeometry().toHex()).decode()
+            )
+            self.profiles.set(
+                "spectroscopy.window_state", bytes(self.saveState().toHex()).decode()
+            )
+            self.profiles.set(
+                "spectroscopy.splitter_state",
+                bytes(self.splitter.saveState().toHex()).decode(),
+            )
             self._persist_acquisition_settings(save=False)
             self._persist_data_dir(save=False)
             self.profiles.set("spectroscopy.last_mode", self.current_mode)
