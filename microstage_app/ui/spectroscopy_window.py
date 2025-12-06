@@ -1815,14 +1815,25 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._traces[key] = series
             self._trace_meta[key] = meta
             self._install_legend_handlers()
+        is_raman = self.current_mode == "Raman"
+        if not is_raman:
+            mask = (axis_arr >= 410) & (axis_arr <= 750)
+            if mask.any():
+                axis_arr = axis_arr[mask]
+                data_arr = data_arr[mask]
         series.replace([QtCore.QPointF(float(x), float(y)) for x, y in zip(axis_arr, data_arr)])
         axis_x = self._axis_x
         axis_y = self._axis_y
         if axis_x:
-            axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
-            if self.current_mode == "Raman":
+            if is_raman:
+                axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
                 axis_x.setTitleText("Raman shift (cm⁻¹)")
             else:
+                xmin = max(410.0, float(np.nanmin(axis_arr)))
+                xmax = min(750.0, float(np.nanmax(axis_arr)))
+                if xmin >= xmax or not np.isfinite(xmin) or not np.isfinite(xmax):
+                    xmin, xmax = 410.0, 750.0
+                axis_x.setRange(xmin, xmax)
                 axis_x.setTitleText("Wavelength (nm)")
         ymin = float(np.nanmin(data_arr))
         ymax = float(np.nanmax(data_arr))
