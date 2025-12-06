@@ -174,25 +174,34 @@ def test_single_and_continuous_acquisition_with_mock_device():
     device.disconnect()
 
 
-def test_schedule_capture_dispatches_job(monkeypatch):
+def test_schedule_capture_falls_back_when_meta_unavailable(monkeypatch, caplog):
     from microstage_app.ui import spectroscopy_window
 
+    caplog.set_level(logging.INFO, logger="microstage_app")
     window, _device = _build_window_with_mock()
+    monkeypatch.setattr(spectroscopy_window, "_CAPTURE_JOB_META_REGISTERED", False)
 
-    window.capture_requested.disconnect()
-    captured_jobs = []
+    captured_types = []
 
-    def _capture(job):
-        captured_jobs.append(job)
+    def fake_q_arg(arg_type, value):
+        captured_types.append(arg_type)
 
-    window.capture_requested.connect(_capture, QtCore.Qt.DirectConnection)
+        class _Arg:
+            def __init__(self, v):
+                self.value = v
+
+        return _Arg(value)
+
+    def fake_invoke(_obj, _method, _conn, _arg):
+        return True
+
+    monkeypatch.setattr(spectroscopy_window.QtCore, "Q_ARG", fake_q_arg)
+    monkeypatch.setattr(spectroscopy_window.QtCore.QMetaObject, "invokeMethod", fake_invoke)
 
     window._schedule_capture("measurement")
 
-    assert captured_jobs
-    job = captured_jobs[-1]
-    assert isinstance(job, spectroscopy_window.CaptureJob)
-    assert job.kind == "measurement"
+    assert captured_types[-1] is object
+    assert any("generic object payloads" in rec.message for rec in caplog.records)
 
 
 def test_continuous_capture_triggers_scheduling(monkeypatch):

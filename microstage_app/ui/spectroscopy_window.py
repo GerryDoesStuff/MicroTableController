@@ -1400,7 +1400,16 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             timestamp=time.time(),
         )
         self._capture_in_flight = True
-        self.capture_requested.emit(job)
+        arg_type = CaptureJob if _CAPTURE_JOB_META_REGISTERED else object
+        if not _CAPTURE_JOB_META_REGISTERED and not getattr(self, "_capture_job_fallback_logged", False):
+            log("CaptureJob meta-type unavailable; scheduling with generic object payloads")
+            self._capture_job_fallback_logged = True
+        QtCore.QMetaObject.invokeMethod(
+            self._capture_worker,
+            "perform_capture",
+            QtCore.Qt.QueuedConnection,
+            QtCore.Q_ARG(arg_type, job),
+        )
 
     @QtCore.Slot(object)
     def _on_capture_started(self, token: object) -> None:
