@@ -59,33 +59,38 @@ def _register_capture_job_meta_type() -> None:
     """Ensure CaptureJob can be sent across Qt thread boundaries.
 
     Some PySide6 builds require explicit registration for custom Python types
-    passed through signals or ``Q_ARG``. Register both by type and by name so
-    ``QMetaObject.invokeMethod`` can marshal ``CaptureJob`` instances without
-    raising ``qArgDataFromPyType`` errors.
+    passed through signals or ``Q_ARG``. Register both by type and by name when
+    possible so ``QMetaObject.invokeMethod`` can marshal ``CaptureJob`` instances
+    without raising ``qArgDataFromPyType`` errors. If the available Qt build
+    does not support registration, log a warning but continue so the
+    application can still start.
     """
 
     errors: list[str] = []
+    registered = False
 
     _register_meta_type = getattr(QtCore, "qRegisterMetaType", None)
-    if not callable(_register_meta_type):
-        errors.append("QtCore.qRegisterMetaType is unavailable")
-    else:
+    if callable(_register_meta_type):
         try:
             _register_meta_type(CaptureJob)
-            _register_meta_type(CaptureJob, "CaptureJob")
+            _register_meta_type("CaptureJob")
+            registered = True
         except Exception as exc:  # pragma: no cover - runtime safety
             errors.append(f"qRegisterMetaType failed: {exc}")
+    elif hasattr(QtCore, "qRegisterMetaType"):  # pragma: no cover - defensive
+        errors.append("QtCore.qRegisterMetaType is unavailable")
 
-    if hasattr(QtCore, "QMetaType") and hasattr(QtCore.QMetaType, "registerType"):
+    register_type = getattr(getattr(QtCore, "QMetaType", None), "registerType", None)
+    if callable(register_type):
         try:
-            QtCore.QMetaType.registerType(CaptureJob, "CaptureJob")
+            register_type(CaptureJob, "CaptureJob")
+            registered = True
         except Exception as exc:  # pragma: no cover - runtime safety
             errors.append(f"QMetaType.registerType failed: {exc}")
 
-    if errors:
+    if errors and not registered:
         message = "; ".join(errors)
         log("CaptureJob meta-type registration failed: %s", message)
-        raise RuntimeError(message)
 
 
 _register_capture_job_meta_type()
