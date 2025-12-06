@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import io
 import os
 import time
@@ -65,15 +64,28 @@ def _register_capture_job_meta_type() -> None:
     raising ``qArgDataFromPyType`` errors.
     """
 
+    errors: list[str] = []
+
     _register_meta_type = getattr(QtCore, "qRegisterMetaType", None)
-    if callable(_register_meta_type):
-        with contextlib.suppress(Exception):
+    if not callable(_register_meta_type):
+        errors.append("QtCore.qRegisterMetaType is unavailable")
+    else:
+        try:
             _register_meta_type(CaptureJob)
-        with contextlib.suppress(Exception):
             _register_meta_type(CaptureJob, "CaptureJob")
+        except Exception as exc:  # pragma: no cover - runtime safety
+            errors.append(f"qRegisterMetaType failed: {exc}")
+
     if hasattr(QtCore, "QMetaType") and hasattr(QtCore.QMetaType, "registerType"):
-        with contextlib.suppress(Exception):
+        try:
             QtCore.QMetaType.registerType(CaptureJob, "CaptureJob")
+        except Exception as exc:  # pragma: no cover - runtime safety
+            errors.append(f"QMetaType.registerType failed: {exc}")
+
+    if errors:
+        message = "; ".join(errors)
+        log("CaptureJob meta-type registration failed: %s", message)
+        raise RuntimeError(message)
 
 
 _register_capture_job_meta_type()
