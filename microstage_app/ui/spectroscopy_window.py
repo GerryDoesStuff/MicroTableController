@@ -1357,7 +1357,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._capture_worker,
             "perform_capture",
             QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(CaptureJob, job),
+            QtCore.Q_ARG(object, job),
         )
 
     @QtCore.Slot(object)
