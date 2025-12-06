@@ -55,7 +55,7 @@ class CaptureJob:
     timestamp: float
 
 
-def _register_capture_job_meta_type() -> None:
+def _register_capture_job_meta_type() -> bool:
     """Ensure CaptureJob can be sent across Qt thread boundaries.
 
     Some PySide6 builds require explicit registration for custom Python types
@@ -92,8 +92,13 @@ def _register_capture_job_meta_type() -> None:
         message = "; ".join(errors)
         log("CaptureJob meta-type registration failed: %s", message)
 
+    if not registered:
+        log("CaptureJob meta-type registration unavailable; using object payloads for scheduling")
 
-_register_capture_job_meta_type()
+    return registered
+
+
+_CAPTURE_JOB_META_REGISTERED = _register_capture_job_meta_type()
 
 
 class CaptureWorker(QtCore.QObject):
@@ -1391,11 +1396,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             timestamp=time.time(),
         )
         self._capture_in_flight = True
+        arg_type = CaptureJob if _CAPTURE_JOB_META_REGISTERED else object
+        if not _CAPTURE_JOB_META_REGISTERED and not getattr(self, "_capture_job_fallback_logged", False):
+            log("CaptureJob meta-type unavailable; scheduling with generic object payloads")
+            self._capture_job_fallback_logged = True
         QtCore.QMetaObject.invokeMethod(
             self._capture_worker,
             "perform_capture",
             QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(CaptureJob, job),
+            QtCore.Q_ARG(arg_type, job),
         )
 
     @QtCore.Slot(object)
