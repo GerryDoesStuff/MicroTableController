@@ -1816,9 +1816,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._trace_meta[key] = meta
             self._install_legend_handlers()
         is_raman = self.current_mode == "Raman"
-        is_fluorescence = self.current_mode == "Fluorescence"
-        clamp_wavelength = not (is_raman or is_fluorescence)
-        if clamp_wavelength:
+        if not is_raman:
             mask = (axis_arr >= 410) & (axis_arr <= 750)
             if mask.any():
                 axis_arr = axis_arr[mask]
@@ -1838,7 +1836,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 axis_x.setRange(xmin, xmax)
                 axis_x.setTitleText("Wavelength (nm)")
             else:
-                axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
+                xmin = max(410.0, float(np.nanmin(axis_arr)))
+                xmax = min(750.0, float(np.nanmax(axis_arr)))
+                if xmin >= xmax or not np.isfinite(xmin) or not np.isfinite(xmax):
+                    xmin, xmax = 410.0, 750.0
+                axis_x.setRange(xmin, xmax)
                 axis_x.setTitleText("Wavelength (nm)")
         ymin = float(np.nanmin(data_arr))
         ymax = float(np.nanmax(data_arr))
