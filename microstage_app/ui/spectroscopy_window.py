@@ -1828,6 +1828,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             if is_raman:
                 axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
                 axis_x.setTitleText("Raman shift (cm⁻¹)")
+            elif clamp_wavelength:
+                xmin = max(410.0, float(np.nanmin(axis_arr)))
+                xmax = min(750.0, float(np.nanmax(axis_arr)))
+                if xmin >= xmax or not np.isfinite(xmin) or not np.isfinite(xmax):
+                    xmin, xmax = 410.0, 750.0
+                axis_x.setRange(xmin, xmax)
+                axis_x.setTitleText("Wavelength (nm)")
             else:
                 xmin = max(410.0, float(np.nanmin(axis_arr)))
                 xmax = min(750.0, float(np.nanmax(axis_arr)))
