@@ -56,18 +56,32 @@ class CaptureJob:
     timestamp: float
 
 
-_register_meta_type = getattr(QtCore, "qRegisterMetaType", None)
-if callable(_register_meta_type):
-    with contextlib.suppress(Exception):
-        _register_meta_type(CaptureJob, "CaptureJob")
-elif hasattr(QtCore, "QMetaType") and hasattr(QtCore.QMetaType, "registerType"):
-    with contextlib.suppress(Exception):
-        QtCore.QMetaType.registerType(CaptureJob)
+def _register_capture_job_meta_type() -> None:
+    """Ensure CaptureJob can be sent across Qt thread boundaries.
+
+    Some PySide6 builds require explicit registration for custom Python types
+    passed through signals or ``Q_ARG``. Register both by type and by name so
+    ``QMetaObject.invokeMethod`` can marshal ``CaptureJob`` instances without
+    raising ``qArgDataFromPyType`` errors.
+    """
+
+    _register_meta_type = getattr(QtCore, "qRegisterMetaType", None)
+    if callable(_register_meta_type):
+        with contextlib.suppress(Exception):
+            _register_meta_type(CaptureJob)
+        with contextlib.suppress(Exception):
+            _register_meta_type(CaptureJob, "CaptureJob")
+    if hasattr(QtCore, "QMetaType") and hasattr(QtCore.QMetaType, "registerType"):
+        with contextlib.suppress(Exception):
+            QtCore.QMetaType.registerType(CaptureJob, "CaptureJob")
+
+
+_register_capture_job_meta_type()
 
 
 class CaptureWorker(QtCore.QObject):
-    capture_ready = QtCore.Signal(object, np.ndarray, np.ndarray, float, float)
-    capture_failed = QtCore.Signal(object, str)
+    capture_ready = QtCore.Signal(CaptureJob, np.ndarray, np.ndarray, float, float)
+    capture_failed = QtCore.Signal(CaptureJob, str)
     capture_started = QtCore.Signal(object)
 
     def __init__(self) -> None:
@@ -84,7 +98,7 @@ class CaptureWorker(QtCore.QObject):
             return True
         return False
 
-    @QtCore.Slot(object)
+    @QtCore.Slot(CaptureJob)
     def perform_capture(self, job: CaptureJob) -> None:
         self.capture_started.emit(job.token)
         start = time.time()
@@ -1364,7 +1378,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._capture_worker,
             "perform_capture",
             QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(object, job),
+            QtCore.Q_ARG(CaptureJob, job),
         )
 
     @QtCore.Slot(object)
@@ -1373,7 +1387,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             return
         self.status_message.setText("Capturing…")
 
-    @QtCore.Slot(object, np.ndarray, np.ndarray, float, float)
+    @QtCore.Slot(CaptureJob, np.ndarray, np.ndarray, float, float)
     def _on_capture_ready(
         self, job: CaptureJob, processed: np.ndarray, raw: np.ndarray, duration: float, peak: float
     ) -> None:
@@ -1437,7 +1451,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if self._continuous:
             QtCore.QTimer.singleShot(self.capture_timer.interval(), self._trigger_continuous_capture)
 
-    @QtCore.Slot(object, str)
+    @QtCore.Slot(CaptureJob, str)
     def _on_capture_failed(self, job: CaptureJob, message: str) -> None:
         if job.token != self._capture_token:
             return
