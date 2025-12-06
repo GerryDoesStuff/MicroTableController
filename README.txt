@@ -67,6 +67,8 @@ QUICK START
    py -3.13 -m venv .venv
    .\.venv\Scripts\activate
    pip install -r requirements.txt
+   # For development/CI (adds pytest + pytest-qt):
+   # pip install -r requirements-dev.txt
 
 2) Place Toupcam bits
    Copy toupcam.dll (and toupcam.py if using the vendor wrapper)

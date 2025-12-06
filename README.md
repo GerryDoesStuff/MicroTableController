@@ -11,6 +11,10 @@ and a **RisingCam E3ISPM** camera (ToupTek OEM) via the vendor SDK. Includes **a
    ```bash
    pip install -r requirements.txt
    ```
+   For development or CI, install the test extras instead:
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
    On Linux, OpenCV (`opencv-python`) requires the system library `libGL.so.1`.
    Install it via your package manager, e.g. `sudo apt-get install -y libgl1`,
   or run the helper script `scripts/install_libgl1.sh`. For headless setups,

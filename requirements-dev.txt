@@ -1,0 +1,4 @@
+# Development and CI dependencies
+-r requirements.txt
+pytest>=8.2,<9.0
+pytest-qt>=4.4,<5.0
