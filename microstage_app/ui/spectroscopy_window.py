@@ -55,7 +55,7 @@ class CaptureJob:
     timestamp: float
 
 
-def _register_capture_job_meta_type() -> None:
+def _register_capture_job_meta_type() -> bool:
     """Ensure CaptureJob can be sent across Qt thread boundaries.
 
     Some PySide6 builds require explicit registration for custom Python types
@@ -92,8 +92,13 @@ def _register_capture_job_meta_type() -> None:
         message = "; ".join(errors)
         log("CaptureJob meta-type registration failed: %s", message)
 
+    if not registered:
+        log("CaptureJob meta-type registration unavailable; using object payloads for scheduling")
 
-_register_capture_job_meta_type()
+    return registered
+
+
+_CAPTURE_JOB_META_REGISTERED = _register_capture_job_meta_type()
 
 
 class CaptureWorker(QtCore.QObject):
@@ -353,6 +358,7 @@ class SpectrumChartView(QtCharts.QChartView):
 
 
 class SpectroscopyWindow(QtWidgets.QMainWindow):
+    capture_requested = QtCore.Signal(object)
     MODES = [
         "Absorbance",
         "Transmittance",
@@ -423,6 +429,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._capture_worker.capture_ready.connect(self._on_capture_ready)
         self._capture_worker.capture_failed.connect(self._on_capture_failed)
         self._capture_worker.capture_started.connect(self._on_capture_started)
+        self.capture_requested.connect(
+            self._capture_worker.perform_capture, QtCore.Qt.QueuedConnection
+        )
         self._capture_thread.start()
         self._capture_in_flight = False
         self._capture_token = object()
@@ -1391,12 +1400,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             timestamp=time.time(),
         )
         self._capture_in_flight = True
-        QtCore.QMetaObject.invokeMethod(
-            self._capture_worker,
-            "perform_capture",
-            QtCore.Qt.QueuedConnection,
-            QtCore.Q_ARG(CaptureJob, job),
-        )
+        self.capture_requested.emit(job)
 
     @QtCore.Slot(object)
     def _on_capture_started(self, token: object) -> None:

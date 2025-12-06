@@ -1,6 +1,8 @@
 import os
+import os
 import sys
 import time
+import logging
 import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -170,6 +172,40 @@ def test_single_and_continuous_acquisition_with_mock_device():
     assert any(entry.metadata.get("integration_ms") == 5.0 for entry in window._recent_captures)
 
     device.disconnect()
+
+
+def test_schedule_capture_dispatches_job(monkeypatch):
+    from microstage_app.ui import spectroscopy_window
+
+    window, _device = _build_window_with_mock()
+
+    window.capture_requested.disconnect()
+    captured_jobs = []
+
+    def _capture(job):
+        captured_jobs.append(job)
+
+    window.capture_requested.connect(_capture, QtCore.Qt.DirectConnection)
+
+    window._schedule_capture("measurement")
+
+    assert captured_jobs
+    job = captured_jobs[-1]
+    assert isinstance(job, spectroscopy_window.CaptureJob)
+    assert job.kind == "measurement"
+
+
+def test_continuous_capture_triggers_scheduling(monkeypatch):
+    window, _device = _build_window_with_mock()
+    calls: list[str] = []
+
+    def _fake_schedule(self, kind: str):
+        calls.append(kind)
+
+    monkeypatch.setattr(window, "_schedule_capture", _fake_schedule.__get__(window, window.__class__))
+
+    window._start_continuous()
+    assert "measurement" in calls
 
 
 def test_wizard_preconditions_and_invalidation():
