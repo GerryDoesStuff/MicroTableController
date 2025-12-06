@@ -405,7 +405,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self._chart = QtCharts.QChart()
         self._chart.setAnimationOptions(QtCharts.QChart.AllAnimations)
-        self._chart.legend().setVisible(True)
+        self._chart.legend().setVisible(False)
+        self._chart.setMargins(QtCore.QMargins(4, 4, 4, 4))
         self._axis_x = QtCharts.QValueAxis()
         self._axis_x.setTitleText("Wavelength (nm)")
         self._chart.addAxis(self._axis_x, QtCore.Qt.AlignBottom)
@@ -1802,7 +1803,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         series = self._traces.get(key)
         if series is None:
             series = QtCharts.QLineSeries()
-            meta = SpectrumTrace(key.title(), color)
+            label = "" if key == "live" else key.title()
+            meta = SpectrumTrace(label, color)
             series.setName(meta.label)
             series.setColor(meta.color)
             self._chart.addSeries(series)
