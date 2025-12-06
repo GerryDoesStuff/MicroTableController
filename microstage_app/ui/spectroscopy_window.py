@@ -380,6 +380,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.profiles = profiles
         self.session = SpectroscopySession()
         self.current_mode = str(self.profiles.get("spectroscopy.last_mode", "Absorbance", expected_type=str))
+        self._default_wavelength_range = (410.0, 750.0)
+        self._counts_max = 5000
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
         self._last_capture_ts = 0.0
         stored_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
@@ -409,10 +411,12 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._chart.setMargins(QtCore.QMargins(4, 4, 4, 4))
         self._axis_x = QtCharts.QValueAxis()
         self._axis_x.setTitleText("Wavelength (nm)")
+        self._axis_x.setRange(*self._default_wavelength_range)
         self._chart.addAxis(self._axis_x, QtCore.Qt.AlignBottom)
 
         self._axis_y = QtCharts.QValueAxis()
-        self._axis_y.setTitleText("Intensity (a.u.)")
+        self._axis_y.setTitleText("Intensity (counts)")
+        self._axis_y.setRange(0.0, float(self._counts_max))
         self._chart.addAxis(self._axis_y, QtCore.Qt.AlignLeft)
 
         self._chart_view = SpectrumChartView(self._chart)
@@ -443,6 +447,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._build_ui()
         self._restore_geometry()
         self._connect_signals()
+        self._update_counts_controls_state()
         self._update_session_context()
         self._refresh_validity_state()
 
@@ -515,6 +520,20 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         control_shortcuts.addWidget(self.btn_show_data)
         control_shortcuts.addStretch(1)
         layout.addLayout(control_shortcuts)
+
+        yscale_layout = QtWidgets.QHBoxLayout()
+        yscale_layout.addWidget(QtWidgets.QLabel("Intensity scale"))
+        self.counts_max_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.counts_max_slider.setRange(100, 100000)
+        self.counts_max_slider.setValue(self._counts_max)
+        self.counts_max_slider.setToolTip("Adjust the maximum counts shown on the Y axis")
+        self.counts_max_spin = QtWidgets.QSpinBox()
+        self.counts_max_spin.setRange(100, 100000)
+        self.counts_max_spin.setValue(self._counts_max)
+        self.counts_max_spin.setSuffix(" counts")
+        yscale_layout.addWidget(self.counts_max_slider, 1)
+        yscale_layout.addWidget(self.counts_max_spin)
+        layout.addLayout(yscale_layout)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         self.splitter = splitter
@@ -738,6 +757,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager.device_connected.connect(self._on_device_connected)
         self.spectrometer_manager.connect_failed.connect(self._on_connect_failed)
         self.session.validity_changed.connect(self._refresh_validity_state)
+
+        self.counts_max_slider.valueChanged.connect(self.counts_max_spin.setValue)
+        self.counts_max_spin.valueChanged.connect(self.counts_max_slider.setValue)
+        self.counts_max_spin.valueChanged.connect(lambda val: self._apply_counts_scale(float(val)))
 
         self.integration_slider.valueChanged.connect(self.integration_spin.setValue)
         self.integration_spin.valueChanged.connect(self.integration_slider.setValue)
@@ -1828,19 +1851,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             if is_raman:
                 axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
                 axis_x.setTitleText("Raman shift (cm⁻¹)")
-            elif clamp_wavelength:
-                xmin = max(410.0, float(np.nanmin(axis_arr)))
-                xmax = min(750.0, float(np.nanmax(axis_arr)))
-                if xmin >= xmax or not np.isfinite(xmin) or not np.isfinite(xmax):
-                    xmin, xmax = 410.0, 750.0
-                axis_x.setRange(xmin, xmax)
-                axis_x.setTitleText("Wavelength (nm)")
             else:
-                xmin = max(410.0, float(np.nanmin(axis_arr)))
-                xmax = min(750.0, float(np.nanmax(axis_arr)))
-                if xmin >= xmax or not np.isfinite(xmin) or not np.isfinite(xmax):
-                    xmin, xmax = 410.0, 750.0
-                axis_x.setRange(xmin, xmax)
+                axis_x.setRange(*self._default_wavelength_range)
                 axis_x.setTitleText("Wavelength (nm)")
         ymin = float(np.nanmin(data_arr))
         ymax = float(np.nanmax(data_arr))
@@ -1856,8 +1868,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             elif self.current_mode == "Raman":
                 axis_y.setTitleText("Intensity (a.u.)")
             else:
-                axis_y.setTitleText("Intensity (a.u.)")
-            axis_y.setRange(ymin, ymax)
+                axis_y.setTitleText("Intensity (counts)")
+            if self._is_counts_mode():
+                axis_y.setRange(0.0, float(self._counts_max))
+            else:
+                axis_y.setRange(ymin, ymax)
         if self.current_mode == "Raman":
             self._configure_raman_axis(axis_arr)
             if self._secondary_axis:
@@ -1954,8 +1969,30 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.profiles.save()
             self.status_message.setText(f"{mode} wizard completed")
             self._update_session_context()
+            self._update_counts_controls_state()
         else:
             self.status_message.setText(f"{mode} wizard cancelled")
+
+    def _apply_counts_scale(self, value: float) -> None:
+        self._counts_max = int(value)
+        if self._axis_y and self._is_counts_mode():
+            self._axis_y.setRange(0.0, float(self._counts_max))
+
+    def _is_counts_mode(self) -> bool:
+        return self.current_mode not in {
+            "Absorbance",
+            "Transmittance",
+            "Reflectance",
+            "Relative Irradiance",
+            "Raman",
+        }
+
+    def _update_counts_controls_state(self) -> None:
+        enabled = self._is_counts_mode()
+        self.counts_max_slider.setEnabled(enabled)
+        self.counts_max_spin.setEnabled(enabled)
+        if enabled:
+            self._apply_counts_scale(self._counts_max)
 
     def _wizard_capture(self, kind: str, integration: float, averages: int) -> Optional[np.ndarray]:
         dev, lock, _desc = self._active_device_with_lock()
