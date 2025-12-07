@@ -50,6 +50,10 @@ PRESET_LENS_ORDER = ["5x", "10x", "20x", "50x"]
 # responsive.
 PREVIEW_MAX_EDGE_PX = 1280
 
+# Avoid spamming dimmer devices with rapid brightness updates while the user
+# drags sliders or holds spin buttons.
+ILLUMINATION_BRIGHTNESS_DEBOUNCE_MS = 200
+
 
 def _load_stage_bounds():
     cfg = Path(__file__).resolve().parents[2] / "marlin/Marlin-2.1.3-b3/Marlin/Configuration.h"
@@ -1381,6 +1385,7 @@ class MainWindow(QtWidgets.QMainWindow):
             toggle.setToolTip("Turn this light on or off. Right-click to re-show.")
 
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            slider.setTracking(False)
             slider.setRange(0, 100)
             slider.setValue(50)
             slider.setToolTip("Adjust illumination intensity (0–100%). Right-click to re-show.")
@@ -1805,14 +1810,32 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._run_illumination_row_action(row, lambda dimmer: dimmer.set_on(checked) if dimmer else None)
 
-    def _on_illumination_brightness_changed(self, row: dict[str, object]):
+    def _illumination_brightness_value(self, row: dict[str, object]) -> int:
+        spin = row.get("spin")
+        return int(spin.value()) if isinstance(spin, QtWidgets.QSpinBox) else 0
+
+    def _apply_illumination_brightness(self, row: dict[str, object]):
         if self._updating_illumination_ui:
             return
-        spin = row.get("spin")
-        value = int(spin.value()) if isinstance(spin, QtWidgets.QSpinBox) else 0
-        self._run_illumination_row_action(
-            row, lambda dimmer: dimmer.set_brightness(value) if dimmer else None
-        )
+        timer = row.get("brightness_timer")
+        if isinstance(timer, QtCore.QTimer):
+            timer.stop()
+        value = self._illumination_brightness_value(row)
+        self._run_illumination_row_action(row, lambda dimmer: dimmer.set_brightness(value) if dimmer else None)
+
+    def _schedule_illumination_brightness_update(self, row: dict[str, object]):
+        if self._updating_illumination_ui:
+            return
+        timer = row.get("brightness_timer")
+        if not isinstance(timer, QtCore.QTimer):
+            timer = QtCore.QTimer(self)
+            timer.setSingleShot(True)
+            row["brightness_timer"] = timer
+            timer.timeout.connect(lambda r=row: self._apply_illumination_brightness(r))
+        timer.start(ILLUMINATION_BRIGHTNESS_DEBOUNCE_MS)
+
+    def _on_illumination_brightness_changed(self, row: dict[str, object]):
+        self._schedule_illumination_brightness_update(row)
 
     def _on_illumination_row_changed(self, row: dict[str, object]):
         if self._updating_illumination_ui:
@@ -1900,6 +1923,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 spin.valueChanged.connect(slider.setValue)
                 spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
                 spin.valueChanged.connect(lambda _=None, r=row: self._on_illumination_brightness_changed(r))
+                spin.editingFinished.connect(lambda r=row: self._apply_illumination_brightness(r))
+                slider.sliderReleased.connect(lambda r=row: self._apply_illumination_brightness(r))
             if isinstance(name_edit, QtWidgets.QLineEdit):
                 name_edit.textChanged.connect(lambda _=None, r=row: self._on_illumination_row_changed(r))
                 name_edit.customContextMenuRequested.connect(
