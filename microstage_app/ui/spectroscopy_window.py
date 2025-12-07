@@ -360,6 +360,7 @@ class SpectrumChartView(QtCharts.QChartView):
 
 class SpectroscopyWindow(QtWidgets.QMainWindow):
     capture_requested = QtCore.Signal(CaptureJob)
+    DEFAULT_WAVELENGTH_RANGE: tuple[float, float] = (410.0, 750.0)
     MODES = [
         "Absorbance",
         "Transmittance",
@@ -385,7 +386,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.current_mode = stored_mode.strip() if stored_mode else ""
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
         stored_range = self._extract_wavelength_range(self.mode_params)
-        self._default_wavelength_range = stored_range or (410.0, 750.0)
+        self._default_wavelength_range = stored_range or self.DEFAULT_WAVELENGTH_RANGE
         self._counts_max = 5000
         self._last_capture_ts = 0.0
         stored_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
@@ -1965,7 +1966,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 self._install_legend_handlers()
             is_raman = self.current_mode == "Raman"
             if not is_raman and clamp_wavelength:
-                mask = (axis_arr >= 410) & (axis_arr <= 750)
+                w_min, w_max = self._default_wavelength_range
+                mask = (axis_arr >= w_min) & (axis_arr <= w_max)
                 if mask.any():
                     axis_arr = axis_arr[mask]
                     data_arr = data_arr[mask]
