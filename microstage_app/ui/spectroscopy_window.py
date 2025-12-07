@@ -527,13 +527,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         yscale_layout = QtWidgets.QHBoxLayout()
         yscale_layout.addWidget(QtWidgets.QLabel("Intensity scale"))
         self.counts_max_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.counts_max_slider.setRange(100, 100000)
+        self.counts_max_slider.setRange(1, 100000)
         self.counts_max_slider.setValue(self._counts_max)
-        self.counts_max_slider.setToolTip("Adjust the maximum counts shown on the Y axis")
+        self.counts_max_slider.setToolTip("Adjust the maximum value shown on the Y axis")
         self.counts_max_spin = QtWidgets.QSpinBox()
-        self.counts_max_spin.setRange(100, 100000)
+        self.counts_max_spin.setRange(1, 100000)
         self.counts_max_spin.setValue(self._counts_max)
-        self.counts_max_spin.setSuffix(" counts")
+        self.counts_max_spin.setSuffix(" units")
         yscale_layout.addWidget(self.counts_max_slider, 1)
         yscale_layout.addWidget(self.counts_max_spin)
         layout.addLayout(yscale_layout)
@@ -2031,9 +2031,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _apply_counts_scale(self, value: float, *, user_action: bool = False) -> None:
         self._counts_max = int(value)
-        if self._axis_y and self._is_counts_mode():
-            mark_manual = user_action or self._user_y_range
-            self._set_y_range(0.0, float(self._counts_max), mark_manual=mark_manual)
+        if not self._axis_y:
+            return
+        ymin = self._axis_y.min()
+        if not np.isfinite(ymin):
+            ymin = 0.0
+        mark_manual = user_action or self._user_y_range
+        self._set_y_range(float(ymin), float(self._counts_max), mark_manual=mark_manual)
 
     def _is_counts_mode(self) -> bool:
         return self.current_mode not in {
@@ -2045,11 +2049,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         }
 
     def _update_counts_controls_state(self) -> None:
-        enabled = self._is_counts_mode()
-        self.counts_max_slider.setEnabled(enabled)
-        self.counts_max_spin.setEnabled(enabled)
-        if enabled:
-            self._apply_counts_scale(self._counts_max)
+        self.counts_max_slider.setEnabled(True)
+        self.counts_max_spin.setEnabled(True)
+        self._apply_counts_scale(self._counts_max)
 
     def _wizard_capture(self, kind: str, integration: float, averages: int) -> Optional[np.ndarray]:
         dev, lock, _desc = self._active_device_with_lock()
