@@ -420,6 +420,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._axis_y.setRange(0.0, float(self._counts_max))
         self._user_y_range = False
         self._suppress_y_range_tracking = False
+        self._auto_scale_requested = True
         self._chart.addAxis(self._axis_y, QtCore.Qt.AlignLeft)
         self._axis_y.rangeChanged.connect(self._on_axis_y_range_changed)
 
@@ -1823,6 +1824,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if self._suppress_y_range_tracking:
             return
         self._user_y_range = True
+        self._auto_scale_requested = False
         self._axis_ranges["y"] = (float(_min), float(_max))
 
     def _set_y_range(self, ymin: float, ymax: float, *, mark_manual: Optional[bool] = None) -> None:
@@ -1835,9 +1837,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._suppress_y_range_tracking = False
         if mark_manual is not None:
             self._user_y_range = mark_manual
+            if mark_manual:
+                self._auto_scale_requested = False
 
-    def _auto_scale_y_from_traces(self) -> None:
+    def _auto_scale_y_from_traces(self, *, force: bool = False) -> None:
         if not self._axis_y:
+            return
+        if not force and not self._auto_scale_requested:
             return
         ymin = np.inf
         ymax = -np.inf
@@ -1851,10 +1857,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if not np.isfinite(ymin) or not np.isfinite(ymax):
             default_max = float(self._counts_max if self._is_counts_mode() else 1.0)
             self._set_y_range(0.0, default_max, mark_manual=False)
+            # Keep the auto-scale request pending so the first real dataset after a reset
+            # can still establish a meaningful range.
+            self._auto_scale_requested = True
             return
         if ymin == ymax:
             ymax += 1.0
         self._set_y_range(float(ymin), float(ymax), mark_manual=False)
+        self._auto_scale_requested = False
 
     def _reset_chart_view(self) -> None:
         self._chart.zoomReset()
@@ -1862,10 +1872,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _reset_y_axis_range(self) -> None:
         self._user_y_range = False
+        self._auto_scale_requested = not self._is_counts_mode()
         if self._is_counts_mode():
             self._apply_counts_scale(self._counts_max, user_action=False)
         else:
-            self._auto_scale_y_from_traces()
+            self._auto_scale_y_from_traces(force=True)
 
     def _update_axis_range(
         self, axis: Optional[QtCharts.QAbstractAxis], name: str, new_min: float, new_max: float
@@ -1970,7 +1981,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 else:
                     axis_y.setTitleText("Intensity (counts)")
                 if not self._user_y_range and not self._is_counts_mode():
-                    y_changed = self._update_axis_range(axis_y, "y", ymin, ymax)
+                    if self._auto_scale_requested:
+                        y_changed = self._update_axis_range(axis_y, "y", ymin, ymax)
+                        self._auto_scale_requested = False
             if self.current_mode == "Raman":
                 self._configure_raman_axis(axis_arr)
                 if self._secondary_axis:
