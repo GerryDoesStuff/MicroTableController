@@ -11,6 +11,9 @@ class LogBus(QtCore.QObject):
 
         self.message.emit(line)
 
+    def debug(self, msg: str, *args) -> None:
+        logging.getLogger("microstage_app").debug(msg, *args)
+
     def info(self, msg: str, *args) -> None:
         logging.getLogger("microstage_app").info(msg, *args)
 
