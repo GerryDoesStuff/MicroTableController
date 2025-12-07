@@ -401,6 +401,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._time_series_timer = QtCore.QTimer(self)
         self._time_series_timer.setSingleShot(True)
         self._time_series_timer.timeout.connect(self._trigger_time_series_capture)
+        self._mode_wizard: Optional[SpectroscopyModeWizard] = None
         self._recent_colors = [
             QtGui.QColor("#1f77b4"),
             QtGui.QColor("#ff7f0e"),
@@ -2090,6 +2091,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._launch_wizard(dlg.selected_mode)
 
     def _launch_wizard(self, mode: str) -> None:
+        if self._mode_wizard and self._mode_wizard.isVisible():
+            self._mode_wizard.close()
         wizard = SpectroscopyModeWizard(
             mode,
             self.session,
@@ -2101,20 +2104,44 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             },
             parent=self,
         )
-        if wizard.exec() == QtWidgets.QDialog.Accepted:
-            self.current_mode = mode
-            self._update_mode_label()
-            self.mode_params = dict(self.session.mode_params)
-            self._apply_wavelength_range_from_params()
-            self.profiles.set("spectroscopy.last_mode", mode)
-            self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
-            self.profiles.save()
-            self.status_message.setText(f"{mode} wizard completed")
-            self._update_session_context()
-            self._update_counts_controls_state()
-            self._reset_y_axis_range()
-        else:
-            self.status_message.setText(f"{mode} wizard cancelled")
+        wizard.setModal(False)
+        wizard.setWindowModality(QtCore.Qt.NonModal)
+        wizard.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        self._mode_wizard = wizard
+        wizard.accepted.connect(
+            lambda m=mode, w=wizard: self._on_mode_wizard_accepted(m, w)
+        )
+        wizard.rejected.connect(
+            lambda m=mode, w=wizard: self._on_mode_wizard_rejected(m, w)
+        )
+        wizard.destroyed.connect(lambda _obj=None, w=wizard: self._clear_mode_wizard(w))
+        wizard.show()
+
+    def _on_mode_wizard_accepted(self, mode: str, wizard: SpectroscopyModeWizard) -> None:
+        if wizard is not self._mode_wizard:
+            return
+        wizard.mode_params["rois"] = [roi.as_tuple() for roi in self.session.rois]
+        self.session.set_mode_params(**wizard.mode_params)
+        self.current_mode = mode
+        self._update_mode_label()
+        self.mode_params = dict(wizard.mode_params)
+        self._apply_wavelength_range_from_params()
+        self.profiles.set("spectroscopy.last_mode", mode)
+        self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
+        self.profiles.save()
+        self.status_message.setText(f"{mode} wizard completed")
+        self._update_session_context()
+        self._update_counts_controls_state()
+        self._reset_y_axis_range()
+
+    def _on_mode_wizard_rejected(self, mode: str, wizard: SpectroscopyModeWizard) -> None:
+        if wizard is not self._mode_wizard:
+            return
+        self.status_message.setText(f"{mode} wizard cancelled")
+
+    def _clear_mode_wizard(self, wizard: SpectroscopyModeWizard) -> None:
+        if wizard is self._mode_wizard:
+            self._mode_wizard = None
 
     def _apply_counts_scale(self, value: float, *, user_action: bool = False) -> None:
         self._counts_max = int(value)
