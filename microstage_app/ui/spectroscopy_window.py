@@ -1812,6 +1812,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _plot_spectrum(
         self, key: str, data: np.ndarray, color: QtGui.QColor, *, x_axis: Optional[np.ndarray] = None
     ) -> None:
+        params = self.session.mode_params or {}
+        clamp_wavelength = bool(params.get("clamp_wavelength", True))
         axis_data = x_axis if x_axis is not None else self.session.wavelengths
         if axis_data is None or data is None:
             return
@@ -1839,7 +1841,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self._trace_meta[key] = meta
             self._install_legend_handlers()
         is_raman = self.current_mode == "Raman"
-        if not is_raman:
+        if not is_raman and clamp_wavelength:
             mask = (axis_arr >= 410) & (axis_arr <= 750)
             if mask.any():
                 axis_arr = axis_arr[mask]
@@ -1852,7 +1854,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
                 axis_x.setTitleText("Raman shift (cm⁻¹)")
             else:
-                axis_x.setRange(*self._default_wavelength_range)
+                if clamp_wavelength:
+                    axis_x.setRange(*self._default_wavelength_range)
+                else:
+                    axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
                 axis_x.setTitleText("Wavelength (nm)")
         ymin = float(np.nanmin(data_arr))
         ymax = float(np.nanmax(data_arr))
