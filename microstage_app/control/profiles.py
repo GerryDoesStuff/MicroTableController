@@ -82,7 +82,7 @@ DEFAULTS = {
         'splitter_state': '',
         'data_dir': '',
         'default_device': '',
-        'last_mode': 'Absorbance',
+        'last_mode': '',
         'last_params': {},
         'integration_ms': 10.0,
         'averages': 1,

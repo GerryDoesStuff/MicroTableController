@@ -140,7 +140,7 @@ def _build_window_with_mock():
     manager = SpectrometerManager(providers=[provider])
     profiles = _StubProfiles(
         {
-            "spectroscopy.last_mode": "Absorbance",
+            "spectroscopy.last_mode": "",
             "spectroscopy.last_params": {},
             "spectroscopy.compact": False,
         }
