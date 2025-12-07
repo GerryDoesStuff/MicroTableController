@@ -1844,6 +1844,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _set_y_range(self, ymin: float, ymax: float, *, mark_manual: Optional[bool] = None) -> None:
         if not self._axis_y:
             return
+        ymin = 0.0
+        ymax = max(ymax, ymin)
+        if math.isclose(ymax, ymin, abs_tol=1e-9):
+            ymax = ymin + 1.0
         self._suppress_y_range_tracking = True
         try:
             self._update_axis_range(self._axis_y, "y", ymin, ymax)
