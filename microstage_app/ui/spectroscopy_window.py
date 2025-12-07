@@ -383,9 +383,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.session = SpectroscopySession()
         stored_mode = self.profiles.get("spectroscopy.last_mode", "", expected_type=str)
         self.current_mode = stored_mode.strip() if stored_mode else ""
-        self._default_wavelength_range = (410.0, 750.0)
-        self._counts_max = 5000
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
+        stored_range = self._extract_wavelength_range(self.mode_params)
+        self._default_wavelength_range = stored_range or (410.0, 750.0)
+        self._counts_max = 5000
         self._last_capture_ts = 0.0
         stored_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
         self._data_dir = ensure_data_directory(stored_dir or default_data_directory())
@@ -2102,6 +2103,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.current_mode = mode
             self._update_mode_label()
             self.mode_params = dict(self.session.mode_params)
+            self._apply_wavelength_range_from_params()
             self.profiles.set("spectroscopy.last_mode", mode)
             self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
             self.profiles.save()
@@ -2121,6 +2123,30 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             ymin = 0.0
         mark_manual = user_action or self._user_y_range
         self._set_y_range(float(ymin), float(self._counts_max), mark_manual=mark_manual)
+
+    def _extract_wavelength_range(self, params: Optional[Dict[str, object]]) -> Optional[tuple[float, float]]:
+        if not params:
+            return None
+        rng = params.get("wavelength_range")
+        if not isinstance(rng, (list, tuple)) or len(rng) != 2:
+            return None
+        try:
+            start = float(rng[0])
+            end = float(rng[1])
+        except (TypeError, ValueError):
+            return None
+        if not (math.isfinite(start) and math.isfinite(end)) or start >= end:
+            return None
+        return (start, end)
+
+    def _apply_wavelength_range_from_params(self) -> None:
+        wavelength_range = self._extract_wavelength_range(self.session.mode_params)
+        if wavelength_range is None:
+            return
+        self._default_wavelength_range = wavelength_range
+        self._axis_ranges["x"] = (float(wavelength_range[0]), float(wavelength_range[1]))
+        if self._axis_x:
+            self._axis_x.setRange(*self._axis_ranges["x"])
 
     def _is_counts_mode(self) -> bool:
         mode = (self.current_mode or "").strip()

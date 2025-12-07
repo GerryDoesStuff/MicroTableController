@@ -875,8 +875,12 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
     def _build_pages(self) -> None:
         self.addPage(WavelengthConfigPage(self))
         self.addPage(AcquisitionPage(self))
-        self.addPage(CapturePage(self, "Capture dark", "dark"))
-        self.addPage(CapturePage(self, "Capture reference", "reference"))
+        if self.mode in {"Absorbance", "Transmittance"}:
+            self.addPage(CapturePage(self, "Capture reference", "reference"))
+            self.addPage(CapturePage(self, "Capture dark", "dark"))
+        else:
+            self.addPage(CapturePage(self, "Capture dark", "dark"))
+            self.addPage(CapturePage(self, "Capture reference", "reference"))
         if self.mode == "Absorbance":
             self.addPage(BeerLambertPage(self))
         elif self.mode in {"Transmittance", "Reflectance"}:
