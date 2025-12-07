@@ -385,8 +385,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         stored_mode = self.profiles.get("spectroscopy.last_mode", "", expected_type=str)
         self.current_mode = stored_mode.strip() if stored_mode else ""
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
-        stored_range = self._extract_wavelength_range(self.mode_params)
-        self._default_wavelength_range = stored_range or self.DEFAULT_WAVELENGTH_RANGE
+        self._default_wavelength_range = self.DEFAULT_WAVELENGTH_RANGE
         self._counts_max = 5000
         self._last_capture_ts = 0.0
         stored_dir = str(self.profiles.get("spectroscopy.data_dir", "", expected_type=str))
@@ -468,6 +467,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         if self.mode_params:
             self.session.set_mode_params(**self.mode_params)
+            self._apply_wavelength_range_from_params()
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
