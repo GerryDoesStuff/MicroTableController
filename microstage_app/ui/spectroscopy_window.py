@@ -376,6 +376,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         parent: Optional[QtWidgets.QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         self.setWindowTitle("Vis Spectroscopy")
         self.spectrometer_manager = manager
         self.profiles = profiles
