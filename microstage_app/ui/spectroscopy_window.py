@@ -1868,6 +1868,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _reset_chart_view(self) -> None:
         self._chart.zoomReset()
+        if self._axis_x:
+            xmin, xmax = self._axis_ranges.get("x", (None, None))
+            if xmin is not None and xmax is not None:
+                self._update_axis_range(self._axis_x, "x", xmin, xmax)
         self._reset_y_axis_range()
 
     def _reset_y_axis_range(self) -> None:
