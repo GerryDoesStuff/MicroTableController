@@ -1366,7 +1366,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(QtWidgets.QLabel("Name"), 0, 0)
         layout.addWidget(QtWidgets.QLabel("IP / Host"), 0, 1)
         layout.addWidget(QtWidgets.QLabel("Power"), 0, 2)
-        layout.addWidget(QtWidgets.QLabel("Intensity"), 0, 3, 1, 2)
+        layout.addWidget(QtWidgets.QLabel("Intensity (%)"), 0, 3, 1, 2)
         layout.addWidget(QtWidgets.QLabel("Status"), 0, 5)
 
         self.illumination_rows = []
@@ -1388,13 +1388,12 @@ class MainWindow(QtWidgets.QMainWindow):
             slider.setTracking(False)
             slider.setRange(0, 100)
             slider.setValue(50)
-            slider.setToolTip("Adjust illumination intensity (0–100%). Right-click to re-show.")
+            slider.setToolTip("Adjust illumination intensity percentage (0–100). Right-click to re-show.")
 
             spin = QtWidgets.QSpinBox()
             spin.setRange(0, 100)
-            spin.setSuffix(" %")
             spin.setValue(slider.value())
-            spin.setToolTip("Numeric intensity entry for this light. Right-click to re-show.")
+            spin.setToolTip("Numeric intensity percentage for this light (0–100). Right-click to re-show.")
 
             status_label = QtWidgets.QLabel("—")
             status_label.setTextFormat(QtCore.Qt.PlainText)
