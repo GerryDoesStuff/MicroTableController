@@ -555,10 +555,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         info = QtWidgets.QHBoxLayout()
         self.cursor_label = QtWidgets.QLabel("Cursor: —")
         self.roi_label = QtWidgets.QLabel("ROI: —")
+        self.btn_reset_view = QtWidgets.QToolButton()
+        self.btn_reset_view.setText("Reset view")
+        self.btn_reset_view.setToolTip("Reset zoom and pan to default axes")
         self.cursor_label.setToolTip("Hover over the plot to inspect values")
         self.roi_label.setToolTip("Drag with Shift to set a region of interest")
         info.addWidget(self.cursor_label)
         info.addWidget(self.roi_label)
+        info.addWidget(self.btn_reset_view)
         info.addStretch(1)
         chart_layout.addLayout(info)
         self.ts_group = QtWidgets.QGroupBox("Time series views")
@@ -807,6 +811,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.act_zoom_out.triggered.connect(self._chart.zoomOut)
         self.act_reset.triggered.connect(self._reset_chart_view)
         self.act_export.triggered.connect(self._export_plot)
+        self.btn_reset_view.clicked.connect(self._reset_chart_view)
 
         self._chart_view.cursorMoved.connect(self._update_cursor)
         self._chart_view.roiSelected.connect(self._apply_roi)
@@ -1868,6 +1873,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     def _reset_chart_view(self) -> None:
         self._chart.zoomReset()
+        if self._axis_x:
+            xmin, xmax = self._axis_ranges.get("x", (None, None))
+            if xmin is not None and xmax is not None:
+                self._update_axis_range(self._axis_x, "x", xmin, xmax)
         self._reset_y_axis_range()
 
     def _reset_y_axis_range(self) -> None:
