@@ -381,7 +381,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager = manager
         self.profiles = profiles
         self.session = SpectroscopySession()
-        self.current_mode = str(self.profiles.get("spectroscopy.last_mode", "Absorbance", expected_type=str))
+        stored_mode = self.profiles.get("spectroscopy.last_mode", "", expected_type=str)
+        self.current_mode = stored_mode.strip() if stored_mode else ""
         self._default_wavelength_range = (410.0, 750.0)
         self._counts_max = 5000
         self.mode_params = dict(self.profiles.get("spectroscopy.last_params", {}, expected_type=dict) or {})
@@ -496,7 +497,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.status_led.setStyleSheet("color: red;")
         self.status_label = QtWidgets.QLabel("No spectrometer")
         self.status_label.setToolTip("Connection status")
-        self.mode_label = QtWidgets.QLabel(f"Mode: {self.current_mode}")
+        self.mode_label = QtWidgets.QLabel(f"Mode: {self._mode_display_name()}")
         top.addWidget(QtWidgets.QLabel("Spectrometer:"))
         top.addWidget(self.device_combo, 1)
         top.addWidget(self.btn_refresh)
@@ -831,6 +832,13 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.data_dialog.raise_()
         self.data_dialog.activateWindow()
 
+    def _mode_display_name(self) -> str:
+        mode = (self.current_mode or "").strip()
+        return mode if mode else "Counts"
+
+    def _update_mode_label(self) -> None:
+        self.mode_label.setText(f"Mode: {self._mode_display_name()}")
+
     def _restore_geometry(self) -> None:
         geo = self.profiles.get("spectroscopy.geometry", "", expected_type=str)
         state = self.profiles.get("spectroscopy.window_state", "", expected_type=str)
@@ -856,7 +864,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.smoothing_spin.setValue(int(self.profiles.get("spectroscopy.smoothing", self.smoothing_spin.value(), expected_type=int)))
         self.dark_chk.setChecked(bool(self.profiles.get("spectroscopy.subtract_dark", self.dark_chk.isChecked(), expected_type=bool)))
         self.integration_slider.setValue(int(self.integration_spin.value()))
-        self.mode_label.setText(f"Mode: {self.current_mode}")
+        self._update_mode_label()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
         self.capture_timer.stop()
@@ -1980,7 +1988,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             if ymin == ymax:
                 ymax += 1.0
             if axis_y:
-                if self.current_mode == "Absorbance":
+                if self._is_counts_mode():
+                    axis_y.setTitleText("Intensity (counts)")
+                elif self.current_mode == "Absorbance":
                     axis_y.setTitleText("Absorbance (AU)")
                 elif self.current_mode in {"Transmittance", "Reflectance"}:
                     axis_y.setTitleText("%" if self.session.mode_params.get("as_percent", True) else "Ratio")
@@ -2086,7 +2096,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         )
         if wizard.exec() == QtWidgets.QDialog.Accepted:
             self.current_mode = mode
-            self.mode_label.setText(f"Mode: {mode}")
+            self._update_mode_label()
             self.mode_params = dict(self.session.mode_params)
             self.profiles.set("spectroscopy.last_mode", mode)
             self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
@@ -2109,7 +2119,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._set_y_range(float(ymin), float(self._counts_max), mark_manual=mark_manual)
 
     def _is_counts_mode(self) -> bool:
-        return self.current_mode not in {
+        mode = (self.current_mode or "").strip()
+        return mode in {"", "Counts"} or mode not in {
             "Absorbance",
             "Transmittance",
             "Reflectance",
