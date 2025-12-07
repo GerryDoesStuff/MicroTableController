@@ -417,7 +417,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._axis_y = QtCharts.QValueAxis()
         self._axis_y.setTitleText("Intensity (counts)")
         self._axis_y.setRange(0.0, float(self._counts_max))
+        self._user_y_range = False
+        self._suppress_y_range_tracking = False
         self._chart.addAxis(self._axis_y, QtCore.Qt.AlignLeft)
+        self._axis_y.rangeChanged.connect(self._on_axis_y_range_changed)
 
         self._chart_view = SpectrumChartView(self._chart)
         self._traces: Dict[str, QtCharts.QLineSeries] = {}
@@ -760,7 +763,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self.counts_max_slider.valueChanged.connect(self.counts_max_spin.setValue)
         self.counts_max_spin.valueChanged.connect(self.counts_max_slider.setValue)
-        self.counts_max_spin.valueChanged.connect(lambda val: self._apply_counts_scale(float(val)))
+        self.counts_max_spin.valueChanged.connect(
+            lambda val: self._apply_counts_scale(float(val), user_action=True)
+        )
 
         self.integration_slider.valueChanged.connect(self.integration_spin.setValue)
         self.integration_spin.valueChanged.connect(self.integration_slider.setValue)
@@ -793,7 +798,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
         self.act_zoom_in.triggered.connect(self._chart.zoomIn)
         self.act_zoom_out.triggered.connect(self._chart.zoomOut)
-        self.act_reset.triggered.connect(self._chart.zoomReset)
+        self.act_reset.triggered.connect(self._reset_chart_view)
         self.act_export.triggered.connect(self._export_plot)
 
         self._chart_view.cursorMoved.connect(self._update_cursor)
@@ -1808,6 +1813,53 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         else:
             self._schedule_next_time_series_tick()
 
+    def _on_axis_y_range_changed(self, _min: float, _max: float) -> None:
+        if self._suppress_y_range_tracking:
+            return
+        self._user_y_range = True
+
+    def _set_y_range(self, ymin: float, ymax: float, *, mark_manual: Optional[bool] = None) -> None:
+        if not self._axis_y:
+            return
+        self._suppress_y_range_tracking = True
+        try:
+            self._axis_y.setRange(ymin, ymax)
+        finally:
+            self._suppress_y_range_tracking = False
+        if mark_manual is not None:
+            self._user_y_range = mark_manual
+
+    def _auto_scale_y_from_traces(self) -> None:
+        if not self._axis_y:
+            return
+        ymin = np.inf
+        ymax = -np.inf
+        for series in self._traces.values():
+            points = series.pointsVector()
+            if not points:
+                continue
+            ys = [p.y() for p in points]
+            ymin = min(ymin, min(ys))
+            ymax = max(ymax, max(ys))
+        if not np.isfinite(ymin) or not np.isfinite(ymax):
+            default_max = float(self._counts_max if self._is_counts_mode() else 1.0)
+            self._set_y_range(0.0, default_max, mark_manual=False)
+            return
+        if ymin == ymax:
+            ymax += 1.0
+        self._set_y_range(float(ymin), float(ymax), mark_manual=False)
+
+    def _reset_chart_view(self) -> None:
+        self._chart.zoomReset()
+        self._reset_y_axis_range()
+
+    def _reset_y_axis_range(self) -> None:
+        self._user_y_range = False
+        if self._is_counts_mode():
+            self._apply_counts_scale(self._counts_max, user_action=False)
+        else:
+            self._auto_scale_y_from_traces()
+
     # ------------------------------------------------------------------
     def _plot_spectrum(
         self, key: str, data: np.ndarray, color: QtGui.QColor, *, x_axis: Optional[np.ndarray] = None
@@ -1874,10 +1926,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 axis_y.setTitleText("Intensity (a.u.)")
             else:
                 axis_y.setTitleText("Intensity (counts)")
-            if self._is_counts_mode():
-                axis_y.setRange(0.0, float(self._counts_max))
-            else:
-                axis_y.setRange(ymin, ymax)
+            if not self._user_y_range and not self._is_counts_mode():
+                self._set_y_range(ymin, ymax, mark_manual=False)
         if self.current_mode == "Raman":
             self._configure_raman_axis(axis_arr)
             if self._secondary_axis:
@@ -1975,13 +2025,15 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(f"{mode} wizard completed")
             self._update_session_context()
             self._update_counts_controls_state()
+            self._reset_y_axis_range()
         else:
             self.status_message.setText(f"{mode} wizard cancelled")
 
-    def _apply_counts_scale(self, value: float) -> None:
+    def _apply_counts_scale(self, value: float, *, user_action: bool = False) -> None:
         self._counts_max = int(value)
         if self._axis_y and self._is_counts_mode():
-            self._axis_y.setRange(0.0, float(self._counts_max))
+            mark_manual = user_action or self._user_y_range
+            self._set_y_range(0.0, float(self._counts_max), mark_manual=mark_manual)
 
     def _is_counts_mode(self) -> bool:
         return self.current_mode not in {
