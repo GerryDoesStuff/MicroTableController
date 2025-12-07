@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import math
 import os
 import time
 
@@ -406,7 +407,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         ]
 
         self._chart = QtCharts.QChart()
-        self._chart.setAnimationOptions(QtCharts.QChart.AllAnimations)
+        self._chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
         self._chart.legend().setVisible(False)
         self._chart.setMargins(QtCore.QMargins(4, 4, 4, 4))
         self._axis_x = QtCharts.QValueAxis()
@@ -426,6 +427,11 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._traces: Dict[str, QtCharts.QLineSeries] = {}
         self._trace_meta: Dict[str, SpectrumTrace] = {}
         self._secondary_axis: Optional[QtCharts.QCategoryAxis] = None
+        self._axis_ranges: Dict[str, tuple[float, float]] = {
+            "x": (float(self._default_wavelength_range[0]), float(self._default_wavelength_range[1])),
+            "y": (0.0, float(self._counts_max)),
+        }
+        self._last_plot_ts = 0.0
 
         self.capture_timer = QtCore.QTimer(self)
         self.capture_timer.setInterval(250)
@@ -1817,13 +1823,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if self._suppress_y_range_tracking:
             return
         self._user_y_range = True
+        self._axis_ranges["y"] = (float(_min), float(_max))
 
     def _set_y_range(self, ymin: float, ymax: float, *, mark_manual: Optional[bool] = None) -> None:
         if not self._axis_y:
             return
         self._suppress_y_range_tracking = True
         try:
-            self._axis_y.setRange(ymin, ymax)
+            self._update_axis_range(self._axis_y, "y", ymin, ymax)
         finally:
             self._suppress_y_range_tracking = False
         if mark_manual is not None:
@@ -1860,6 +1867,34 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         else:
             self._auto_scale_y_from_traces()
 
+    def _update_axis_range(
+        self, axis: Optional[QtCharts.QAbstractAxis], name: str, new_min: float, new_max: float
+    ) -> bool:
+        if axis is None:
+            return False
+        new_range = (float(new_min), float(new_max))
+        current = self._axis_ranges.get(name)
+        if current and math.isclose(current[0], new_range[0], abs_tol=1e-6) and math.isclose(
+            current[1], new_range[1], abs_tol=1e-6
+        ):
+            return False
+        axis.setRange(*new_range)
+        self._axis_ranges[name] = new_range
+        return True
+
+    def _log_plot_refresh(self, key: str, points: int, x_changed: bool, y_changed: bool) -> None:
+        now = time.time()
+        delta_ms = (now - self._last_plot_ts) * 1000.0 if self._last_plot_ts else 0.0
+        self._last_plot_ts = now
+        LOG.debug(
+            "Plot %s refreshed: %d points | Δt=%.1f ms | axis updates x=%s y=%s",
+            key,
+            points,
+            delta_ms,
+            x_changed,
+            y_changed,
+        )
+
     # ------------------------------------------------------------------
     def _plot_spectrum(
         self, key: str, data: np.ndarray, color: QtGui.QColor, *, x_axis: Optional[np.ndarray] = None
@@ -1877,64 +1912,75 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             data_arr = data_arr[:length]
         if axis_arr.size == 0 or data_arr.size == 0:
             return
-        series = self._traces.get(key)
-        if series is None:
-            series = QtCharts.QLineSeries()
-            label = "" if key == "live" else key.title()
-            meta = SpectrumTrace(label, color)
-            series.setName(meta.label)
-            series.setColor(meta.color)
-            self._chart.addSeries(series)
-            if self._axis_x:
-                series.attachAxis(self._axis_x)
-            if self._axis_y:
-                series.attachAxis(self._axis_y)
-            self._traces[key] = series
-            self._trace_meta[key] = meta
-            self._install_legend_handlers()
-        is_raman = self.current_mode == "Raman"
-        if not is_raman and clamp_wavelength:
-            mask = (axis_arr >= 410) & (axis_arr <= 750)
-            if mask.any():
-                axis_arr = axis_arr[mask]
-                data_arr = data_arr[mask]
-        series.replace([QtCore.QPointF(float(x), float(y)) for x, y in zip(axis_arr, data_arr)])
-        axis_x = self._axis_x
-        axis_y = self._axis_y
-        if axis_x:
-            if is_raman:
-                axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
-                axis_x.setTitleText("Raman shift (cm⁻¹)")
-            else:
-                if clamp_wavelength:
-                    axis_x.setRange(*self._default_wavelength_range)
+        self._chart_view.setUpdatesEnabled(False)
+        try:
+            series = self._traces.get(key)
+            if series is None:
+                series = QtCharts.QLineSeries()
+                label = "" if key == "live" else key.title()
+                meta = SpectrumTrace(label, color)
+                series.setName(meta.label)
+                series.setColor(meta.color)
+                self._chart.addSeries(series)
+                if self._axis_x:
+                    series.attachAxis(self._axis_x)
+                if self._axis_y:
+                    series.attachAxis(self._axis_y)
+                self._traces[key] = series
+                self._trace_meta[key] = meta
+                self._install_legend_handlers()
+            is_raman = self.current_mode == "Raman"
+            if not is_raman and clamp_wavelength:
+                mask = (axis_arr >= 410) & (axis_arr <= 750)
+                if mask.any():
+                    axis_arr = axis_arr[mask]
+                    data_arr = data_arr[mask]
+            series.replace([QtCore.QPointF(float(x), float(y)) for x, y in zip(axis_arr, data_arr)])
+            axis_x = self._axis_x
+            axis_y = self._axis_y
+            x_changed = False
+            y_changed = False
+            if axis_x:
+                if is_raman:
+                    x_changed = self._update_axis_range(
+                        axis_x, "x", float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr))
+                    )
+                    axis_x.setTitleText("Raman shift (cm⁻¹)")
                 else:
-                    axis_x.setRange(float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr)))
-                axis_x.setTitleText("Wavelength (nm)")
-        ymin = float(np.nanmin(data_arr))
-        ymax = float(np.nanmax(data_arr))
-        if ymin == ymax:
-            ymax += 1.0
-        if axis_y:
-            if self.current_mode == "Absorbance":
-                axis_y.setTitleText("Absorbance (AU)")
-            elif self.current_mode in {"Transmittance", "Reflectance"}:
-                axis_y.setTitleText("%" if self.session.mode_params.get("as_percent", True) else "Ratio")
-            elif self.current_mode == "Relative Irradiance":
-                axis_y.setTitleText("Irradiance")
-            elif self.current_mode == "Raman":
-                axis_y.setTitleText("Intensity (a.u.)")
-            else:
-                axis_y.setTitleText("Intensity (counts)")
-            if not self._user_y_range and not self._is_counts_mode():
-                self._set_y_range(ymin, ymax, mark_manual=False)
-        if self.current_mode == "Raman":
-            self._configure_raman_axis(axis_arr)
-            if self._secondary_axis:
-                series.attachAxis(self._secondary_axis)
-        elif self._secondary_axis:
-            self._chart.removeAxis(self._secondary_axis)
-            self._secondary_axis = None
+                    if clamp_wavelength:
+                        x_changed = self._update_axis_range(axis_x, "x", *self._default_wavelength_range)
+                    else:
+                        x_changed = self._update_axis_range(
+                            axis_x, "x", float(np.nanmin(axis_arr)), float(np.nanmax(axis_arr))
+                        )
+                    axis_x.setTitleText("Wavelength (nm)")
+            ymin = float(np.nanmin(data_arr))
+            ymax = float(np.nanmax(data_arr))
+            if ymin == ymax:
+                ymax += 1.0
+            if axis_y:
+                if self.current_mode == "Absorbance":
+                    axis_y.setTitleText("Absorbance (AU)")
+                elif self.current_mode in {"Transmittance", "Reflectance"}:
+                    axis_y.setTitleText("%" if self.session.mode_params.get("as_percent", True) else "Ratio")
+                elif self.current_mode == "Relative Irradiance":
+                    axis_y.setTitleText("Irradiance")
+                elif self.current_mode == "Raman":
+                    axis_y.setTitleText("Intensity (a.u.)")
+                else:
+                    axis_y.setTitleText("Intensity (counts)")
+                if not self._user_y_range and not self._is_counts_mode():
+                    y_changed = self._update_axis_range(axis_y, "y", ymin, ymax)
+            if self.current_mode == "Raman":
+                self._configure_raman_axis(axis_arr)
+                if self._secondary_axis:
+                    series.attachAxis(self._secondary_axis)
+            elif self._secondary_axis:
+                self._chart.removeAxis(self._secondary_axis)
+                self._secondary_axis = None
+            self._log_plot_refresh(key, len(axis_arr), x_changed, y_changed)
+        finally:
+            self._chart_view.setUpdatesEnabled(True)
 
     def _configure_raman_axis(self, shift_axis: np.ndarray) -> None:
         wavelengths = self.session.wavelengths
