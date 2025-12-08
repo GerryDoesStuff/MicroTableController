@@ -971,26 +971,12 @@ class ResultsPage(BaseWizardPage):
                 return None
             arr = processing.compute_absorbance(smoothed, ref)
             metrics: Dict[str, float] = {"Max absorbance": float(np.nanmax(arr))}
-            path = float(params.get("path_length_cm", 1.0))
-            conc = float(params.get("concentration_m", 0.0))
-            if params.get("compute_ext_coeff") and path > 0 and conc > 0:
-                epsilon = float(np.nanmax(arr) / (path * conc))
-                metrics["Molar absorptivity"] = epsilon
             roi_metrics = {}
             for roi in self.session.rois:
                 mask = (wl >= roi.start_nm) & (wl <= roi.end_nm)
                 if np.any(mask):
                     roi_metrics[f"{roi.label or 'ROI'} avg"] = float(np.nanmean(arr[mask]))
             metrics.update(roi_metrics)
-            points = params.get("beer_lambert_points", [])
-            if len(points) >= 2:
-                try:
-                    slope, intercept, r2 = processing.beer_lambert_fit([(p[0], p[1]) for p in points])
-                    metrics["Fit slope"] = slope
-                    metrics["Fit intercept"] = intercept
-                    metrics["R²"] = r2
-                except Exception:
-                    pass
             self.wizard_ref.last_metrics = metrics
             return wl, arr
         if self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
@@ -1108,9 +1094,7 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         else:
             self.addPage(CapturePage(self, "Capture dark", "dark"))
             self.addPage(CapturePage(self, "Capture reference", "reference"))
-        if self.mode == "Absorbance":
-            self.addPage(BeerLambertPage(self))
-        elif self.mode in {"Transmittance", "Reflectance"}:
+        if self.mode in {"Transmittance", "Reflectance"}:
             self.addPage(TransReflectPage(self))
         elif self.mode == "Relative Irradiance":
             self.addPage(IrradianceCalibrationPage(self))
@@ -1118,7 +1102,8 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
             self.addPage(FluorescenceMetadataPage(self))
         elif self.mode == "Raman":
             self.addPage(RamanConfigPage(self))
-        self.addPage(ModeConfigPage(self))
+        if self.mode != "Absorbance":
+            self.addPage(ModeConfigPage(self))
         self.addPage(ResultsPage(self))
         self.button(QtWidgets.QWizard.FinishButton).setEnabled(False)
         self.currentIdChanged.connect(self._update_finish_state)
