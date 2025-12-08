@@ -868,6 +868,15 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.setModal(False)
         self.setWindowModality(QtCore.Qt.NonModal)
         self.setOption(QtWidgets.QWizard.NoBackButtonOnStartPage)
+        self.setButtonLayout(
+            [
+                QtWidgets.QWizard.Stretch,
+                QtWidgets.QWizard.BackButton,
+                QtWidgets.QWizard.NextButton,
+                QtWidgets.QWizard.FinishButton,
+                QtWidgets.QWizard.CancelButton,
+            ]
+        )
         self._build_pages()
 
     def _build_pages(self) -> None:
