@@ -8,6 +8,7 @@ from PySide6 import QtCharts, QtCore, QtGui, QtWidgets
 
 from ..spectroscopy import processing
 from ..spectroscopy.session import SpectroscopySession
+from .spectrum_charts import SpectrumChartView, create_spectrum_chart
 
 CaptureCallable = Callable[[str, float, int], Optional[np.ndarray]]
 
@@ -313,20 +314,12 @@ class CapturePage(BaseWizardPage):
         self._refresh_live_chart()
         self._refresh_stored_chart()
 
-    def _build_chart(self) -> tuple[QtCharts.QChart, QtCharts.QChartView, QtCharts.QValueAxis, QtCharts.QValueAxis]:
-        chart = QtCharts.QChart()
-        chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
-        chart.legend().setVisible(True)
-        chart.setMargins(QtCore.QMargins(6, 6, 6, 6))
-        x_axis = QtCharts.QValueAxis()
-        y_axis = QtCharts.QValueAxis()
-        x_axis.setTitleText(self._x_axis_title())
-        y_axis.setTitleText(self._y_axis_title())
-        chart.addAxis(x_axis, QtCore.Qt.AlignBottom)
-        chart.addAxis(y_axis, QtCore.Qt.AlignLeft)
-        view = QtCharts.QChartView(chart)
-        view.setRenderHint(QtGui.QPainter.Antialiasing)
-        return chart, view, x_axis, y_axis
+    def _build_chart(self) -> tuple[QtCharts.QChart, SpectrumChartView, QtCharts.QValueAxis, QtCharts.QValueAxis]:
+        return create_spectrum_chart(
+            x_title=self._x_axis_title(),
+            y_title=self._y_axis_title(),
+            legend_visible=True,
+        )
 
     def _x_axis_title(self) -> str:
         return "Raman shift (cm⁻¹)" if self.wizard_ref.mode == "Raman" else "Wavelength (nm)"
@@ -816,18 +809,17 @@ class ResultsPage(BaseWizardPage):
         super().__init__(wizard)
         self.setTitle("Results and overlays")
         layout = QtWidgets.QVBoxLayout(self)
-        self.chart = QtCharts.QChart()
-        self.chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
-        self.chart.legend().setVisible(True)
-        self.x_axis = QtCharts.QValueAxis()
-        self.y_axis = QtCharts.QValueAxis()
-        self.chart.addAxis(self.x_axis, QtCore.Qt.AlignBottom)
-        self.chart.addAxis(self.y_axis, QtCore.Qt.AlignLeft)
-        self.x_axis.setTitleText("Wavelength (nm)")
-        self.y_axis.setTitleText("Intensity")
+        (
+            self.chart,
+            self.chart_view,
+            self.x_axis,
+            self.y_axis,
+        ) = create_spectrum_chart(
+            x_title="Wavelength (nm)",
+            y_title="Intensity",
+            legend_visible=True,
+        )
         self.secondary_axis: Optional[QtCharts.QCategoryAxis] = None
-        self.chart_view = QtCharts.QChartView(self.chart)
-        self.chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.history_list = QtWidgets.QListWidget()
         self.history_list.itemChanged.connect(self._toggle_series)
         self.metrics = QtWidgets.QLabel("No metrics computed yet.")
