@@ -36,6 +36,7 @@ from ..spectroscopy.processing import (
 )
 from ..spectroscopy.session import AcquisitionMetadata, SpectroscopySession
 from .spectroscopy_modes import ModeSelectorDialog, SpectroscopyModeWizard
+from .spectrum_charts import SpectrumChartView, create_spectrum_chart
 from ..utils.log import LOG, log
 from ..utils.workers import run_async
 import matplotlib.pyplot as plt
@@ -283,81 +284,6 @@ class ScrollDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
-
-
-class SpectrumChartView(QtCharts.QChartView):
-    cursorMoved = QtCore.Signal(float)
-    roiSelected = QtCore.Signal(float, float)
-
-    def __init__(self, chart: QtCharts.QChart, parent: Optional[QtWidgets.QWidget] = None):
-        super().__init__(chart, parent)
-        self.setRubberBand(QtCharts.QChartView.RectangleRubberBand)
-        self.setRenderHint(QtGui.QPainter.Antialiasing)
-        self._last_pos: Optional[QtCore.QPoint] = None
-        self._roi_origin: Optional[QtCore.QPoint] = None
-        self._roi_band = QtWidgets.QRubberBand(QtWidgets.QRubberBand.Rectangle, self)
-        self._vline = QtWidgets.QGraphicsLineItem()
-        self._vline.setPen(QtGui.QPen(QtGui.QColor("orange"), 1, QtCore.Qt.DotLine))
-        self.scene().addItem(self._vline)
-
-    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() in (QtCore.Qt.MiddleButton,) or (
-            event.button() == QtCore.Qt.LeftButton and event.modifiers() & QtCore.Qt.ControlModifier
-        ):
-            self._last_pos = event.pos()
-        elif event.button() == QtCore.Qt.LeftButton and event.modifiers() & QtCore.Qt.ShiftModifier:
-            self._roi_origin = event.pos()
-            self._roi_band.setGeometry(QtCore.QRect(self._roi_origin, QtCore.QSize()))
-            self._roi_band.show()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
-        if self._last_pos is not None:
-            delta = event.pos() - self._last_pos
-            self.chart().scroll(-delta.x(), delta.y())
-            self._last_pos = event.pos()
-        elif self._roi_origin is not None:
-            rect = QtCore.QRect(self._roi_origin, event.pos()).normalized()
-            self._roi_band.setGeometry(rect)
-        mapped = self.chart().mapToValue(event.position())
-        self._update_crosshair(mapped.x())
-        self.cursorMoved.emit(mapped.x())
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() in (QtCore.Qt.MiddleButton, QtCore.Qt.LeftButton):
-            self._last_pos = None
-        if event.button() == QtCore.Qt.LeftButton and self._roi_origin is not None:
-            rect = QtCore.QRect(self._roi_origin, event.pos()).normalized()
-            self._roi_band.hide()
-            self._roi_origin = None
-            if rect.width() > 5:
-                p1 = self.chart().mapToValue(rect.topLeft())
-                p2 = self.chart().mapToValue(rect.bottomRight())
-                start, end = sorted([p1.x(), p2.x()])
-                self.roiSelected.emit(start, end)
-        super().mouseReleaseEvent(event)
-
-    def leaveEvent(self, event: QtCore.QEvent) -> None:
-        self._update_crosshair(None)
-        return super().leaveEvent(event)
-
-    def _update_crosshair(self, x: Optional[float]) -> None:
-        if x is None:
-            self._vline.setVisible(False)
-            return
-        chart = self.chart()
-        axis_y = chart.axisY()
-        if axis_y is None:
-            self._vline.setVisible(False)
-            return
-        plot_area = chart.plotArea()
-        top = chart.mapToPosition(QtCore.QPointF(x, axis_y.max()))
-        bottom = chart.mapToPosition(QtCore.QPointF(x, axis_y.min()))
-        self._vline.setLine(QtCore.QLineF(top, bottom))
-        self._vline.setVisible(plot_area.contains(top) or plot_area.contains(bottom))
-
-
 class SpectroscopyWindow(QtWidgets.QMainWindow):
     capture_requested = QtCore.Signal(CaptureJob)
     DEFAULT_WAVELENGTH_RANGE: tuple[float, float] = (410.0, 750.0)
@@ -410,25 +336,24 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             QtGui.QColor("#8c564b"),
         ]
 
-        self._chart = QtCharts.QChart()
-        self._chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
-        self._chart.legend().setVisible(False)
-        self._chart.setMargins(QtCore.QMargins(4, 4, 4, 4))
-        self._axis_x = QtCharts.QValueAxis()
-        self._axis_x.setTitleText("Wavelength (nm)")
-        self._axis_x.setRange(*self._default_wavelength_range)
-        self._chart.addAxis(self._axis_x, QtCore.Qt.AlignBottom)
-
-        self._axis_y = QtCharts.QValueAxis()
-        self._axis_y.setTitleText("Intensity (counts)")
-        self._axis_y.setRange(0.0, float(self._counts_max))
+        (
+            self._chart,
+            self._chart_view,
+            self._axis_x,
+            self._axis_y,
+        ) = create_spectrum_chart(
+            x_title="Wavelength (nm)",
+            y_title="Intensity (counts)",
+            legend_visible=False,
+            margins=QtCore.QMargins(4, 4, 4, 4),
+            x_range=self._default_wavelength_range,
+            y_range=(0.0, float(self._counts_max)),
+        )
         self._user_y_range = False
         self._suppress_y_range_tracking = False
         self._auto_scale_requested = True
-        self._chart.addAxis(self._axis_y, QtCore.Qt.AlignLeft)
         self._axis_y.rangeChanged.connect(self._on_axis_y_range_changed)
 
-        self._chart_view = SpectrumChartView(self._chart)
         self._traces: Dict[str, QtCharts.QLineSeries] = {}
         self._trace_meta: Dict[str, SpectrumTrace] = {}
         self._secondary_axis: Optional[QtCharts.QCategoryAxis] = None
