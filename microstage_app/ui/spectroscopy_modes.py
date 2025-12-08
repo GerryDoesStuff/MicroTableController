@@ -235,7 +235,40 @@ class CapturePage(BaseWizardPage):
         else:
             self.preset_combo = None
         layout.addWidget(self.btn_capture)
+        charts_row = QtWidgets.QHBoxLayout()
+        live_group = QtWidgets.QGroupBox("Live spectrum")
+        live_layout = QtWidgets.QVBoxLayout(live_group)
+        (
+            self.live_chart,
+            self.live_chart_view,
+            self.live_x_axis,
+            self.live_y_axis,
+        ) = self._build_chart()
+        self.live_status = QtWidgets.QLabel("Waiting for live data…")
+        live_layout.addWidget(self.live_chart_view)
+        live_layout.addWidget(self.live_status)
+        stored_group = QtWidgets.QGroupBox("Captured spectrum")
+        stored_layout = QtWidgets.QVBoxLayout(stored_group)
+        (
+            self.stored_chart,
+            self.stored_chart_view,
+            self.stored_x_axis,
+            self.stored_y_axis,
+        ) = self._build_chart()
+        self.stored_status = QtWidgets.QLabel("No capture yet.")
+        stored_layout.addWidget(self.stored_chart_view)
+        stored_layout.addWidget(self.stored_status)
+        charts_row.addWidget(live_group, 1)
+        charts_row.addWidget(stored_group, 1)
+        layout.addLayout(charts_row)
         layout.addStretch(1)
+
+        self.session.spectra_changed.connect(self._on_session_spectrum_changed)
+        self.session.wavelengths_changed.connect(lambda _=None: self._sync_axes())
+        self._live_timer = QtCore.QTimer(self)
+        self._live_timer.setInterval(750)
+        self._live_timer.timeout.connect(self._refresh_live_chart)
+        self._live_timer.start()
 
     def _capture(self) -> None:
         self.wizard_ref.apply_preset_for_step(self.capture_key)
@@ -259,6 +292,7 @@ class CapturePage(BaseWizardPage):
                 self.session.set_raw(spectrum)
                 self.wizard_ref.state["raw_captured"] = True
             self.info.setText("Capture stored in session.")
+            self._refresh_stored_chart()
         except Exception as exc:
             self.info.setText(f"Capture failed: {exc}")
         self.wizard_ref._update_finish_state()
@@ -269,6 +303,109 @@ class CapturePage(BaseWizardPage):
 
     def isComplete(self) -> bool:  # type: ignore[override]
         return bool(self.wizard_ref.state.get(f"{self.capture_key}_captured", False))
+
+    def initializePage(self) -> None:  # type: ignore[override]
+        self._sync_axes()
+        self._refresh_live_chart()
+        self._refresh_stored_chart()
+
+    def _on_session_spectrum_changed(self) -> None:
+        self._refresh_live_chart()
+        self._refresh_stored_chart()
+
+    def _build_chart(self) -> tuple[QtCharts.QChart, QtCharts.QChartView, QtCharts.QValueAxis, QtCharts.QValueAxis]:
+        chart = QtCharts.QChart()
+        chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
+        chart.legend().setVisible(True)
+        chart.setMargins(QtCore.QMargins(6, 6, 6, 6))
+        x_axis = QtCharts.QValueAxis()
+        y_axis = QtCharts.QValueAxis()
+        x_axis.setTitleText(self._x_axis_title())
+        y_axis.setTitleText(self._y_axis_title())
+        chart.addAxis(x_axis, QtCore.Qt.AlignBottom)
+        chart.addAxis(y_axis, QtCore.Qt.AlignLeft)
+        view = QtCharts.QChartView(chart)
+        view.setRenderHint(QtGui.QPainter.Antialiasing)
+        return chart, view, x_axis, y_axis
+
+    def _x_axis_title(self) -> str:
+        return "Raman shift (cm⁻¹)" if self.wizard_ref.mode == "Raman" else "Wavelength (nm)"
+
+    def _y_axis_title(self) -> str:
+        return "Intensity (counts)"
+
+    def _refresh_live_chart(self) -> None:
+        data = self.session.raw_spectrum or self.session.reference_spectrum or self.session.dark_spectrum
+        label = "Live"
+        color = QtGui.QColor("deepskyblue")
+        self._plot_chart(self.live_chart, self.live_x_axis, self.live_y_axis, self.live_status, label, data, color)
+
+    def _refresh_stored_chart(self) -> None:
+        if self.capture_key == "dark":
+            data = self.session.dark_spectrum
+            label = "Dark capture"
+            color = QtGui.QColor("gray")
+        elif self.capture_key == "reference":
+            data = self.session.reference_spectrum
+            label = "Reference capture"
+            color = QtGui.QColor("green")
+        else:
+            data = self.session.raw_spectrum
+            label = "Raw capture"
+            color = QtGui.QColor("#1f77b4")
+        self._plot_chart(
+            self.stored_chart,
+            self.stored_x_axis,
+            self.stored_y_axis,
+            self.stored_status,
+            label,
+            data,
+            color,
+            apply_smoothing=self.capture_key == "raw",
+        )
+
+    def _plot_chart(
+        self,
+        chart: QtCharts.QChart,
+        x_axis: QtCharts.QValueAxis,
+        y_axis: QtCharts.QValueAxis,
+        status_label: QtWidgets.QLabel,
+        label: str,
+        data: Optional[np.ndarray],
+        color: QtGui.QColor,
+        *,
+        apply_smoothing: bool = False,
+    ) -> None:
+        chart.removeAllSeries()
+        wl = self.session.wavelengths
+        if wl is None:
+            status_label.setText("Set wavelength calibration to preview spectra.")
+            return
+        if data is None:
+            status_label.setText("Waiting for data…")
+            return
+        array = np.asarray(data, dtype=float)
+        if apply_smoothing:
+            array = processing.smooth_boxcar(array, window=int(self.wizard_ref.mode_params.get("smoothing", 1)))
+        series = _attach_series(chart, x_axis, y_axis, label, wl, array, color)
+        series.setUseOpenGL(True)
+        ymin = float(np.nanmin(array)) if array.size else 0.0
+        ymax = float(np.nanmax(array)) if array.size else 1.0
+        if not np.isfinite(ymin) or not np.isfinite(ymax):
+            ymin, ymax = 0.0, 1.0
+        if ymin == ymax:
+            ymax += 1.0
+        x_axis.setRange(float(np.nanmin(wl)), float(np.nanmax(wl)))
+        y_axis.setRange(ymin, ymax)
+        x_axis.setTitleText(self._x_axis_title())
+        y_axis.setTitleText(self._y_axis_title())
+        status_label.setText("")
+
+    def _sync_axes(self) -> None:
+        self.live_x_axis.setTitleText(self._x_axis_title())
+        self.stored_x_axis.setTitleText(self._x_axis_title())
+        self.live_y_axis.setTitleText(self._y_axis_title())
+        self.stored_y_axis.setTitleText(self._y_axis_title())
 
 
 class BeerLambertPage(BaseWizardPage):
