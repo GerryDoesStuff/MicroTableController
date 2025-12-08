@@ -44,47 +44,52 @@ class BaseWizardPage(QtWidgets.QWizardPage):
         self.completeChanged.emit()
 
 
-class WavelengthConfigPage(BaseWizardPage):
+def _series_from_data(label: str, x: np.ndarray, y: np.ndarray, color: QtGui.QColor) -> QtCharts.QLineSeries:
+    series = QtCharts.QLineSeries()
+    series.setName(label)
+    series.setColor(color)
+    points = [QtCore.QPointF(float(xv), float(yv)) for xv, yv in zip(x, y)]
+    series.replace(points)
+    return series
+
+
+def _attach_series(
+    chart: QtCharts.QChart,
+    x_axis: QtCharts.QAbstractAxis,
+    y_axis: QtCharts.QAbstractAxis,
+    label: str,
+    x: np.ndarray,
+    y: np.ndarray,
+    color: QtGui.QColor,
+) -> QtCharts.QLineSeries:
+    series = _series_from_data(label, x, y, color)
+    chart.addSeries(series)
+    series.attachAxis(x_axis)
+    series.attachAxis(y_axis)
+    return series
+
+
+class AcquisitionSetupPage(BaseWizardPage):
     def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
         super().__init__(wizard)
-        self.setTitle("Wavelength configuration")
-        layout = QtWidgets.QFormLayout(self)
+        self.setTitle("Acquisition and wavelength setup")
+        layout = QtWidgets.QVBoxLayout(self)
+
+        params_row = QtWidgets.QHBoxLayout()
+
+        wl_group = QtWidgets.QGroupBox("Wavelength range")
+        wl_form = QtWidgets.QFormLayout(wl_group)
         self.min_spin = QtWidgets.QDoubleSpinBox()
         self.max_spin = QtWidgets.QDoubleSpinBox()
-        self.min_spin.setSuffix(" nm")
-        self.max_spin.setSuffix(" nm")
-        self.min_spin.setRange(0, 2000)
-        self.max_spin.setRange(0, 2000)
-        self.min_spin.valueChanged.connect(self._sync)
-        self.max_spin.valueChanged.connect(self._sync)
-        layout.addRow("Min wavelength", self.min_spin)
-        layout.addRow("Max wavelength", self.max_spin)
-        if wizard.session.wavelengths is not None:
-            wl = wizard.session.wavelengths
-            self.min_spin.setValue(float(wl.min()))
-            self.max_spin.setValue(float(wl.max()))
+        for spin in (self.min_spin, self.max_spin):
+            spin.setSuffix(" nm")
+            spin.setRange(0, 2000)
+            spin.valueChanged.connect(self._on_param_changed)
+        wl_form.addRow("Min wavelength", self.min_spin)
+        wl_form.addRow("Max wavelength", self.max_spin)
 
-    def _sync(self) -> None:
-        if self.min_spin.value() >= self.max_spin.value():
-            self.setSubTitle("Min must be < Max")
-        else:
-            self.setSubTitle("")
-            self.wizard_ref.mode_params["wavelength_range"] = (
-                self.min_spin.value(),
-                self.max_spin.value(),
-            )
-            self.session.set_mode_params(**self.wizard_ref.mode_params)
-        self.mark_dirty()
-
-    def isComplete(self) -> bool:  # type: ignore[override]
-        return self.min_spin.value() < self.max_spin.value()
-
-
-class AcquisitionPage(BaseWizardPage):
-    def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
-        super().__init__(wizard)
-        self.setTitle("Acquisition parameters")
-        layout = QtWidgets.QFormLayout(self)
+        acq_group = QtWidgets.QGroupBox("Acquisition")
+        acq_form = QtWidgets.QFormLayout(acq_group)
         self.integration = QtWidgets.QDoubleSpinBox()
         self.integration.setRange(1.0, 10000.0)
         self.integration.setSuffix(" ms")
@@ -96,23 +101,112 @@ class AcquisitionPage(BaseWizardPage):
         self.smoothing.setRange(1, 101)
         self.smoothing.setValue(wizard.initial_acquisition.get("smoothing", 5))
         for widget in (self.integration, self.averages, self.smoothing):
-            widget.valueChanged.connect(self._changed)
-        layout.addRow("Integration time", self.integration)
-        layout.addRow("Averages", self.averages)
-        layout.addRow("Smoothing (boxcar)", self.smoothing)
+            widget.valueChanged.connect(self._on_param_changed)
+        acq_form.addRow("Integration time", self.integration)
+        acq_form.addRow("Averages", self.averages)
+        acq_form.addRow("Smoothing (boxcar)", self.smoothing)
 
-    def _changed(self) -> None:
+        params_row.addWidget(wl_group, 1)
+        params_row.addWidget(acq_group, 1)
+        layout.addLayout(params_row)
+
+        self.chart = QtCharts.QChart()
+        self.chart.setAnimationOptions(QtCharts.QChart.NoAnimation)
+        self.chart.legend().setVisible(True)
+        self.x_axis = QtCharts.QValueAxis()
+        self.y_axis = QtCharts.QValueAxis()
+        self.x_axis.setTitleText("Wavelength (nm)")
+        self.y_axis.setTitleText("Intensity")
+        self.chart.addAxis(self.x_axis, QtCore.Qt.AlignBottom)
+        self.chart.addAxis(self.y_axis, QtCore.Qt.AlignLeft)
+        self.chart_view = QtCharts.QChartView(self.chart)
+        self.chart_view.setRenderHint(QtGui.QPainter.Antialiasing)
+        layout.addWidget(self.chart_view, 2)
+        self.status_label = QtWidgets.QLabel("No spectra captured yet.")
+        layout.addWidget(self.status_label)
+
+        wl_range = wizard.mode_params.get("wavelength_range")
+        if wl_range and len(wl_range) == 2:
+            self.min_spin.setValue(float(wl_range[0]))
+            self.max_spin.setValue(float(wl_range[1]))
+        elif wizard.session.wavelengths is not None:
+            wl = wizard.session.wavelengths
+            self.min_spin.setValue(float(wl.min()))
+            self.max_spin.setValue(float(wl.max()))
+
+        wizard.session.spectra_changed.connect(self._refresh_chart)
+        wizard.session.wavelengths_changed.connect(lambda _: self._refresh_chart())
+        self._sync_params()
+
+    def initializePage(self) -> None:  # type: ignore[override]
+        self._refresh_chart()
+
+    def _on_param_changed(self) -> None:
+        self._sync_params()
+        self.wizard_ref.invalidate_captures()
+        self.mark_dirty()
+
+    def _sync_params(self) -> None:
         self.wizard_ref.mode_params.update(
             integration=float(self.integration.value()),
             averages=int(self.averages.value()),
             smoothing=int(self.smoothing.value()),
         )
+        valid_range = self.min_spin.value() < self.max_spin.value()
+        if valid_range:
+            self.setSubTitle("")
+            self.wizard_ref.mode_params["wavelength_range"] = (
+                self.min_spin.value(),
+                self.max_spin.value(),
+            )
+        else:
+            self.setSubTitle("Min must be < Max")
         self.session.set_mode_params(**self.wizard_ref.mode_params)
-        self.wizard_ref.invalidate_captures()
-        self.mark_dirty()
+        if valid_range:
+            self.x_axis.setRange(self.min_spin.value(), self.max_spin.value())
+        self._refresh_chart()
+
+    def _refresh_chart(self) -> None:
+        self.chart.removeAllSeries()
+        wl = self.session.wavelengths
+        if wl is None:
+            self.status_label.setText("Set wavelength calibration to preview spectra.")
+            return
+        spectra_added = False
+        ymin, ymax = float("inf"), float("-inf")
+        for label, data, color in (
+            ("Dark", self.session.dark_spectrum, QtGui.QColor("gray")),
+            ("Reference", self.session.reference_spectrum, QtGui.QColor("green")),
+            ("Raw", self.session.raw_spectrum, QtGui.QColor("deepskyblue")),
+        ):
+            if data is None:
+                continue
+            display = (
+                processing.smooth_boxcar(np.asarray(data, dtype=float), window=int(self.smoothing.value()))
+                if label == "Raw"
+                else np.asarray(data, dtype=float)
+            )
+            series = _attach_series(self.chart, self.x_axis, self.y_axis, label, wl, display, color)
+            ymin = min(ymin, float(np.nanmin(display)))
+            ymax = max(ymax, float(np.nanmax(display)))
+            spectra_added = True
+            series.setUseOpenGL(True)
+        if not spectra_added:
+            self.status_label.setText("Capture a spectrum to preview settings.")
+            return
+        self.status_label.setText("")
+        if ymin == float("inf") or ymax == float("-inf"):
+            ymin, ymax = 0.0, 1.0
+        if ymin == ymax:
+            ymax += 1.0
+        self.y_axis.setRange(ymin, ymax)
+        if self.min_spin.value() < self.max_spin.value():
+            self.x_axis.setRange(self.min_spin.value(), self.max_spin.value())
+        else:
+            self.x_axis.setRange(float(np.nanmin(wl)), float(np.nanmax(wl)))
 
     def isComplete(self) -> bool:  # type: ignore[override]
-        return True
+        return self.min_spin.value() < self.max_spin.value()
 
 
 class CapturePage(BaseWizardPage):
@@ -671,7 +765,7 @@ class ResultsPage(BaseWizardPage):
             self.y_axis.setTitleText("Intensity (a.u.)")
         self.y_axis.setRange(float(ymin), float(ymax))
         # current result
-        series = self._series_from_data("Current", result[0], result[1], QtGui.QColor("deepskyblue"))
+        series = _series_from_data("Current", result[0], result[1], QtGui.QColor("deepskyblue"))
         self.chart.addSeries(series)
         series.attachAxis(self.x_axis)
         series.attachAxis(self.y_axis)
@@ -688,20 +782,10 @@ class ResultsPage(BaseWizardPage):
         self._add_overlay_series("Raw", self.session.raw_spectrum, QtGui.QColor("orange"))
         self.metrics.setText(self.wizard_ref.format_metrics(result))
 
-    def _series_from_data(
-        self, label: str, x: np.ndarray, y: np.ndarray, color: QtGui.QColor
-    ) -> QtCharts.QLineSeries:
-        series = QtCharts.QLineSeries()
-        series.setName(label)
-        series.setColor(color)
-        points = [QtCore.QPointF(float(xv), float(yv)) for xv, yv in zip(x, y)]
-        series.replace(points)
-        return series
-
     def _add_overlay_series(self, name: str, data: Optional[np.ndarray], color: QtGui.QColor) -> None:
         if data is None or self.session.wavelengths is None:
             return
-        series = self._series_from_data(name, self.session.wavelengths, data, color)
+        series = _series_from_data(name, self.session.wavelengths, data, color)
         self.chart.addSeries(series)
         series.attachAxis(self.x_axis)
         series.attachAxis(self.y_axis)
@@ -880,8 +964,7 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self._build_pages()
 
     def _build_pages(self) -> None:
-        self.addPage(WavelengthConfigPage(self))
-        self.addPage(AcquisitionPage(self))
+        self.addPage(AcquisitionSetupPage(self))
         if self.mode in {"Absorbance", "Transmittance"}:
             self.addPage(CapturePage(self, "Capture reference", "reference"))
             self.addPage(CapturePage(self, "Capture dark", "dark"))
