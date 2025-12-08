@@ -1291,6 +1291,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_dark_palette(self, enabled: bool):
         app = QtWidgets.QApplication.instance()
         if enabled:
+            app.setStyle("Fusion")
             palette = QtGui.QPalette()
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
             palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
@@ -1302,14 +1303,34 @@ class MainWindow(QtWidgets.QMainWindow):
             palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
             palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
             palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
+            palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(200, 200, 200))
             palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
             palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
             palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+            palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(170, 170, 170))
+            palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(170, 170, 170))
             app.setPalette(palette)
-            app.setStyle("Fusion")
+            app.setStyleSheet(
+                "\n".join(
+                    [
+                        "QWizard, QWizardPage, QDialog {"
+                        "  background-color: palette(Window);"
+                        "  color: palette(WindowText);"
+                        "}",
+                        "QLineEdit, QPlainTextEdit, QTextEdit, QListView, QTableView, QTreeView,"
+                        " QComboBox, QSpinBox, QDoubleSpinBox, QDateTimeEdit {"
+                        "  background-color: palette(Base);"
+                        "  color: palette(Text);"
+                        "  selection-background-color: palette(Highlight);"
+                        "  selection-color: palette(HighlightedText);"
+                        "}",
+                    ]
+                )
+            )
         else:
             app.setStyle(self._default_style)
             app.setPalette(app.style().standardPalette())
+            app.setStyleSheet("")
 
     def _on_toggle_dark_mode(self, checked: bool):
         self._apply_dark_palette(checked)
