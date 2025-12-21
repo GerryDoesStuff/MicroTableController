@@ -151,6 +151,7 @@ class ToupcamCamera:
 
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
+        self._stream_lock = threading.RLock()
         self._first_logged = False
         self._cb_thread = None
 
@@ -178,27 +179,29 @@ class ToupcamCamera:
     # ---------------- internal ----------------
 
     def _realloc_buffer(self):
-        # bytes length is stride*height; the wrapper wants c_char_p
-        rowbytes = ((self._w * self._bits + 31) // 32) * 4
-        self._stride = rowbytes
-        # use mutable bytearray so the SDK can fill in-place and cache a NumPy view
-        self._buf = bytearray(self._stride * self._h)
-        self._buf_ptr = (ctypes.c_char * len(self._buf)).from_buffer(self._buf)
-        self._arr = np.frombuffer(self._buf, dtype=np.uint8).reshape(self._h, self._stride)
-        log(
-            f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B"
-        )
+        with self._stream_lock:
+            # bytes length is stride*height; the wrapper wants c_char_p
+            rowbytes = ((self._w * self._bits + 31) // 32) * 4
+            self._stride = rowbytes
+            # use mutable bytearray so the SDK can fill in-place and cache a NumPy view
+            self._buf = bytearray(self._stride * self._h)
+            self._buf_ptr = (ctypes.c_char * len(self._buf)).from_buffer(self._buf)
+            self._arr = np.frombuffer(self._buf, dtype=np.uint8).reshape(self._h, self._stride)
+            log(
+                f"Camera: size={self._w}x{self._h}, bits={self._bits}, stride={self._stride}, buf={len(self._buf)}B"
+            )
 
     def _update_dimensions(self):
         """Refresh width/height using final output size after ROI/resolution."""
-        try:
-            if hasattr(self._cam, "get_FinalSize"):
-                self._w, self._h = self._cam.get_FinalSize()
-            else:
+        with self._stream_lock:
+            try:
+                if hasattr(self._cam, "get_FinalSize"):
+                    self._w, self._h = self._cam.get_FinalSize()
+                else:
+                    self._w, self._h = self._cam.get_Size()
+            except Exception:
                 self._w, self._h = self._cam.get_Size()
-        except Exception:
-            self._w, self._h = self._cam.get_Size()
-        self._realloc_buffer()
+            self._realloc_buffer()
 
     def _force_rgb_or_raw(self):
         # 0 = RGB, 1 = RAW (per SDK); not all models implement this option
@@ -393,39 +396,47 @@ class ToupcamCamera:
             if self._cb_thread is None:
                 self._cb_thread = threading.current_thread()
             try:
-                if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001) or self._cam is None:
+                if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001):
                     return
+                with self._stream_lock:
+                    if (
+                        not self._is_streaming
+                        or self._cam is None
+                        or self._buf_ptr is None
+                        or self._arr is None
+                    ):
+                        return
 
-                self._event_count += 1
-                t0 = time.perf_counter()
-                self._cam.PullImageV2(self._buf_ptr, self._bits, None)
-                t1 = time.perf_counter()
+                    self._event_count += 1
+                    t0 = time.perf_counter()
+                    self._cam.PullImageV2(self._buf_ptr, self._bits, None)
+                    t1 = time.perf_counter()
 
-                # Update FPS
-                self._fps_n += 1
-                now = time.time()
-                if now - self._fps_t0 >= 0.5:
-                    self._fps = self._fps_n / (now - self._fps_t0)
-                    self._avg_pull_ms = (self._pull_acc / max(1, self._fps_n)) * 1000.0
-                    self._avg_proc_ms = (self._proc_acc / max(1, self._fps_n)) * 1000.0
-                    self._fps_n = 0
-                    self._fps_t0 = now
-                    self._pull_acc = 0.0
-                    self._proc_acc = 0.0
+                    # Update FPS
+                    self._fps_n += 1
+                    now = time.time()
+                    if now - self._fps_t0 >= 0.5:
+                        self._fps = self._fps_n / (now - self._fps_t0)
+                        self._avg_pull_ms = (self._pull_acc / max(1, self._fps_n)) * 1000.0
+                        self._avg_proc_ms = (self._proc_acc / max(1, self._fps_n)) * 1000.0
+                        self._fps_n = 0
+                        self._fps_t0 = now
+                        self._pull_acc = 0.0
+                        self._proc_acc = 0.0
 
-                arr = self._arr
-                if self._bits == 24:
-                    img = arr[:, : self._w * 3].reshape(self._h, self._w, 3).copy()
-                else:  # 8-bit RAW/mono preview
-                    # Keep the grayscale frame instead of expanding to RGB.
-                    # Converting to 3-channel was creating extra copies that
-                    # slowed down the raw path and negated its bandwidth
-                    # advantage.
-                    img = arr[:, : self._w].reshape(self._h, self._w).copy()
+                    arr = self._arr
+                    if self._bits == 24:
+                        img = arr[:, : self._w * 3].reshape(self._h, self._w, 3).copy()
+                    else:  # 8-bit RAW/mono preview
+                        # Keep the grayscale frame instead of expanding to RGB.
+                        # Converting to 3-channel was creating extra copies that
+                        # slowed down the raw path and negated its bandwidth
+                        # advantage.
+                        img = arr[:, : self._w].reshape(self._h, self._w).copy()
 
-                t2 = time.perf_counter()
-                self._pull_acc += (t1 - t0)
-                self._proc_acc += (t2 - t1)
+                    t2 = time.perf_counter()
+                    self._pull_acc += (t1 - t0)
+                    self._proc_acc += (t2 - t1)
 
                 with self._lock:
                     self._last = img
@@ -472,21 +483,23 @@ class ToupcamCamera:
             log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
-        try:
-            if self._cam:
-                self._cam.Stop()
-                log("Camera: stopped")
-        except Exception as e:
-            log(f"Camera: stop error: {e}")
-        finally:
-            self._is_streaming = False
+        self._is_streaming = False
+        with self._stream_lock:
             try:
                 if self._cam:
-                    self._cam.Close()
+                    self._cam.Stop()
+                    log("Camera: stopped")
+            except Exception as e:
+                log(f"Camera: stop error: {e}")
             finally:
-                self._cam = None
-                self._buf = None
-                self._buf_ptr = None
+                try:
+                    if self._cam:
+                        self._cam.Close()
+                finally:
+                    self._cam = None
+                    self._buf = None
+                    self._buf_ptr = None
+                    self._arr = None
 
     def get_latest_frame(self):
         with self._lock:
