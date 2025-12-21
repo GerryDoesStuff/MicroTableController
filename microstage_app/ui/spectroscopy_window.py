@@ -1030,6 +1030,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _on_refresh_completed(self, success: bool, message: str) -> None:
         self.btn_refresh.setEnabled(True)
         self._last_refresh_successful = success
+        if "Ocean Optics driver did not respond" in (message or ""):
+            self.status_message.setText(message)
+            self._apply_monitoring_state()
+            return
         if success:
             self.status_message.setText(message or "Device refresh complete")
         else:
