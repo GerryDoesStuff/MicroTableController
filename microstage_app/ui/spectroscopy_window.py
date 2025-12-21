@@ -382,6 +382,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._continuous = False
         self._rate_limit_ms = 250
         self._last_refresh_successful = False
+        self._connect_thread: Optional[QtCore.QThread] = None
+        self._connect_worker: Optional[QtCore.QObject] = None
+        self._connect_in_flight = False
+        self._connect_timed_out = False
+        self._connect_timeout_ms = 10000
+        self._connect_timeout_timer = QtCore.QTimer(self)
+        self._connect_timeout_timer.setSingleShot(True)
+        self._connect_timeout_timer.timeout.connect(self._on_connect_timeout)
 
         self._build_ui()
         self._restore_geometry()
@@ -798,6 +806,19 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.capture_timer.stop()
         self._capture_token = object()
         self._continuous = False
+        if self._connect_thread and self._connect_thread.isRunning():
+            self._connect_timeout_timer.stop()
+            self._connect_thread.quit()
+            stopped = self._connect_thread.wait(10000)
+            if stopped:
+                self._connect_worker = None
+                self._connect_thread.deleteLater()
+                self._connect_thread = None
+            else:
+                LOG.warning("Connect thread did not finish before window closed")
+                self.status_message.setText("Shutdown still in progress. Please wait…")
+                event.ignore()
+                return
         QtCore.QMetaObject.invokeMethod(
             self._capture_worker, "request_stop", QtCore.Qt.QueuedConnection
         )
@@ -1127,6 +1148,12 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _update_status_from_selection(self) -> None:
         desc = self._current_descriptor()
         active = self.spectrometer_manager.get_active(desc) if desc else None
+        if self._connect_in_flight:
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(False)
+            self.status_led.setStyleSheet("color: orange;")
+            self.status_label.setText("Connecting…")
+            return
         self.btn_connect.setEnabled(bool(desc) and active is None)
         self.btn_disconnect.setEnabled(active is not None)
         if active:
@@ -1153,24 +1180,81 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     def _connect_selected(self) -> None:
         desc = self._current_descriptor()
-        if not desc:
+        if not desc or self._connect_in_flight:
             return
-        try:
-            dev = self.spectrometer_manager.connect(desc)
-            if dev is None:
-                if not self.status_message.text().startswith("Connect failed"):
-                    self.status_message.setText("Connect failed: no device available")
-                self._update_status_from_selection()
-                self._update_session_context()
-                return
-            wavelengths = dev.get_wavelengths()
-            self.session.set_wavelengths(wavelengths)
-            self._default_device = self._device_key(desc)
-            self.profiles.set("spectroscopy.default_device", self._default_device)
-            self.profiles.save()
-        except Exception as exc:
-            self.status_message.setText(f"Connect failed: {exc}")
-            LOG.warning("Spectrometer connect failed: %s", exc)
+        self._connect_in_flight = True
+        self._connect_timed_out = False
+        self.status_message.setText(f"Connecting to {desc.label()}…")
+        self._update_status_from_selection()
+
+        def do_connect():
+            device = self.spectrometer_manager.connect(desc)
+            if device is None:
+                return None, None, "Connect failed: no device available"
+            try:
+                wavelengths = device.get_wavelengths()
+            except Exception as exc:
+                return device, None, str(exc)
+            return device, wavelengths, ""
+
+        thread, worker = run_async(do_connect, parent=self)
+        self._connect_thread = thread
+        self._connect_worker = worker
+        worker.finished.connect(
+            lambda result, err, d=desc: self._on_connect_finished(d, result, err)
+        )
+        self._connect_timeout_timer.start(self._connect_timeout_ms)
+
+    def _cleanup_connect_worker(self) -> None:
+        thread = self._connect_thread
+        if thread:
+            thread.quit()
+            thread.wait()
+        self._connect_thread = None
+        self._connect_worker = None
+
+    def _on_connect_timeout(self) -> None:
+        if not self._connect_in_flight:
+            return
+        self._connect_timed_out = True
+        self.status_message.setText("Connect timed out. Please try again.")
+        self._update_status_from_selection()
+        self._update_session_context()
+
+    def _on_connect_finished(
+        self,
+        desc: SpectrometerDescriptor,
+        result: Optional[tuple[Optional[SpectrometerDevice], Optional[np.ndarray], str]],
+        err: Optional[Exception],
+    ) -> None:
+        self._connect_timeout_timer.stop()
+        timed_out = self._connect_timed_out
+        self._connect_in_flight = False
+        self._cleanup_connect_worker()
+        if timed_out:
+            device = result[0] if result else None
+            if device is not None:
+                self.spectrometer_manager.disconnect(desc)
+            self._update_status_from_selection()
+            self._update_session_context()
+            return
+        if err:
+            self.status_message.setText(f"Connect failed: {err}")
+            LOG.warning("Spectrometer connect failed: %s", err)
+        elif result:
+            device, wavelengths, error_message = result
+            if error_message:
+                self.status_message.setText(f"Connect failed: {error_message}")
+                LOG.warning("Spectrometer connect failed: %s", error_message)
+            elif device is None or wavelengths is None:
+                self.status_message.setText("Connect failed: no device available")
+            else:
+                self.session.set_wavelengths(wavelengths)
+                self._default_device = self._device_key(desc)
+                self.profiles.set("spectroscopy.default_device", self._default_device)
+                self.profiles.save()
+        else:
+            self.status_message.setText("Connect failed: unexpected response")
         self._update_status_from_selection()
         self._update_session_context()
 
