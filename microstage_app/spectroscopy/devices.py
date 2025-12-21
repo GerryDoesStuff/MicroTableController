@@ -317,11 +317,12 @@ class SpectrometerManager(QtCore.QObject):
         targets = [descriptor] if descriptor else list(self._active.keys())
         for desc in targets:
             device = self._active.pop(desc, None)
-            self._locks.pop(desc, None)
+            lock = self._locks.get(desc)
             if device is None:
                 self.device_connected.emit(desc, None)
                 continue
             try:
+                locker = QtCore.QMutexLocker(lock) if lock is not None else None
                 try:
                     logger.info(
                         "[thread=%s] Disconnecting spectrometer via %s: %s (%s)",
@@ -339,7 +340,11 @@ class SpectrometerManager(QtCore.QObject):
                     )
                 except BaseException as exc:  # pragma: no cover - defensive
                     logger.warning("Failed to disconnect spectrometer %s: %s", desc.label(), exc)
+                finally:
+                    if locker is not None:
+                        locker.unlock()
             finally:
+                self._locks.pop(desc, None)
                 self.device_connected.emit(desc, None)
         if descriptor is None:
             self._last_active = None
