@@ -928,10 +928,22 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
             "\n".join(
                 [
                     "QWizardPage QLabel {",
-                    "  color: palette(WindowText);",
+                    "  color: #000000;",
                     "}",
                     "QWizardPage QGroupBox::title {",
-                    "  color: palette(WindowText);",
+                    "  color: #000000;",
+                    "}",
+                    "QWizardPage QAbstractButton {",
+                    "  color: #000000;",
+                    "}",
+                    "QWizardPage QAbstractSpinBox {",
+                    "  color: #000000;",
+                    "}",
+                    "QWizardPage QLineEdit {",
+                    "  color: #000000;",
+                    "}",
+                    "QWizardPage QComboBox {",
+                    "  color: #000000;",
                     "}",
                 ]
             )
