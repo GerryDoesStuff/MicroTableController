@@ -173,10 +173,14 @@ class SpectrometerManager(QtCore.QObject):
                 devices.extend(provider.list_devices())
             except BaseException as exc:  # pragma: no cover - defensive
                 logger.warning(
-                    "Spectrometer enumeration failed for %s: %s: %s\n%s",
+                    "Spectrometer enumeration failed for %s (%s: %s)",
                     provider_name,
                     type(exc).__name__,
                     exc,
+                )
+                logger.debug(
+                    "Spectrometer enumeration traceback for %s:\n%s",
+                    provider_name,
                     traceback.format_exc(),
                 )
             finally:
