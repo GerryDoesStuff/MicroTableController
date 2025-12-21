@@ -399,11 +399,10 @@ class ToupcamCamera:
             try:
                 if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001):
                     return
-                if not self._streaming_event.is_set():
-                    return
                 with self._stream_lock:
                     if (
                         not self._is_streaming
+                        or not self._streaming_event.is_set()
                         or self._cam is None
                         or self._buf_ptr is None
                         or self._arr is None
