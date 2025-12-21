@@ -525,13 +525,11 @@ class BeerLambertPage(BaseWizardPage):
         wl = self.session.wavelengths
         raw = self.session.raw_spectrum
         ref = self.session.reference_spectrum
-        dark = self.session.dark_spectrum
+        dark = self.session.dark_spectrum if self.session.dark_valid else None
         if wl is None or raw is None or ref is None:
             return None
         smoothed = processing.smooth_boxcar(raw, window=int(self.wizard_ref.mode_params.get("smoothing", 1)))
-        if dark is not None:
-            smoothed = processing.subtract_dark(smoothed, dark)
-        absorb = processing.compute_absorbance(smoothed, ref)
+        absorb = processing.compute_absorbance(smoothed, ref, dark=dark)
         roi = self.roi_combo.currentData()
         if roi is None:
             value = float(np.nanmax(absorb))
