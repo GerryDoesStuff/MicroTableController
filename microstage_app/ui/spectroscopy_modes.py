@@ -276,6 +276,7 @@ class CapturePage(BaseWizardPage):
         self._live_timer.start()
         self._live_capture_in_flight = False
         self._live_spectrum: Optional[np.ndarray] = None
+        self._live_capture_thread: Optional[QtCore.QThread] = None
 
     def _capture(self) -> None:
         self.wizard_ref.apply_preset_for_step(self.capture_key)
@@ -340,10 +341,28 @@ class CapturePage(BaseWizardPage):
         integration = float(params.get("integration", 10.0))
         averages = int(params.get("averages", 1))
         self._live_capture_in_flight = True
-        try:
-            data = self.wizard_ref.capture_callback("preview", integration, averages)
-        finally:
-            self._live_capture_in_flight = False
+        self._start_live_capture(integration, averages)
+
+    def _start_live_capture(self, integration: float, averages: int) -> None:
+        if self._live_capture_thread is not None:
+            return
+        thread = QtCore.QThread(self)
+        worker = _LiveCaptureWorker(self.wizard_ref.capture_callback, integration, averages)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_live_capture_complete)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_live_capture_thread)
+        self._live_capture_thread = thread
+        thread.start()
+
+    def _clear_live_capture_thread(self) -> None:
+        self._live_capture_thread = None
+
+    def _on_live_capture_complete(self, data: Optional[np.ndarray]) -> None:
+        self._live_capture_in_flight = False
         if data is None:
             data = self._live_spectrum
         else:
@@ -432,6 +451,21 @@ class CapturePage(BaseWizardPage):
         self.stored_x_axis.setTitleText(self._x_axis_title())
         self.live_y_axis.setTitleText(self._y_axis_title())
         self.stored_y_axis.setTitleText(self._y_axis_title())
+
+
+class _LiveCaptureWorker(QtCore.QObject):
+    finished = QtCore.Signal(object)
+
+    def __init__(self, callback: CaptureCallable, integration: float, averages: int) -> None:
+        super().__init__()
+        self._callback = callback
+        self._integration = integration
+        self._averages = averages
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        data = self._callback("preview", self._integration, self._averages)
+        self.finished.emit(data)
 
 
 class BeerLambertPage(BaseWizardPage):
