@@ -1033,7 +1033,8 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         if success:
             self.status_message.setText(message or "Device refresh complete")
         else:
-            self.status_message.setText(message or "Device refresh failed")
+            failure_detail = message or "driver did not respond"
+            self.status_message.setText(f"Refresh failed—{failure_detail}")
         self._apply_monitoring_state()
 
     def _on_monitor_toggled(self, checked: bool) -> None:
