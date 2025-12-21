@@ -816,27 +816,34 @@ class OceanOpticsSpectrometerProvider:
         if not is_main_thread:
             app = QtCore.QCoreApplication.instance() if is_windows else None
             if app is not None:
-                result: dict[str, object] = {"devices": None, "error": None}
+                class _EnumHelper(QtCore.QObject):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.devices: List[SpectrometerDescriptor] = []
+                        self.error: Optional[BaseException] = None
 
-                def _enumerate_on_main_thread() -> None:
-                    try:
-                        result["devices"] = list(OceanOpticsSpectrometer.enumerate())
-                    except BaseException as exc:  # pragma: no cover - defensive
-                        result["error"] = exc
+                    @QtCore.Slot()
+                    def run(self) -> None:
+                        try:
+                            self.devices = list(OceanOpticsSpectrometer.enumerate())
+                        except BaseException as exc:  # pragma: no cover - defensive
+                            self.error = exc
 
+                helper = _EnumHelper()
+                helper.moveToThread(app.thread())
                 QtCore.QMetaObject.invokeMethod(
-                    app,
-                    _enumerate_on_main_thread,
+                    helper,
+                    "run",
                     QtCore.Qt.BlockingQueuedConnection,
                 )
-                if result["error"] is not None:
-                    exc = result["error"]
+                if helper.error is not None:
+                    exc = helper.error
                     logger.warning(
                         "Failed to enumerate OceanOptics spectrometers: %s",
                         f"{type(exc).__name__}: {exc}",
                     )
                     return []
-                return list(result["devices"] or [])
+                return list(helper.devices or [])
             try:
                 return list(OceanOpticsSpectrometer.enumerate())
             except BaseException as exc:  # pragma: no cover - defensive
