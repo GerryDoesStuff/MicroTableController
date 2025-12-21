@@ -90,6 +90,7 @@ class SpectrometerManager(QtCore.QObject):
         self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
         self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
         self._device_providers: dict[SpectrometerDescriptor, _SpectrometerProvider] = {}
+        self._provider_devices: dict[_SpectrometerProvider, list[SpectrometerDescriptor]] = {}
         self._last_active: Optional[SpectrometerDescriptor] = None
         self._poll_thread: Optional[QtCore.QThread] = None
         self._poll_worker: Optional[QtCore.QObject] = None
@@ -177,6 +178,7 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
         self._device_providers.clear()
+        self._provider_devices.clear()
 
     close = shutdown
 
@@ -199,12 +201,13 @@ class SpectrometerManager(QtCore.QObject):
             start_time = time.perf_counter()
             try:
                 provider_devices = provider.list_devices()
-                devices.extend(provider_devices)
-                for descriptor in provider_devices:
-                    device_providers[descriptor] = provider
                 if getattr(provider, "timed_out", False):
                     timeouts.append(provider_name)
+                    provider_devices = self._provider_devices.get(provider, [])
+                else:
+                    self._provider_devices[provider] = list(provider_devices)
             except BaseException as exc:  # pragma: no cover - defensive
+                provider_devices = self._provider_devices.get(provider, [])
                 logger.warning(
                     "Spectrometer enumeration failed for %s (%s: %s)",
                     provider_name,
@@ -216,6 +219,9 @@ class SpectrometerManager(QtCore.QObject):
                     provider_name,
                     traceback.format_exc(),
                 )
+            devices.extend(provider_devices)
+            for descriptor in provider_devices:
+                device_providers[descriptor] = provider
             finally:
                 elapsed = time.perf_counter() - start_time
                 logger.info(
