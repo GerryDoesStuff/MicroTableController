@@ -811,10 +811,32 @@ class OceanOpticsSpectrometerProvider:
 
     def list_devices(self) -> List[SpectrometerDescriptor]:
         self._timed_out = False
-        if (
-            sys.platform == "win32"
-            and threading.current_thread() is not threading.main_thread()
-        ):
+        is_main_thread = threading.current_thread() is threading.main_thread()
+        is_windows = sys.platform == "win32"
+        if not is_main_thread:
+            app = QtCore.QCoreApplication.instance() if is_windows else None
+            if app is not None:
+                result: dict[str, object] = {"devices": None, "error": None}
+
+                def _enumerate_on_main_thread() -> None:
+                    try:
+                        result["devices"] = list(OceanOpticsSpectrometer.enumerate())
+                    except BaseException as exc:  # pragma: no cover - defensive
+                        result["error"] = exc
+
+                QtCore.QMetaObject.invokeMethod(
+                    app,
+                    _enumerate_on_main_thread,
+                    QtCore.Qt.BlockingQueuedConnection,
+                )
+                if result["error"] is not None:
+                    exc = result["error"]
+                    logger.warning(
+                        "Failed to enumerate OceanOptics spectrometers: %s",
+                        f"{type(exc).__name__}: {exc}",
+                    )
+                    return []
+                return list(result["devices"] or [])
             try:
                 return list(OceanOpticsSpectrometer.enumerate())
             except BaseException as exc:  # pragma: no cover - defensive
