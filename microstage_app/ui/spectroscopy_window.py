@@ -835,12 +835,17 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
 
     # ------------------------------------------------------------------
     def _install_legend_handlers(self) -> None:
-        for marker in self._chart.legend().markers():
-            try:
+        if not hasattr(self, "_legend_marker_connections"):
+            self._legend_marker_connections = set()
+        markers = list(self._chart.legend().markers())
+        active_markers = set(markers)
+        self._legend_marker_connections.intersection_update(active_markers)
+        for marker in markers:
+            if marker in self._legend_marker_connections:
                 marker.clicked.disconnect()
-            except Exception:
-                pass
+                self._legend_marker_connections.discard(marker)
             marker.clicked.connect(lambda checked=False, m=marker: self._toggle_series(m))
+            self._legend_marker_connections.add(marker)
 
     def _toggle_series(self, marker: QtCharts.QLegendMarker) -> None:
         series = marker.series()
