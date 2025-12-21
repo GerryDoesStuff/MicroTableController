@@ -660,7 +660,7 @@ class MainWindow(QtWidgets.QMainWindow):
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
                 w.setChecked(val)
-            elif isinstance(w, QtWidgets.QAction):
+            elif isinstance(w, QtGui.QAction):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
                 w.setChecked(val)
             elif isinstance(w, QtWidgets.QComboBox):
@@ -4259,7 +4259,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 val = w.value()
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = w.isChecked()
-            elif isinstance(w, QtWidgets.QAction):
+            elif isinstance(w, QtGui.QAction):
                 val = w.isChecked()
             elif isinstance(w, QtWidgets.QComboBox):
                 data = w.currentData()
