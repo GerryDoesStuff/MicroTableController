@@ -53,6 +53,7 @@ PREVIEW_MAX_EDGE_PX = 1280
 # Avoid spamming dimmer devices with rapid brightness updates while the user
 # drags sliders or holds spin buttons.
 ILLUMINATION_BRIGHTNESS_DEBOUNCE_MS = 200
+ILLUMINATION_BRIGHTNESS_MIN = 1
 
 
 def _load_stage_bounds():
@@ -1435,6 +1436,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "spin": spin,
                 "active": False,
                 "status": status_label,
+                "last_brightness": spin.value(),
             }
             self.illumination_rows.append(row_data)
             self._set_illumination_row_active(row_data, idx < 2)
@@ -1558,6 +1560,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     spin.setValue(brightness)
                 if isinstance(slider, QtWidgets.QSlider):
                     slider.setValue(brightness)
+                row["last_brightness"] = brightness
 
                 self._update_illumination_name_state(row)
 
@@ -1792,6 +1795,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 spin.setValue(state.brightness)
             if isinstance(slider, QtWidgets.QSlider):
                 slider.setValue(state.brightness)
+            row["last_brightness"] = state.brightness
         finally:
             self._updating_illumination_ui = False
         status = "on" if state.on else "off"
@@ -1830,9 +1834,35 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._run_illumination_row_action(row, lambda dimmer: dimmer.set_on(checked) if dimmer else None)
 
-    def _illumination_brightness_value(self, row: dict[str, object]) -> int:
+    def _illumination_brightness_value(self, row: dict[str, object]) -> int | None:
         spin = row.get("spin")
-        return int(spin.value()) if isinstance(spin, QtWidgets.QSpinBox) else 0
+        if not isinstance(spin, QtWidgets.QSpinBox):
+            return None
+        editor = spin.lineEdit()
+        if editor and not editor.text().strip():
+            fallback = row.get("last_brightness", ILLUMINATION_BRIGHTNESS_MIN)
+            if not isinstance(fallback, int):
+                fallback = ILLUMINATION_BRIGHTNESS_MIN
+            self._updating_illumination_ui = True
+            try:
+                spin.setValue(fallback)
+            finally:
+                self._updating_illumination_ui = False
+            self._set_illumination_status(row, "Intensity required; keeping last value.", error=True)
+            return None
+        value = int(spin.value())
+        if value < ILLUMINATION_BRIGHTNESS_MIN:
+            value = ILLUMINATION_BRIGHTNESS_MIN
+            self._updating_illumination_ui = True
+            try:
+                spin.setValue(value)
+            finally:
+                self._updating_illumination_ui = False
+            self._set_illumination_status(
+                row, f"Intensity adjusted to {ILLUMINATION_BRIGHTNESS_MIN}%.", error=True
+            )
+        row["last_brightness"] = value
+        return value
 
     def _apply_illumination_brightness(self, row: dict[str, object]):
         if self._updating_illumination_ui:
@@ -1841,6 +1871,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(timer, QtCore.QTimer):
             timer.stop()
         value = self._illumination_brightness_value(row)
+        if value is None:
+            return
         self._run_illumination_row_action(row, lambda dimmer: dimmer.set_brightness(value) if dimmer else None)
 
     def _schedule_illumination_brightness_update(self, row: dict[str, object]):
