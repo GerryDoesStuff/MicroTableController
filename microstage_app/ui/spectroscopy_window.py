@@ -1174,6 +1174,12 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         lock = self.spectrometer_manager.acquisition_lock(desc) if device else None
         return device, lock, desc
 
+    def _invoke_on_ui(self, callback) -> None:
+        if QtCore.QThread.currentThread() == self.thread():
+            callback()
+        else:
+            QtCore.QTimer.singleShot(0, callback)
+
     def _acquisition_context(self, lock: Optional[QtCore.QMutex]):
         return QtCore.QMutexLocker(lock) if lock is not None else contextlib.nullcontext()
 
@@ -2252,16 +2258,47 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
     def _wizard_capture(self, kind: str, integration: float, averages: int) -> Optional[np.ndarray]:
         dev, lock, _desc = self._active_device_with_lock()
         if dev is None or lock is None:
-            self.status_message.setText("No spectrometer connected")
+            self._invoke_on_ui(lambda: self.status_message.setText("No spectrometer connected"))
             return None
-        self._update_session_context()
-        try:
+        self._invoke_on_ui(self._update_session_context)
+
+        def do_capture() -> np.ndarray:
             with self._acquisition_context(lock):
                 dev.set_integration_time_ms(integration)
                 dev.set_averages(averages)
-                spectrum = dev.capture()
-            if kind != "preview":
-                ts = time.time()
+                return dev.capture()
+
+        spectrum: Optional[np.ndarray] = None
+        if QtCore.QThread.currentThread() == self.thread():
+            thread, worker = run_async(do_capture, parent=self)
+            loop = QtCore.QEventLoop()
+            result: dict[str, object] = {"data": None, "error": None}
+
+            def _finished(data, error) -> None:
+                result["data"] = data
+                result["error"] = error
+                loop.quit()
+
+            worker.finished.connect(_finished)
+            loop.exec()
+            if result["error"] is not None:
+                self.status_message.setText(f"Capture failed: {result['error']}")
+                return None
+            spectrum = result["data"]
+        else:
+            try:
+                spectrum = do_capture()
+            except Exception as exc:
+                self._invoke_on_ui(lambda: self.status_message.setText(f"Capture failed: {exc}"))
+                return None
+
+        if spectrum is None:
+            return None
+
+        if kind != "preview":
+            ts = time.time()
+
+            def _record() -> None:
                 self._record_capture(
                     kind,
                     spectrum,
@@ -2275,7 +2312,6 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                     },
                     raw_data=spectrum,
                 )
-            return spectrum
-        except Exception as exc:
-            self.status_message.setText(f"Capture failed: {exc}")
-            return None
+
+            self._invoke_on_ui(_record)
+        return spectrum
