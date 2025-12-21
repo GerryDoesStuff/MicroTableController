@@ -1076,6 +1076,18 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
                 QtWidgets.QWizard.CancelButton,
             ]
         )
+        self.setStyleSheet(
+            "\n".join(
+                [
+                    "QWizardPage QLabel {",
+                    "  color: palette(WindowText);",
+                    "}",
+                    "QWizardPage QGroupBox::title {",
+                    "  color: palette(WindowText);",
+                    "}",
+                ]
+            )
+        )
         self._build_pages()
 
     def _build_pages(self) -> None:
@@ -1172,4 +1184,3 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
     def accept(self) -> None:  # type: ignore[override]
         self._persist_params()
         super().accept()
-
