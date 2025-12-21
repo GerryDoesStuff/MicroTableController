@@ -708,6 +708,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.spectrometer_manager.devices_changed.connect(self._on_devices_changed)
         self.spectrometer_manager.device_connected.connect(self._on_device_connected)
         self.spectrometer_manager.connect_failed.connect(self._on_connect_failed)
+        self.spectrometer_manager.refresh_completed.connect(self._on_refresh_completed)
         self.session.validity_changed.connect(self._refresh_validity_state)
 
         self.counts_max_slider.valueChanged.connect(self.counts_max_spin.setValue)
@@ -1018,9 +1019,22 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.profiles.save()
 
     def _refresh_devices(self) -> None:
-        devices = self.spectrometer_manager.refresh(start_monitoring=False)
-        self._last_refresh_successful = True
-        self._populate_devices(devices)
+        if not self.btn_refresh.isEnabled():
+            return
+        self.btn_refresh.setEnabled(False)
+        self.status_message.setText("Refreshing spectrometers…")
+        started = self.spectrometer_manager.refresh_async(start_monitoring=False, timeout_ms=10000)
+        if not started:
+            self.btn_refresh.setEnabled(True)
+            self.status_message.setText("Refresh already in progress")
+
+    def _on_refresh_completed(self, success: bool, message: str) -> None:
+        self.btn_refresh.setEnabled(True)
+        self._last_refresh_successful = success
+        if success:
+            self.status_message.setText(message or "Device refresh complete")
+        else:
+            self.status_message.setText(message or "Device refresh failed")
         self._apply_monitoring_state()
 
     def _on_monitor_toggled(self, checked: bool) -> None:
