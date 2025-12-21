@@ -207,6 +207,9 @@ class SpectrometerManager(QtCore.QObject):
                     provider_devices = self._provider_devices.get(provider, [])
                 else:
                     self._provider_devices[provider] = list(provider_devices)
+                devices.extend(provider_devices)
+                for descriptor in provider_devices:
+                    device_providers[descriptor] = provider
             except BaseException as exc:  # pragma: no cover - defensive
                 provider_devices = self._provider_devices.get(provider, [])
                 logger.warning(
@@ -220,9 +223,9 @@ class SpectrometerManager(QtCore.QObject):
                     provider_name,
                     traceback.format_exc(),
                 )
-            devices.extend(provider_devices)
-            for descriptor in provider_devices:
-                device_providers[descriptor] = provider
+                devices.extend(provider_devices)
+                for descriptor in provider_devices:
+                    device_providers[descriptor] = provider
             finally:
                 elapsed = time.perf_counter() - start_time
                 logger.info(
