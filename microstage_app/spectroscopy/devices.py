@@ -98,6 +98,7 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_token: Optional[object] = None
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
+        self._last_refresh_successful = False
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
@@ -284,6 +285,7 @@ class SpectrometerManager(QtCore.QObject):
         return True
 
     def _finalize_refresh(self, success: bool, message: str) -> None:
+        self._last_refresh_successful = success
         if self._refresh_was_paused and self._active:
             self._pause_monitoring_for_active_use()
         elif not self._refresh_start_monitoring:
