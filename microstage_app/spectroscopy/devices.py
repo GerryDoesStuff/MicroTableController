@@ -7,7 +7,6 @@ import importlib
 import importlib.util
 import logging
 import multiprocessing
-import queue
 import threading
 import time
 import traceback
@@ -68,21 +67,53 @@ class _SpectrometerProvider(Protocol):
         ...
 
 
-class _EnumHelper(QtCore.QObject):
-    result = None
-    error = None
+def _serialize_descriptors(
+    devices: Iterable[SpectrometerDescriptor],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "model": device.model,
+            "serial_number": device.serial_number,
+            "path": device.path,
+            "vendor": device.vendor,
+        }
+        for device in devices
+    ]
 
-    def __init__(self, manager: "SpectrometerManager", timeout_s: float):
-        super().__init__()
-        self._manager = manager
-        self._timeout_s = timeout_s
 
-    @QtCore.Slot()
-    def run(self) -> None:
+def _deserialize_descriptors(payload: Iterable[object]) -> list[SpectrometerDescriptor]:
+    descriptors: list[SpectrometerDescriptor] = []
+    for item in payload:
+        if isinstance(item, SpectrometerDescriptor):
+            descriptors.append(item)
+        else:
+            descriptors.append(SpectrometerDescriptor(**item))
+    return descriptors
+
+
+def _ocean_optics_pipe_worker(conn: multiprocessing.connection.Connection) -> None:
+    try:
+        while True:
+            try:
+                command = conn.recv()
+            except EOFError:
+                break
+            if command == "quit":
+                break
+            if command != "enumerate":
+                conn.send(("error", f"Unknown command: {command}"))
+                continue
+            try:
+                devices = OceanOpticsSpectrometer.enumerate()
+            except BaseException as exc:  # pragma: no cover - defensive
+                conn.send(("error", f"{type(exc).__name__}: {exc}"))
+                continue
+            conn.send(("ok", _serialize_descriptors(devices)))
+    finally:
         try:
-            self.result = self._manager._enumerate_oceanoptics_via_subprocess(self._timeout_s)
-        except BaseException as exc:  # pragma: no cover - defensive
-            self.error = exc
+            conn.close()
+        except BaseException:  # pragma: no cover - defensive
+            pass
 
 
 class SpectrometerManager(QtCore.QObject):
@@ -112,6 +143,9 @@ class SpectrometerManager(QtCore.QObject):
         self._device_providers: dict[SpectrometerDescriptor, _SpectrometerProvider] = {}
         self._provider_devices: dict[_SpectrometerProvider, list[SpectrometerDescriptor]] = {}
         self._last_active: Optional[SpectrometerDescriptor] = None
+        self._oceanoptics_process: Optional[multiprocessing.Process] = None
+        self._oceanoptics_conn: Optional[multiprocessing.connection.Connection] = None
+        self._oceanoptics_lock = threading.Lock()
         self._poll_thread: Optional[QtCore.QThread] = None
         self._poll_worker: Optional[QtCore.QObject] = None
         self._poll_in_flight = False
@@ -127,6 +161,8 @@ class SpectrometerManager(QtCore.QObject):
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
+        if any(isinstance(provider, OceanOpticsSpectrometerProvider) for provider in self._providers):
+            self._start_oceanoptics_helper()
         if auto_start:
             self.start_monitoring()
 
@@ -199,12 +235,89 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_start_monitoring = False
         self._device_providers.clear()
         self._provider_devices.clear()
+        self._shutdown_oceanoptics_helper()
 
     close = shutdown
 
     @property
     def devices(self) -> List[SpectrometerDescriptor]:
         return list(self._devices)
+
+    def _start_oceanoptics_helper(self) -> None:
+        if self._oceanoptics_process is not None:
+            return
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=True)
+        process = ctx.Process(
+            target=_ocean_optics_pipe_worker,
+            args=(child_conn,),
+            name="OceanOpticsEnumWorker",
+            daemon=True,
+        )
+        process.start()
+        child_conn.close()
+        self._oceanoptics_process = process
+        self._oceanoptics_conn = parent_conn
+
+    def _shutdown_oceanoptics_helper(self) -> None:
+        conn = self._oceanoptics_conn
+        process = self._oceanoptics_process
+        self._oceanoptics_conn = None
+        self._oceanoptics_process = None
+        if conn is not None:
+            with self._oceanoptics_lock:
+                try:
+                    conn.send("quit")
+                except (BrokenPipeError, OSError):
+                    pass
+            try:
+                conn.close()
+            except BaseException:  # pragma: no cover - defensive
+                pass
+        if process is not None:
+            process.join(2.0)
+            if process.is_alive():
+                process.terminate()
+                process.join(2.0)
+
+    def _request_oceanoptics_enumeration(
+        self,
+        timeout_s: float,
+    ) -> tuple[list[SpectrometerDescriptor], bool, bool]:
+        conn = self._oceanoptics_conn
+        process = self._oceanoptics_process
+        if conn is None or process is None or not process.is_alive():
+            logger.warning("Ocean Optics helper not available for enumeration")
+            return [], True, True
+        with self._oceanoptics_lock:
+            while conn.poll():
+                try:
+                    conn.recv()
+                except (EOFError, OSError):
+                    break
+            try:
+                conn.send("enumerate")
+            except (BrokenPipeError, OSError) as exc:
+                logger.warning("Failed to send Ocean Optics enumeration request: %s", exc)
+                return [], True, True
+            if not conn.poll(timeout_s):
+                logger.warning(
+                    "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
+                    timeout_s,
+                )
+                return [], True, False
+            try:
+                status, payload = conn.recv()
+            except (EOFError, OSError) as exc:
+                logger.warning("Failed to read Ocean Optics enumeration response: %s", exc)
+                return [], True, True
+        if status == "error":
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
+            return [], False, True
+        if status != "ok":
+            logger.warning("Unexpected Ocean Optics response: %s", status)
+            return [], False, True
+        return _deserialize_descriptors(payload), False, False
 
     def _enumerate_devices(self, *, capture_timeouts: bool = False) -> List[SpectrometerDescriptor]:
         logger.info(
@@ -220,10 +333,7 @@ class SpectrometerManager(QtCore.QObject):
             logger.info("Starting spectrometer enumeration for %s", provider_name)
             start_time = time.perf_counter()
             try:
-                if isinstance(provider, OceanOpticsSpectrometerProvider):
-                    provider_devices = self._request_oceanoptics_enumeration(provider)
-                else:
-                    provider_devices = provider.list_devices()
+                provider_devices = provider.list_devices()
                 if getattr(provider, "timed_out", False):
                     timeouts.append(provider_name)
                     provider_devices = self._provider_devices.get(provider, [])
@@ -639,65 +749,6 @@ class SpectrometerManager(QtCore.QObject):
             self._locks[descriptor] = lock
         return lock
 
-    def _enumerate_oceanoptics_via_subprocess(
-        self,
-        timeout_s: float,
-    ) -> tuple[List[SpectrometerDescriptor], bool]:
-        ctx = multiprocessing.get_context("spawn")
-        result_queue: multiprocessing.Queue = ctx.Queue(maxsize=1)
-        process = ctx.Process(
-            target=_ocean_optics_enumerate_worker,
-            args=(result_queue,),
-            name="OceanOpticsEnumerate",
-            daemon=True,
-        )
-        process.start()
-        process.join(timeout_s)
-        if process.is_alive():
-            process.terminate()
-            process.join()
-            logger.warning(
-                "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
-                timeout_s,
-            )
-            return [], True
-        try:
-            status, payload = result_queue.get_nowait()
-        except queue.Empty:
-            return [], False
-        if status == "error":
-            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
-            return [], False
-        return list(payload), False
-
-    def _request_oceanoptics_enumeration(
-        self,
-        provider: "OceanOpticsSpectrometerProvider",
-    ) -> List[SpectrometerDescriptor]:
-        result: dict[str, object] = {"devices": [], "timed_out": False}
-        timeout_s = provider.timeout_s
-        if QtCore.QThread.currentThread() is self.thread():
-            devices, timed_out = self._enumerate_oceanoptics_via_subprocess(timeout_s)
-            result["devices"] = devices
-            result["timed_out"] = timed_out
-        else:
-            helper = _EnumHelper(self, timeout_s)
-            helper.moveToThread(self.thread())
-            QtCore.QMetaObject.invokeMethod(
-                helper,
-                "run",
-                QtCore.Qt.BlockingQueuedConnection,
-            )
-            if helper.error is not None:
-                logger.warning("Failed to enumerate OceanOptics spectrometers: %s", helper.error)
-            else:
-                devices, timed_out = helper.result or ([], False)
-                result["devices"] = devices
-                result["timed_out"] = timed_out
-            helper.deleteLater()
-        provider.set_timed_out(bool(result["timed_out"]))
-        return list(result["devices"])
-
 
 class OceanOpticsSpectrometer:
     def __init__(self, descriptor: SpectrometerDescriptor):
@@ -870,22 +921,12 @@ class MockSpectrometer:
         self._averages = max(1, int(averages))
 
 
-def _ocean_optics_enumerate_worker(
-    result_queue: multiprocessing.Queue,
-) -> None:
-    try:
-        devices = OceanOpticsSpectrometer.enumerate()
-    except BaseException as exc:  # pragma: no cover - defensive
-        result_queue.put(("error", f"{type(exc).__name__}: {exc}"))
-        return
-    result_queue.put(("ok", devices))
-
-
 class OceanOpticsSpectrometerProvider:
     def __init__(self, *, timeout_s: float = 5.0) -> None:
         self._timeout_s = float(timeout_s)
         self._timed_out = False
         self._manager: Optional[SpectrometerManager] = None
+        self._cached_devices: list[SpectrometerDescriptor] = []
 
     def set_manager(self, manager: SpectrometerManager) -> None:
         self._manager = manager
@@ -913,7 +954,12 @@ class OceanOpticsSpectrometerProvider:
                     f"{type(exc).__name__}: {exc}",
                 )
                 return []
-        return manager._request_oceanoptics_enumeration(self)
+        devices, timed_out, had_error = manager._request_oceanoptics_enumeration(self._timeout_s)
+        self._timed_out = timed_out
+        if timed_out or had_error:
+            return list(self._cached_devices)
+        self._cached_devices = list(devices)
+        return list(devices)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> OceanOpticsSpectrometer:
         return OceanOpticsSpectrometer(descriptor)
