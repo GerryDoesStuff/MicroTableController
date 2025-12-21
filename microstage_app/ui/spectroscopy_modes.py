@@ -273,7 +273,6 @@ class CapturePage(BaseWizardPage):
         self._live_timer = QtCore.QTimer(self)
         self._live_timer.setInterval(750)
         self._live_timer.timeout.connect(self._refresh_live_chart)
-        self._live_timer.start()
         self._live_capture_in_flight = False
         self._live_spectrum: Optional[np.ndarray] = None
 
@@ -313,8 +312,14 @@ class CapturePage(BaseWizardPage):
 
     def initializePage(self) -> None:  # type: ignore[override]
         self._sync_axes()
+        if not self._live_timer.isActive():
+            self._live_timer.start()
         self._refresh_live_chart()
         self._refresh_stored_chart()
+
+    def cleanupPage(self) -> None:  # type: ignore[override]
+        if self._live_timer.isActive():
+            self._live_timer.stop()
 
     def _on_session_spectrum_changed(self) -> None:
         self._refresh_live_chart()
