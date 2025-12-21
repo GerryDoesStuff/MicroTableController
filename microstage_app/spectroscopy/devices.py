@@ -8,7 +8,6 @@ import importlib.util
 import logging
 import multiprocessing
 import queue
-import sys
 import threading
 import time
 import traceback
@@ -87,6 +86,9 @@ class SpectrometerManager(QtCore.QObject):
             if providers is not None
             else [OceanOpticsSpectrometerProvider(), MockSpectrometerProvider()]
         )
+        for provider in self._providers:
+            if hasattr(provider, "set_manager"):
+                provider.set_manager(self)
         self._devices: List[SpectrometerDescriptor] = []
         self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
         self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
@@ -201,7 +203,10 @@ class SpectrometerManager(QtCore.QObject):
             logger.info("Starting spectrometer enumeration for %s", provider_name)
             start_time = time.perf_counter()
             try:
-                provider_devices = provider.list_devices()
+                if isinstance(provider, OceanOpticsSpectrometerProvider):
+                    provider_devices = self._request_oceanoptics_enumeration(provider)
+                else:
+                    provider_devices = provider.list_devices()
                 if getattr(provider, "timed_out", False):
                     timeouts.append(provider_name)
                     provider_devices = self._provider_devices.get(provider, [])
@@ -617,6 +622,64 @@ class SpectrometerManager(QtCore.QObject):
             self._locks[descriptor] = lock
         return lock
 
+    def _enumerate_oceanoptics_via_subprocess(
+        self,
+        timeout_s: float,
+    ) -> tuple[List[SpectrometerDescriptor], bool]:
+        ctx = multiprocessing.get_context("spawn")
+        result_queue: multiprocessing.Queue = ctx.Queue(maxsize=1)
+        process = ctx.Process(
+            target=_ocean_optics_enumerate_worker,
+            args=(result_queue,),
+            name="OceanOpticsEnumerate",
+            daemon=True,
+        )
+        process.start()
+        process.join(timeout_s)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            logger.warning(
+                "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
+                timeout_s,
+            )
+            return [], True
+        try:
+            status, payload = result_queue.get_nowait()
+        except queue.Empty:
+            return [], False
+        if status == "error":
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
+            return [], False
+        return list(payload), False
+
+    def _request_oceanoptics_enumeration(
+        self,
+        provider: "OceanOpticsSpectrometerProvider",
+    ) -> List[SpectrometerDescriptor]:
+        result: dict[str, object] = {"devices": [], "timed_out": False}
+        timeout_s = provider.timeout_s
+        if QtCore.QThread.currentThread() is self.thread():
+            devices, timed_out = self._enumerate_oceanoptics_via_subprocess(timeout_s)
+            result["devices"] = devices
+            result["timed_out"] = timed_out
+        else:
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_enumerate_oceanoptics_on_main",
+                QtCore.Qt.BlockingQueuedConnection,
+                QtCore.Q_ARG(object, result),
+                QtCore.Q_ARG(float, timeout_s),
+            )
+        provider.set_timed_out(bool(result["timed_out"]))
+        return list(result["devices"])
+
+    @QtCore.Slot(object, float)
+    def _enumerate_oceanoptics_on_main(self, result: dict, timeout_s: float) -> None:
+        devices, timed_out = self._enumerate_oceanoptics_via_subprocess(timeout_s)
+        result["devices"] = devices
+        result["timed_out"] = timed_out
+
 
 class OceanOpticsSpectrometer:
     def __init__(self, descriptor: SpectrometerDescriptor):
@@ -804,46 +867,26 @@ class OceanOpticsSpectrometerProvider:
     def __init__(self, *, timeout_s: float = 5.0) -> None:
         self._timeout_s = float(timeout_s)
         self._timed_out = False
+        self._manager: Optional[SpectrometerManager] = None
+
+    def set_manager(self, manager: SpectrometerManager) -> None:
+        self._manager = manager
+
+    @property
+    def timeout_s(self) -> float:
+        return self._timeout_s
 
     @property
     def timed_out(self) -> bool:
         return self._timed_out
 
+    def set_timed_out(self, value: bool) -> None:
+        self._timed_out = bool(value)
+
     def list_devices(self) -> List[SpectrometerDescriptor]:
         self._timed_out = False
-        is_main_thread = threading.current_thread() is threading.main_thread()
-        is_windows = sys.platform == "win32"
-        if not is_main_thread:
-            app = QtCore.QCoreApplication.instance() if is_windows else None
-            if app is not None:
-                class _EnumHelper(QtCore.QObject):
-                    def __init__(self) -> None:
-                        super().__init__()
-                        self.devices: List[SpectrometerDescriptor] = []
-                        self.error: Optional[BaseException] = None
-
-                    @QtCore.Slot()
-                    def run(self) -> None:
-                        try:
-                            self.devices = list(OceanOpticsSpectrometer.enumerate())
-                        except BaseException as exc:  # pragma: no cover - defensive
-                            self.error = exc
-
-                helper = _EnumHelper()
-                helper.moveToThread(app.thread())
-                QtCore.QMetaObject.invokeMethod(
-                    helper,
-                    "run",
-                    QtCore.Qt.BlockingQueuedConnection,
-                )
-                if helper.error is not None:
-                    exc = helper.error
-                    logger.warning(
-                        "Failed to enumerate OceanOptics spectrometers: %s",
-                        f"{type(exc).__name__}: {exc}",
-                    )
-                    return []
-                return list(helper.devices or [])
+        manager = self._manager
+        if manager is None:
             try:
                 return list(OceanOpticsSpectrometer.enumerate())
             except BaseException as exc:  # pragma: no cover - defensive
@@ -852,33 +895,7 @@ class OceanOpticsSpectrometerProvider:
                     f"{type(exc).__name__}: {exc}",
                 )
                 return []
-        ctx = multiprocessing.get_context("spawn")
-        result_queue: multiprocessing.Queue = ctx.Queue(maxsize=1)
-        process = ctx.Process(
-            target=_ocean_optics_enumerate_worker,
-            args=(result_queue,),
-            name="OceanOpticsEnumerate",
-            daemon=True,
-        )
-        process.start()
-        process.join(self._timeout_s)
-        if process.is_alive():
-            self._timed_out = True
-            process.terminate()
-            process.join()
-            logger.warning(
-                "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
-                self._timeout_s,
-            )
-            return []
-        try:
-            status, payload = result_queue.get_nowait()
-        except queue.Empty:
-            return []
-        if status == "error":
-            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
-            return []
-        return list(payload)
+        return manager._request_oceanoptics_enumeration(self)
 
     def connect(self, descriptor: SpectrometerDescriptor) -> OceanOpticsSpectrometer:
         return OceanOpticsSpectrometer(descriptor)
