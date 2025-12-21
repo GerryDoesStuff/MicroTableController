@@ -738,7 +738,7 @@ def _ocean_optics_enumerate_worker(
     except BaseException as exc:  # pragma: no cover - defensive
         result_queue.put(("error", f"{type(exc).__name__}: {exc}"))
         return
-        result_queue.put(("ok", devices))
+    result_queue.put(("ok", devices))
 
 
 class OceanOpticsSpectrometerProvider:
