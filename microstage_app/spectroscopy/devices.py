@@ -68,6 +68,23 @@ class _SpectrometerProvider(Protocol):
         ...
 
 
+class _EnumHelper(QtCore.QObject):
+    result = None
+    error = None
+
+    def __init__(self, manager: "SpectrometerManager", timeout_s: float):
+        super().__init__()
+        self._manager = manager
+        self._timeout_s = timeout_s
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            self.result = self._manager._enumerate_oceanoptics_via_subprocess(self._timeout_s)
+        except BaseException as exc:  # pragma: no cover - defensive
+            self.error = exc
+
+
 class SpectrometerManager(QtCore.QObject):
     devices_changed = QtCore.Signal(list)
     device_connected = QtCore.Signal(object, object)
@@ -664,21 +681,22 @@ class SpectrometerManager(QtCore.QObject):
             result["devices"] = devices
             result["timed_out"] = timed_out
         else:
+            helper = _EnumHelper(self, timeout_s)
+            helper.moveToThread(self.thread())
             QtCore.QMetaObject.invokeMethod(
-                self,
-                "_enumerate_oceanoptics_on_main",
+                helper,
+                "run",
                 QtCore.Qt.BlockingQueuedConnection,
-                QtCore.Q_ARG(object, result),
-                QtCore.Q_ARG(float, timeout_s),
             )
+            if helper.error is not None:
+                logger.warning("Failed to enumerate OceanOptics spectrometers: %s", helper.error)
+            else:
+                devices, timed_out = helper.result or ([], False)
+                result["devices"] = devices
+                result["timed_out"] = timed_out
+            helper.deleteLater()
         provider.set_timed_out(bool(result["timed_out"]))
         return list(result["devices"])
-
-    @QtCore.Slot(object, float)
-    def _enumerate_oceanoptics_on_main(self, result: dict, timeout_s: float) -> None:
-        devices, timed_out = self._enumerate_oceanoptics_via_subprocess(timeout_s)
-        result["devices"] = devices
-        result["timed_out"] = timed_out
 
 
 class OceanOpticsSpectrometer:
