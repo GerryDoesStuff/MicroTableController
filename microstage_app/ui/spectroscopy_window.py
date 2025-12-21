@@ -2050,6 +2050,7 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.current_mode = mode
         self._update_mode_label()
         self.mode_params = dict(wizard.mode_params)
+        self._apply_wizard_acquisition_settings(wizard.mode_params)
         self._apply_wavelength_range_from_params()
         self.profiles.set("spectroscopy.last_mode", mode)
         self.profiles.set("spectroscopy.last_params", dict(self.mode_params))
@@ -2058,6 +2059,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self._update_session_context()
         self._update_counts_controls_state()
         self._reset_y_axis_range()
+
+    def _apply_wizard_acquisition_settings(self, params: Dict[str, object]) -> None:
+        if "integration" in params:
+            self.integration_spin.setValue(float(params["integration"]))
+        if "averages" in params:
+            self.averages_spin.setValue(int(params["averages"]))
+        if "smoothing" in params:
+            self.smoothing_spin.setValue(int(params["smoothing"]))
 
     def _on_mode_wizard_rejected(self, mode: str, wizard: SpectroscopyModeWizard) -> None:
         if wizard is not self._mode_wizard:
