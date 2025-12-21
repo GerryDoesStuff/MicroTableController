@@ -158,12 +158,21 @@ class SpectrometerManager(QtCore.QObject):
         return list(self._devices)
 
     def _enumerate_devices(self) -> List[SpectrometerDescriptor]:
+        logger.info(
+            "[thread=%s] Enumerating spectrometer devices",
+            threading.get_ident(),
+        )
         devices: List[SpectrometerDescriptor] = []
         for provider in self._providers:
             try:
                 devices.extend(provider.list_devices())
             except BaseException as exc:  # pragma: no cover - defensive
                 logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
+        logger.info(
+            "[thread=%s] Enumerated %d spectrometer device(s)",
+            threading.get_ident(),
+            len(devices),
+        )
         return devices
 
     def _reset_poll_state(self, *, stop_thread: bool = False) -> None:
@@ -198,18 +207,18 @@ class SpectrometerManager(QtCore.QObject):
             self._poll_worker = worker
             worker.finished.connect(self._on_polled_devices)
         except BaseException:
-            logger.error("Unhandled error starting spectrometer poll:\n%s", traceback.format_exc())
+            logger.warning("Unhandled error starting spectrometer poll:\n%s", traceback.format_exc())
             self._reset_poll_state(stop_thread=True)
 
     @QtCore.Slot(object, object)
     def _on_polled_devices(self, devices, err) -> None:
         try:
             if err:
-                logger.error("Spectrometer poll failed: %s\n%s", err, _format_exception(err))
+                logger.warning("Spectrometer poll failed: %s\n%s", err, _format_exception(err))
                 return
             self._update_devices(devices)
         except BaseException:
-            logger.error("Unhandled error handling polled devices:\n%s", traceback.format_exc())
+            logger.warning("Unhandled error handling polled devices:\n%s", traceback.format_exc())
         finally:
             self._reset_poll_state()
 
@@ -256,7 +265,7 @@ class SpectrometerManager(QtCore.QObject):
                 lambda devices, err, token=token: self._on_refresh_finished(token, devices, err)
             )
         except BaseException:
-            logger.error("Unhandled error starting spectrometer refresh:\n%s", traceback.format_exc())
+            logger.warning("Unhandled error starting spectrometer refresh:\n%s", traceback.format_exc())
             self._finalize_refresh(False, "Failed to start refresh")
             return True
         if timeout_ms > 0:
@@ -295,14 +304,14 @@ class SpectrometerManager(QtCore.QObject):
         if self._refresh_timeout_timer is not None:
             self._refresh_timeout_timer.stop()
         if err:
-            logger.error("Spectrometer refresh failed: %s\n%s", err, _format_exception(err))
+            logger.warning("Spectrometer refresh failed: %s\n%s", err, _format_exception(err))
             message = str(err) or "Device refresh failed"
             self._finalize_refresh(False, message)
             return
         try:
             self._update_devices(devices)
         except BaseException:
-            logger.error("Unhandled error applying refreshed devices:\n%s", traceback.format_exc())
+            logger.warning("Unhandled error applying refreshed devices:\n%s", traceback.format_exc())
             self._finalize_refresh(False, "Device refresh failed")
             return
         self._finalize_refresh(True, "Device refresh complete")
