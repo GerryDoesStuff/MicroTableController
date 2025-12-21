@@ -2128,20 +2128,21 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 dev.set_integration_time_ms(integration)
                 dev.set_averages(averages)
                 spectrum = dev.capture()
-            ts = time.time()
-            self._record_capture(
-                kind,
-                spectrum,
-                {
-                    "integration_ms": float(integration),
-                    "averages": int(averages),
-                    "smoothing": int(self.smoothing_spin.value()),
-                    "device_id": self._current_device_id(),
-                    "mode": self.current_mode,
-                    "timestamp": ts,
-                },
-                raw_data=spectrum,
-            )
+            if kind != "preview":
+                ts = time.time()
+                self._record_capture(
+                    kind,
+                    spectrum,
+                    {
+                        "integration_ms": float(integration),
+                        "averages": int(averages),
+                        "smoothing": int(self.smoothing_spin.value()),
+                        "device_id": self._current_device_id(),
+                        "mode": self.current_mode,
+                        "timestamp": ts,
+                    },
+                    raw_data=spectrum,
+                )
             return spectrum
         except Exception as exc:
             self.status_message.setText(f"Capture failed: {exc}")
