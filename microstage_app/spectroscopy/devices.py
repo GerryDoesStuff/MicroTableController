@@ -89,6 +89,7 @@ class SpectrometerManager(QtCore.QObject):
         self._devices: List[SpectrometerDescriptor] = []
         self._active: dict[SpectrometerDescriptor, SpectrometerDevice] = {}
         self._locks: dict[SpectrometerDescriptor, QtCore.QMutex] = {}
+        self._device_providers: dict[SpectrometerDescriptor, _SpectrometerProvider] = {}
         self._last_active: Optional[SpectrometerDescriptor] = None
         self._poll_thread: Optional[QtCore.QThread] = None
         self._poll_worker: Optional[QtCore.QObject] = None
@@ -175,6 +176,7 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_in_flight = False
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
+        self._device_providers.clear()
 
     close = shutdown
 
@@ -188,6 +190,7 @@ class SpectrometerManager(QtCore.QObject):
             threading.get_ident(),
         )
         devices: List[SpectrometerDescriptor] = []
+        device_providers: dict[SpectrometerDescriptor, _SpectrometerProvider] = {}
         timeouts: list[str] = []
         slow_threshold_s = 2.0
         for provider in self._providers:
@@ -195,7 +198,10 @@ class SpectrometerManager(QtCore.QObject):
             logger.info("Starting spectrometer enumeration for %s", provider_name)
             start_time = time.perf_counter()
             try:
-                devices.extend(provider.list_devices())
+                provider_devices = provider.list_devices()
+                devices.extend(provider_devices)
+                for descriptor in provider_devices:
+                    device_providers[descriptor] = provider
                 if getattr(provider, "timed_out", False):
                     timeouts.append(provider_name)
             except BaseException as exc:  # pragma: no cover - defensive
@@ -228,6 +234,7 @@ class SpectrometerManager(QtCore.QObject):
             threading.get_ident(),
             len(devices),
         )
+        self._device_providers = device_providers
         if capture_timeouts:
             self._last_enumeration_timeouts = timeouts
         return devices
@@ -485,65 +492,59 @@ class SpectrometerManager(QtCore.QObject):
             self._pause_monitoring_for_active_use()
             self.device_connected.emit(descriptor, device)
             return device
-        for provider in self._providers:
-            try:
-                candidates = provider.list_devices()
-            except BaseException as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
-                continue
-            for candidate in candidates:
-                if candidate == descriptor:
-                    try:
-                        logger.info(
-                            "[thread=%s] Provider %s connecting spectrometer: %s (%s)",
-                            threading.get_ident(),
-                            type(provider).__name__,
-                            descriptor.label(),
-                            descriptor.path,
-                        )
-                        device = provider.connect(descriptor)
-                        logger.debug(
-                            "[thread=%s] Provider %s finished connect attempt for %s (%s)",
-                            threading.get_ident(),
-                            type(provider).__name__,
-                            descriptor.label(),
-                            descriptor.path,
-                        )
-                    except BaseException as exc:
-                        logger.warning(
-                            "Failed to create spectrometer %s: %s\n%s",
-                            descriptor.label(),
-                            exc,
-                            traceback.format_exc(),
-                        )
-                        self.connect_failed.emit(descriptor, str(exc))
-                        device = None
-                    if device is None:
-                        self.connect_failed.emit(descriptor, "Device unavailable after provider connect")
-                        self.device_connected.emit(descriptor, None)
-                        return None
-                    try:
-                        device.connect()
-                    except BaseException as exc:
-                        logger.warning(
-                            "Failed to connect spectrometer %s: %s\n%s",
-                            descriptor.label(),
-                            exc,
-                            traceback.format_exc(),
-                        )
-                        self.connect_failed.emit(descriptor, str(exc))
-                        self.device_connected.emit(descriptor, None)
-                        return None
-                    self._active[descriptor] = device
-                    self._locks.setdefault(descriptor, QtCore.QMutex())
-                    self._last_active = descriptor
-                    self._pause_monitoring_for_active_use()
-                    self.device_connected.emit(descriptor, device)
-                    return device
-        logger.warning("Device not found: %s", descriptor.label())
-        self.connect_failed.emit(descriptor, "Device not found during connect")
-        self.device_connected.emit(descriptor, None)
-        return None
+        provider = self._device_providers.get(descriptor)
+        if provider is None:
+            logger.warning("Device not found in provider cache: %s", descriptor.label())
+            self.connect_failed.emit(descriptor, "Device not found during connect")
+            self.device_connected.emit(descriptor, None)
+            return None
+        try:
+            logger.info(
+                "[thread=%s] Provider %s connecting spectrometer: %s (%s)",
+                threading.get_ident(),
+                type(provider).__name__,
+                descriptor.label(),
+                descriptor.path,
+            )
+            device = provider.connect(descriptor)
+            logger.debug(
+                "[thread=%s] Provider %s finished connect attempt for %s (%s)",
+                threading.get_ident(),
+                type(provider).__name__,
+                descriptor.label(),
+                descriptor.path,
+            )
+        except BaseException as exc:
+            logger.warning(
+                "Failed to create spectrometer %s: %s\n%s",
+                descriptor.label(),
+                exc,
+                traceback.format_exc(),
+            )
+            self.connect_failed.emit(descriptor, str(exc))
+            device = None
+        if device is None:
+            self.connect_failed.emit(descriptor, "Device unavailable after provider connect")
+            self.device_connected.emit(descriptor, None)
+            return None
+        try:
+            device.connect()
+        except BaseException as exc:
+            logger.warning(
+                "Failed to connect spectrometer %s: %s\n%s",
+                descriptor.label(),
+                exc,
+                traceback.format_exc(),
+            )
+            self.connect_failed.emit(descriptor, str(exc))
+            self.device_connected.emit(descriptor, None)
+            return None
+        self._active[descriptor] = device
+        self._locks.setdefault(descriptor, QtCore.QMutex())
+        self._last_active = descriptor
+        self._pause_monitoring_for_active_use()
+        self.device_connected.emit(descriptor, device)
+        return device
 
     def disconnect(self, descriptor: Optional[SpectrometerDescriptor] = None) -> None:
         targets = [descriptor] if descriptor else list(self._active.keys())
