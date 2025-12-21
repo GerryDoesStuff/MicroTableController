@@ -73,6 +73,7 @@ def _attach_series(
 class AcquisitionSetupPage(BaseWizardPage):
     def __init__(self, wizard: 'SpectroscopyModeWizard') -> None:
         super().__init__(wizard)
+        self._initializing = True
         self.setTitle("Acquisition and wavelength setup")
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -137,12 +138,15 @@ class AcquisitionSetupPage(BaseWizardPage):
 
         wizard.session.spectra_changed.connect(self._refresh_chart)
         wizard.session.wavelengths_changed.connect(lambda _: self._refresh_chart())
+        self._initializing = False
         self._sync_params()
 
     def initializePage(self) -> None:  # type: ignore[override]
         self._refresh_chart()
 
     def _on_param_changed(self) -> None:
+        if self._initializing:
+            return
         self._sync_params()
         self.wizard_ref.invalidate_captures()
         self.mark_dirty()
