@@ -12,7 +12,7 @@ import cv2
 from ..devices.stage_marlin import StageMarlin, find_marlin_port, list_marlin_ports
 from ..devices.camera_toupcam import create_camera, list_cameras
 from ..devices.shelly_dimmer import ShellyDimmer, ShellyState
-from ..spectroscopy.devices import SpectrometerDescriptor, SpectrometerManager
+from ..spectroscopy.devices import SpectrometerManager
 from ..spectroscopy.io import default_data_directory
 
 from ..control.autofocus import FocusMetric, AutoFocus
@@ -722,11 +722,9 @@ class MainWindow(QtWidgets.QMainWindow):
         devices_menu = self.menuBar().addMenu("Devices")
         self.act_show_cameras = devices_menu.addAction("Cameras")
         self.act_show_stages = devices_menu.addAction("Stages")
+        self.act_show_spectroscopy = devices_menu.addAction("Vis Spectroscopy…")
         self.act_show_cameras.triggered.connect(self._show_camera_dialog)
         self.act_show_stages.triggered.connect(self._show_stage_dialog)
-
-        modules_menu = self.menuBar().addMenu("Modules")
-        self.act_show_spectroscopy = modules_menu.addAction("Vis Spectroscopy…")
         self.act_show_spectroscopy.triggered.connect(self._open_spectroscopy)
 
         view_menu = self.menuBar().addMenu("View")
@@ -1232,27 +1230,6 @@ class MainWindow(QtWidgets.QMainWindow):
         s.addWidget(self.btn_run_example_script)
         s.addStretch(1)
         rightw.addTab(scripts, "Scripts")
-
-        # ---- Devices tab (spectrometers)
-        devices_tab = QtWidgets.QWidget()
-        dv = QtWidgets.QVBoxLayout(devices_tab)
-        spec_box = QtWidgets.QGroupBox("Spectrometers")
-        spec_layout = QtWidgets.QVBoxLayout(spec_box)
-        self.spectrometer_list = QtWidgets.QListWidget()
-        self.spectrometer_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        spec_layout.addWidget(self.spectrometer_list)
-        btn_row = QtWidgets.QHBoxLayout()
-        self.btn_spec_refresh = QtWidgets.QPushButton("Refresh")
-        self.btn_spec_connect = QtWidgets.QPushButton("Connect")
-        self.btn_spec_disconnect = QtWidgets.QPushButton("Disconnect")
-        self.btn_spec_disconnect.setEnabled(False)
-        btn_row.addWidget(self.btn_spec_refresh)
-        btn_row.addWidget(self.btn_spec_connect)
-        btn_row.addWidget(self.btn_spec_disconnect)
-        spec_layout.addLayout(btn_row)
-        dv.addWidget(spec_box)
-        dv.addStretch(1)
-        rightw.addTab(devices_tab, "Devices")
 
         # ---- System monitor tab
         self.system_tab = SystemMonitorTab()
@@ -2027,14 +2004,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # scripts
         self.btn_run_example_script.clicked.connect(self._run_example_script)
 
-        # spectrometers
-        self.btn_spec_refresh.clicked.connect(self._refresh_spectrometers)
-        self.btn_spec_connect.clicked.connect(self._connect_spectrometer_from_list)
-        self.btn_spec_disconnect.clicked.connect(self._disconnect_spectrometer)
-        self.spectrometer_list.itemDoubleClicked.connect(
-            lambda *_: self._connect_spectrometer_from_list()
-        )
-
     def _init_persistent_fields(self):
         def bind(spin, key):
             spin.setValue(self.profiles.get(key, spin.value()))
@@ -2473,14 +2442,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.spectrometer_manager is None:
             self.spectrometer_manager = SpectrometerManager(auto_start=False)
         if not self._spectrometer_signals_connected:
-            self.spectrometer_manager.devices_changed.connect(self._on_spectrometers_changed)
             self.spectrometer_manager.device_connected.connect(self._on_spectrometer_connected)
             self._spectrometer_signals_connected = True
         return self.spectrometer_manager
 
     def _open_spectroscopy(self):
         manager = self._ensure_spectrometer_manager()
-        self._refresh_spectrometers(start_monitoring=False)
         if self.spectroscopy_window is None:
             self.spectroscopy_window = SpectroscopyWindow(
                 manager, self.profiles, self
@@ -2492,99 +2459,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spectroscopy_window.raise_()
         self.spectroscopy_window.activateWindow()
 
-    def _refresh_spectrometers(self, *, start_monitoring: bool = False):
-        manager = self._ensure_spectrometer_manager()
-        devices = manager.refresh(start_monitoring=start_monitoring)
-        self._populate_spectrometer_list(devices)
-
-    def _on_spectrometers_changed(self, devices):
-        self._populate_spectrometer_list(devices)
-
-    def _populate_spectrometer_list(self, devices):
-        if self.spectrometer_manager is None:
-            self.spectrometer_list.clear()
-            self._update_spectrometer_buttons()
-            return
-        selection = self._current_spectrometer_descriptor()
-        active_desc = self.spectrometer_manager.active_descriptor
-        if selection is None and active_desc:
-            selection = active_desc
-        self.spectrometer_list.blockSignals(True)
-        self.spectrometer_list.clear()
-        for desc in devices:
-            label = f"{desc.model} ({desc.serial_number})\n{desc.path}"
-            item = QtWidgets.QListWidgetItem(label)
-            item.setData(QtCore.Qt.UserRole, desc)
-            if selection and selection == desc:
-                item.setSelected(True)
-            self.spectrometer_list.addItem(item)
-        self.spectrometer_list.blockSignals(False)
-        if selection:
-            self._select_spectrometer_descriptor(selection)
-        self._update_spectrometer_buttons()
-
-    def _current_spectrometer_descriptor(self):
-        item = self.spectrometer_list.currentItem()
-        if item:
-            data = item.data(QtCore.Qt.UserRole)
-            if isinstance(data, SpectrometerDescriptor):
-                return data
-        return None
-
-    def _select_spectrometer_descriptor(self, desc: SpectrometerDescriptor):
-        for i in range(self.spectrometer_list.count()):
-            item = self.spectrometer_list.item(i)
-            if item and item.data(QtCore.Qt.UserRole) == desc:
-                item.setSelected(True)
-                self.spectrometer_list.setCurrentItem(item)
-                break
-
-    def _connect_spectrometer_from_list(self):
-        manager = self._ensure_spectrometer_manager()
-        desc = self._current_spectrometer_descriptor()
-        if not desc:
-            return
-        try:
-            dev = manager.connect(desc)
-            if dev is None:
-                self.spectrometer_status.setText(
-                    "Spectrometer: Unable to connect (missing drivers or device?)"
-                )
-                return
-            wavelengths = dev.get_wavelengths()
-            if self.spectroscopy_window:
-                self.spectroscopy_window.session.set_wavelengths(wavelengths)
-        except Exception as exc:
-            log(f"Spectrometer connect failed: {exc}")
-        self._update_spectrometer_buttons()
-
-    def _disconnect_spectrometer(self):
-        desc = self._current_spectrometer_descriptor()
-        if self.spectrometer_manager:
-            self.spectrometer_manager.disconnect(desc)
-        self._update_spectrometer_buttons()
-
     def _on_spectrometer_connected(self, desc, device):
         if desc:
             text = f"Spectrometer: {desc.label()}"
         else:
             text = "Spectrometer: —"
         self.spectrometer_status.setText(text)
-        if desc:
-            self._select_spectrometer_descriptor(desc)
-        self._update_spectrometer_buttons()
-
-    def _update_spectrometer_buttons(self):
-        manager = self.spectrometer_manager
-        if manager is None:
-            self.btn_spec_connect.setEnabled(False)
-            self.btn_spec_disconnect.setEnabled(False)
-            return
-        desc = self._current_spectrometer_descriptor()
-        active = manager.get_active(desc) if desc else None
-        has_selection = bool(desc)
-        self.btn_spec_connect.setEnabled(has_selection and active is None)
-        self.btn_spec_disconnect.setEnabled(active is not None)
 
     # --------------------------- CONNECT/DISCONNECT ---------------------------
 
