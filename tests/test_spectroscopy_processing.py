@@ -65,6 +65,17 @@ def test_processing_edge_cases(wavelengths):
     assert np.allclose(corrected, raw * 0.5)
 
 
+def test_absorbance_with_dark_subtraction():
+    sample = np.array([10.0, 20.0, 30.0])
+    reference = np.array([100.0, 200.0, 300.0])
+    dark = np.array([1.0, 2.0, 3.0])
+
+    expected = np.log10((reference - dark) / (sample - dark))
+    absorbance = compute_absorbance(sample, reference, dark=dark)
+
+    assert np.allclose(absorbance, expected)
+
+
 def test_beer_lambert_fit_consistency(wavelengths):
     ref = np.ones_like(wavelengths) * 100.0
     concentrations = np.array([0.1, 0.5, 1.0])

@@ -39,8 +39,18 @@ def normalize_reference(signal: np.ndarray, reference: np.ndarray, epsilon: floa
     return sig / safe_ref
 
 
-def compute_absorbance(sample: np.ndarray, reference: np.ndarray, epsilon: float = 1e-9) -> np.ndarray:
-    ratio = normalize_reference(reference, sample, epsilon=epsilon)
+def compute_absorbance(
+    sample: np.ndarray,
+    reference: np.ndarray,
+    dark: np.ndarray | None = None,
+    epsilon: float = 1e-9,
+) -> np.ndarray:
+    sample_arr = np.asarray(sample, dtype=float)
+    reference_arr = np.asarray(reference, dtype=float)
+    if dark is not None:
+        sample_arr = subtract_dark(sample_arr, dark)
+        reference_arr = subtract_dark(reference_arr, dark)
+    ratio = normalize_reference(reference_arr, sample_arr, epsilon=epsilon)
     return np.log10(np.clip(ratio, epsilon, None))
 
 

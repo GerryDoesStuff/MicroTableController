@@ -906,7 +906,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         smoothed = smooth_boxcar(raw, window=int(params.get("smoothing", job.smoothing)))
         dark_applied = False
         reference_applied = False
-        if job.subtract_dark:
+        use_dark_for_absorbance = (
+            self.current_mode == "Absorbance"
+            and self.session.reference_valid
+            and self.session.reference_spectrum is not None
+            and self.session.dark_valid
+            and self.session.dark_spectrum is not None
+        )
+        if job.subtract_dark and not use_dark_for_absorbance:
             if self.session.dark_valid and self.session.dark_spectrum is not None:
                 try:
                     smoothed = subtract_dark(smoothed, self.session.dark_spectrum)
@@ -925,7 +932,14 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         processed = smoothed
         if self.current_mode == "Absorbance":
             if self.session.reference_valid and self.session.reference_spectrum is not None:
-                processed = compute_absorbance(smoothed, self.session.reference_spectrum)
+                dark = (
+                    self.session.dark_spectrum
+                    if self.session.dark_valid and self.session.dark_spectrum is not None
+                    else None
+                )
+                processed = compute_absorbance(smoothed, self.session.reference_spectrum, dark=dark)
+                if dark is not None:
+                    dark_applied = True
                 reference_applied = True
             else:
                 self.status_message.setText("Reference required for absorbance; showing counts")
