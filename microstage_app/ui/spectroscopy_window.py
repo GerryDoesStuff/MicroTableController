@@ -2024,9 +2024,26 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         img.save(path)
 
     # ------------------------------------------------------------------
+    def _reset_to_counts_mode(self) -> None:
+        self.current_mode = ""
+        self.mode_params = {}
+        self.session.set_mode_params()
+        self._default_wavelength_range = self.DEFAULT_WAVELENGTH_RANGE
+        self._axis_ranges["x"] = (
+            float(self._default_wavelength_range[0]),
+            float(self._default_wavelength_range[1]),
+        )
+        if self._axis_x:
+            self._axis_x.setRange(*self._axis_ranges["x"])
+        self._update_mode_label()
+        self._update_session_context()
+        self._reset_y_axis_range()
+
     def _open_modes_dialog(self) -> None:
         dlg = ModeSelectorDialog(self.MODES, parent=self)
         if dlg.exec() == QtWidgets.QDialog.Accepted and dlg.selected_mode:
+            if not self._is_counts_mode():
+                self._reset_to_counts_mode()
             self._launch_wizard(dlg.selected_mode)
 
     def _launch_wizard(self, mode: str) -> None:
