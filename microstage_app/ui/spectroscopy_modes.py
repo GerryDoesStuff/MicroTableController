@@ -838,218 +838,36 @@ class ResultsPage(BaseWizardPage):
         super().__init__(wizard)
         self.setTitle("Results and overlays")
         layout = QtWidgets.QVBoxLayout(self)
-        (
-            self.chart,
-            self.chart_view,
-            self.x_axis,
-            self.y_axis,
-        ) = create_spectrum_chart(
-            x_title="Wavelength (nm)",
-            y_title="Intensity",
-            legend_visible=True,
-        )
-        self.secondary_axis: Optional[QtCharts.QCategoryAxis] = None
-        self.history_list = QtWidgets.QListWidget()
-        self.history_list.itemChanged.connect(self._toggle_series)
-        self.metrics = QtWidgets.QLabel("No metrics computed yet.")
-        self.capture_btn = QtWidgets.QPushButton("Capture sample for result")
-        self.capture_btn.clicked.connect(self._capture_sample)
-        layout.addWidget(self.chart_view, 2)
-        layout.addWidget(QtWidgets.QLabel("History (toggle to overlay):"))
-        layout.addWidget(self.history_list)
-        layout.addWidget(self.metrics)
-        layout.addWidget(self.capture_btn)
+        self.info_label = QtWidgets.QLabel("")
+        self.info_label.setWordWrap(True)
+        self.status_label = QtWidgets.QLabel("")
+        layout.addWidget(self.info_label)
+        layout.addWidget(self.status_label)
         layout.addStretch(1)
-        self.series_for_item: Dict[QtWidgets.QListWidgetItem, QtCharts.QLineSeries] = {}
+        self.session.validity_changed.connect(self._refresh_status)
 
     def initializePage(self) -> None:  # type: ignore[override]
-        self._recompute()
-
-    def _capture_sample(self) -> None:
-        params = self.wizard_ref.mode_params
-        spectrum = self.wizard_ref.capture_callback(
-            "raw",
-            float(params.get("integration", 10.0)),
-            int(params.get("averages", 1)),
+        mode_label = self.wizard_ref.mode.lower()
+        self.info_label.setText(
+            "Live %s is calculated continuously on the main Vis Spectroscopy graph. "
+            "Finish the wizard to apply the acquisition and wavelength settings." % mode_label
         )
-        if spectrum is not None:
-            self.session.set_raw(spectrum)
-            self.wizard_ref.state["raw_captured"] = True
-            self._recompute()
-            self.wizard_ref._update_finish_state()
-            self.completeChanged.emit()
+        self._refresh_status()
 
-    def _toggle_series(self, item: QtWidgets.QListWidgetItem) -> None:
-        series = self.series_for_item.get(item)
-        if series:
-            series.setVisible(item.checkState() == QtCore.Qt.Checked)
-
-    def _recompute(self) -> None:
-        self.chart.removeAllSeries()
-        self.series_for_item.clear()
-        self.history_list.blockSignals(True)
-        self.history_list.clear()
-        self.history_list.blockSignals(False)
-        if self.session.wavelengths is None:
-            self.metrics.setText("Missing wavelength calibration.")
-            return
-        result = self._compute_mode_result()
-        if result is None:
-            self.metrics.setText("No result computed; capture sample, dark, and reference first.")
-            return
-        if self.wizard_ref.mode == "Raman":
-            if self.secondary_axis is None:
-                self.secondary_axis = QtCharts.QCategoryAxis()
-                self.chart.addAxis(self.secondary_axis, QtCore.Qt.AlignTop)
+    def _refresh_status(self) -> None:
+        parts = []
+        if self.session.dark_valid:
+            parts.append("Dark ✓")
         else:
-            if self.secondary_axis:
-                self.chart.removeAxis(self.secondary_axis)
-            self.secondary_axis = None
-        if self.wizard_ref.mode == "Raman":
-            self.x_axis.setTitleText("Raman shift (cm⁻¹)")
-        else:
-            self.x_axis.setTitleText("Wavelength (nm)")
-        self.x_axis.setRange(float(np.min(result[0])), float(np.max(result[0])))
-        ymin, ymax = np.min(result[1]), np.max(result[1])
-        if ymin == ymax:
-            ymax += 1.0
-        if self.wizard_ref.mode == "Absorbance":
-            self.y_axis.setTitleText("Absorbance (AU)")
-        elif self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
-            self.y_axis.setTitleText("%" if self.wizard_ref.mode_params.get("as_percent", True) else "Ratio")
-        elif self.wizard_ref.mode == "Relative Irradiance":
-            self.y_axis.setTitleText("Irradiance")
-        elif self.wizard_ref.mode == "Raman":
-            self.y_axis.setTitleText("Intensity (a.u.)")
-        self.y_axis.setRange(float(ymin), float(ymax))
-        # current result
-        series = _series_from_data("Current", result[0], result[1], QtGui.QColor("deepskyblue"))
-        self.chart.addSeries(series)
-        series.attachAxis(self.x_axis)
-        series.attachAxis(self.y_axis)
-        if self.secondary_axis:
-            series.attachAxis(self.secondary_axis)
-            self._configure_raman_secondary_axis(result[0])
-        item = QtWidgets.QListWidgetItem("Current result")
-        item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-        item.setCheckState(QtCore.Qt.Checked)
-        self.history_list.addItem(item)
-        self.series_for_item[item] = series
-        self._add_overlay_series("Dark", self.session.dark_spectrum, QtGui.QColor("gray"))
-        self._add_overlay_series("Reference", self.session.reference_spectrum, QtGui.QColor("green"))
-        self._add_overlay_series("Raw", self.session.raw_spectrum, QtGui.QColor("orange"))
-        self.metrics.setText(self.wizard_ref.format_metrics(result))
-
-    def _add_overlay_series(self, name: str, data: Optional[np.ndarray], color: QtGui.QColor) -> None:
-        if data is None or self.session.wavelengths is None:
-            return
-        series = _series_from_data(name, self.session.wavelengths, data, color)
-        self.chart.addSeries(series)
-        series.attachAxis(self.x_axis)
-        series.attachAxis(self.y_axis)
-        item = QtWidgets.QListWidgetItem(name)
-        item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
-        item.setCheckState(QtCore.Qt.Unchecked)
-        self.history_list.addItem(item)
-        self.series_for_item[item] = series
-
-    def _configure_raman_secondary_axis(self, shift_axis: np.ndarray) -> None:
-        if not getattr(self, "secondary_axis", None) or self.session.wavelengths is None:
-            return
-        self.secondary_axis.clear()
-        excitation = float(self.wizard_ref.mode_params.get("excitation_nm", 532.0))
-        min_shift = float(np.nanmin(shift_axis))
-        max_shift = float(np.nanmax(shift_axis))
-        ticks = np.linspace(min_shift, max_shift, 5)
-        for tick in ticks:
-            denom = (1e7 / excitation) - tick
-            wl = 1e7 / denom if denom != 0 else float("nan")
-            self.secondary_axis.append(f"{wl:.0f} nm", float(tick))
-        self.secondary_axis.setRange(min_shift, max_shift)
-        self.secondary_axis.setTitleText("Wavelength (nm)")
-
-    def _compute_mode_result(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-        wl = self.session.wavelengths
-        raw = self.session.raw_spectrum
-        ref = self.session.reference_spectrum
-        dark = self.session.dark_spectrum
-        if wl is None or raw is None:
-            return None
-        params = self.wizard_ref.mode_params
-        smoothed = processing.smooth_boxcar(raw, window=int(params.get("smoothing", 1)))
-        if dark is not None:
-            try:
-                smoothed = processing.subtract_dark(smoothed, dark)
-            except Exception:
-                pass
-        baseline_opt = params.get("baseline", "none").lower()
-        if baseline_opt == "median":
-            smoothed = processing.apply_baseline(smoothed, processing.median_baseline)
-        elif baseline_opt.startswith("edge"):
-            smoothed = processing.apply_baseline(smoothed, lambda arr: processing.edge_baseline(arr))
-        if self.wizard_ref.mode == "Absorbance":
-            if ref is None:
-                return None
-            arr = processing.compute_absorbance(smoothed, ref)
-            metrics: Dict[str, float] = {"Max absorbance": float(np.nanmax(arr))}
-            roi_metrics = {}
-            for roi in self.session.rois:
-                mask = (wl >= roi.start_nm) & (wl <= roi.end_nm)
-                if np.any(mask):
-                    roi_metrics[f"{roi.label or 'ROI'} avg"] = float(np.nanmean(arr[mask]))
-            metrics.update(roi_metrics)
-            self.wizard_ref.last_metrics = metrics
-            return wl, arr
-        if self.wizard_ref.mode in {"Transmittance", "Reflectance"}:
-            if ref is None:
-                return None
-            arr = processing.normalize_reference(smoothed, ref)
-            if params.get("clamp_zero", True):
-                arr = np.clip(arr, 0.0, None)
-            if params.get("as_percent", True):
-                arr = arr * 100.0
-            self.wizard_ref.last_metrics = {
-                "Mean": float(np.nanmean(arr)),
-                "Peak": float(np.nanmax(arr)),
-                "Min": float(np.nanmin(arr)),
-            }
-            return wl, arr
+            parts.append("Dark ✕")
+        if self.wizard_ref.mode in {"Absorbance", "Transmittance", "Reflectance"}:
+            parts.append("Reference ✓" if self.session.reference_valid else "Reference ✕")
         if self.wizard_ref.mode == "Relative Irradiance":
-            curve = self.session.calibration.response_curve
-            arr = processing.compute_irradiance(
-                smoothed,
-                float(params.get("integration", 10.0)),
-                response_curve=curve if params.get("apply_response", True) else None,
-            )
-            centroid = float(np.average(wl, weights=arr)) if np.nansum(arr) > 0 else float("nan")
-            metrics = {"Total irradiance": float(np.trapz(arr, wl)), "Peak": float(np.nanmax(arr))}
-            if "centroid" in params.get("color_metrics", []):
-                metrics["Centroid nm"] = centroid
-            if "cie" in params.get("color_metrics", []):
-                metrics.update(processing.cie_approx_metrics(wl, arr))
-            self.wizard_ref.last_metrics = metrics
-            return wl, arr
-        if self.wizard_ref.mode == "Fluorescence":
-            area = float(np.trapz(smoothed, wl))
-            self.wizard_ref.last_metrics = {
-                "Integrated intensity": area,
-                "Peak": float(np.nanmax(smoothed)),
-            }
-            return wl, smoothed
-        if self.wizard_ref.mode == "Raman":
-            excitation = float(params.get("excitation_nm", 532.0))
-            shift = processing.raman_shift_cm(wl, excitation)
-            shift = shift - float(params.get("shift_offset", 0.0))
-            smoothed = processing.apply_mask_bands(wl, smoothed, params.get("filter_bands", []))
-            self.wizard_ref.last_metrics = {
-                "Max shift": float(np.nanmax(shift)),
-                "Peak intensity": float(np.nanmax(smoothed)),
-            }
-            return shift, smoothed
-        return wl, smoothed
+            parts.append("Calibration ✓" if self.session.calibration_valid else "Calibration ✕")
+        self.status_label.setText(" | ".join(parts))
 
     def isComplete(self) -> bool:  # type: ignore[override]
-        return bool(self.wizard_ref.state.get("raw_captured"))
+        return True
 
 
 class SpectroscopyModeWizard(QtWidgets.QWizard):
@@ -1088,7 +906,6 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.state: Dict[str, bool] = {
             "dark_captured": session.dark_spectrum is not None,
             "reference_captured": session.reference_spectrum is not None,
-            "raw_captured": session.raw_spectrum is not None,
             "calibration_valid": session.calibration_valid,
         }
         self.last_metrics: Dict[str, float] = {}
@@ -1153,14 +970,13 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
         self.session.set_mode_params(**self.mode_params)
 
     def invalidate_results(self) -> None:
-        self.state["raw_captured"] = False
         self.state["reference_captured"] = False
         self.state["dark_captured"] = False
         self.state["calibration_valid"] = self.session.calibration_valid
 
     def invalidate_captures(self) -> None:
-        self.state["raw_captured"] = False
         self.state["reference_captured"] = False
+        self.state["dark_captured"] = False
 
     def apply_preset_for_step(self, step: str) -> None:
         if self.apply_preset_cb and self.step_presets.get(step):
@@ -1177,7 +993,6 @@ class SpectroscopyModeWizard(QtWidgets.QWizard):
     def _update_finish_state(self) -> None:
         finish_enabled = all(
             (
-                self.state.get("raw_captured"),
                 (not self._requires_reference() or self.state.get("reference_captured")),
                 (not self._requires_dark() or self.state.get("dark_captured")),
                 (not self._requires_reference() or self.session.reference_valid),
