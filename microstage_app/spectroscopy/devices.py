@@ -8,6 +8,7 @@ import importlib.util
 import logging
 import multiprocessing
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -807,6 +808,18 @@ class OceanOpticsSpectrometerProvider:
 
     def list_devices(self) -> List[SpectrometerDescriptor]:
         self._timed_out = False
+        if (
+            sys.platform == "win32"
+            and threading.current_thread() is not threading.main_thread()
+        ):
+            try:
+                return list(OceanOpticsSpectrometer.enumerate())
+            except BaseException as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to enumerate OceanOptics spectrometers: %s",
+                    f"{type(exc).__name__}: {exc}",
+                )
+                return []
         ctx = multiprocessing.get_context("spawn")
         result_queue: multiprocessing.Queue = ctx.Queue(maxsize=1)
         process = ctx.Process(
