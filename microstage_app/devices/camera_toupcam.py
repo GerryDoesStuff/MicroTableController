@@ -152,6 +152,7 @@ class ToupcamCamera:
         self._last = None     # np.uint8 HxWx(3)
         self._lock = threading.Lock()
         self._stream_lock = threading.RLock()
+        self._streaming_event = threading.Event()
         self._first_logged = False
         self._cb_thread = None
 
@@ -398,12 +399,7 @@ class ToupcamCamera:
             try:
                 if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001):
                     return
-                if (
-                    not self._is_streaming
-                    or self._cam is None
-                    or self._buf_ptr is None
-                    or self._arr is None
-                ):
+                if not self._streaming_event.is_set():
                     return
                 with self._stream_lock:
                     if (
@@ -416,7 +412,16 @@ class ToupcamCamera:
 
                     self._event_count += 1
                     t0 = time.perf_counter()
-                    self._cam.PullImageV2(self._buf_ptr, self._bits, None)
+                    try:
+                        result = self._cam.PullImageV2(self._buf_ptr, self._bits, None)
+                    except Exception as e:
+                        log(f"Camera: PullImageV2 exception: {e}")
+                        self._disable_streaming("PullImageV2 exception")
+                        return
+                    if isinstance(result, int) and result != 0:
+                        log(f"Camera: PullImageV2 failed with code {result}")
+                        self._disable_streaming(f"PullImageV2 failed ({result})")
+                        return
                     t1 = time.perf_counter()
 
                     # Update FPS
@@ -458,6 +463,14 @@ class ToupcamCamera:
         self._on_event = _on_event
         # Stream startup is deferred to start_stream()
 
+    def _disable_streaming(self, reason: str):
+        with self._stream_lock:
+            if not self._is_streaming:
+                return
+            self._is_streaming = False
+            self._streaming_event.clear()
+        log(f"Camera: streaming disabled ({reason})")
+
     # ---------------- public API used by UI ----------------
 
     def name(self):
@@ -488,11 +501,13 @@ class ToupcamCamera:
             log("Camera: pull mode started")
             with self._stream_lock:
                 self._is_streaming = True
+                self._streaming_event.set()
         except Exception as e:
             log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
         self._is_streaming = False
+        self._streaming_event.clear()
         with self._stream_lock:
             try:
                 if self._cam:
