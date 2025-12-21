@@ -96,7 +96,6 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_worker: Optional[QtCore.QObject] = None
         self._refresh_timeout_timer: Optional[QtCore.QTimer] = None
         self._refresh_in_flight = False
-        self._refresh_token: Optional[object] = None
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
         self._last_refresh_successful = False
@@ -216,7 +215,6 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_thread = None
         self._refresh_worker = None
         self._refresh_in_flight = False
-        self._refresh_token = None
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
 
@@ -280,15 +278,11 @@ class SpectrometerManager(QtCore.QObject):
             self._monitor_paused_for_active = False
         if start_monitoring:
             self.start_monitoring(force=True)
-        token = object()
-        self._refresh_token = token
         try:
             thread, worker = run_async(self._enumerate_devices, parent=self)
             self._refresh_thread = thread
             self._refresh_worker = worker
-            worker.finished.connect(
-                lambda devices, err, token=token: self._on_refresh_finished(token, devices, err)
-            )
+            worker.finished.connect(self._on_refresh_finished)
         except BaseException:
             logger.warning("Unhandled error starting spectrometer refresh:\n%s", traceback.format_exc())
             self._finalize_refresh(False, "Failed to start refresh")
@@ -302,14 +296,14 @@ class SpectrometerManager(QtCore.QObject):
                     self._refresh_timeout_timer.timeout.disconnect()
                 except (TypeError, RuntimeError):
                     pass
-            self._refresh_timeout_timer.timeout.connect(
-                lambda token=token: self._on_refresh_timeout(token)
-            )
+            self._refresh_timeout_timer.timeout.connect(self._on_refresh_timeout)
             self._refresh_timeout_timer.start(timeout_ms)
         return True
 
     def _finalize_refresh(self, success: bool, message: str) -> None:
         self._last_refresh_successful = success
+        if self._refresh_timeout_timer is not None:
+            self._refresh_timeout_timer.stop()
         if self._refresh_was_paused and self._active:
             self._pause_monitoring_for_active_use()
         elif not self._refresh_start_monitoring:
@@ -317,18 +311,16 @@ class SpectrometerManager(QtCore.QObject):
         self.refresh_completed.emit(success, message)
         self._reset_refresh_state()
 
-    def _on_refresh_timeout(self, token: object) -> None:
-        if token != self._refresh_token or not self._refresh_in_flight:
+    def _on_refresh_timeout(self) -> None:
+        if not self._refresh_in_flight or self._refresh_worker is None:
             return
         logger.warning("Spectrometer refresh timed out")
-        self._finalize_refresh(False, "Device refresh timed out")
+        self._finalize_refresh(False, "Driver did not respond")
 
     @QtCore.Slot(object, object)
-    def _on_refresh_finished(self, token: object, devices, err) -> None:
-        if token != self._refresh_token:
+    def _on_refresh_finished(self, devices, err) -> None:
+        if not self._refresh_in_flight or self.sender() is not self._refresh_worker:
             return
-        if self._refresh_timeout_timer is not None:
-            self._refresh_timeout_timer.stop()
         if err:
             logger.warning("Spectrometer refresh failed: %s\n%s", err, _format_exception(err))
             message = str(err) or "Device refresh failed"

@@ -1034,7 +1034,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(message or "Device refresh complete")
         else:
             failure_detail = message or "driver did not respond"
-            if "timed out" in failure_detail.lower():
+            if "driver did not respond" in failure_detail.lower():
+                self.status_message.setText("Driver did not respond")
+            elif "timed out" in failure_detail.lower():
                 self.status_message.setText("Refresh timed out")
             else:
                 self.status_message.setText(f"Refresh failed—{failure_detail}")
