@@ -743,6 +743,9 @@ class ToupcamCamera:
         depth = int(depth)
         if depth not in self._color_depths:
             return
+        prev_raw_mode = self._raw_mode
+        prev_bits = self._bits
+        prev_color_depth = self._color_depth
         updated = False
         try:
             if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BITDEPTH"):
@@ -765,6 +768,14 @@ class ToupcamCamera:
         finally:
             if not updated:
                 try:
+                    self._raw_mode = prev_raw_mode
+                    self._bits = prev_bits
+                    self._color_depth = prev_color_depth
+                    if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BITDEPTH"):
+                        self._cam.put_Option(
+                            self._tp.TOUPCAM_OPTION_BITDEPTH,
+                            1 if prev_color_depth > 8 else 0,
+                        )
                     self._update_dimensions()
                 except Exception:
                     pass
@@ -875,6 +886,9 @@ class ToupcamCamera:
                 self._is_streaming = True
 
     def set_raw_fast_mono(self, enable: bool):
+        prev_raw_mode = self._raw_mode
+        prev_bits = self._bits
+        prev_color_depth = self._color_depth
         self._raw_mode = bool(enable)
         self._bits = 16 if (self._raw_mode and self._color_depth > 8) else (
             8 if self._raw_mode else 24
@@ -898,6 +912,10 @@ class ToupcamCamera:
         finally:
             if not updated:
                 try:
+                    self._raw_mode = prev_raw_mode
+                    self._bits = prev_bits
+                    self._color_depth = prev_color_depth
+                    self._force_rgb_or_raw()
                     self._update_dimensions()
                 except Exception:
                     pass
