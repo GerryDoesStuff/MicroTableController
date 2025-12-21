@@ -1025,7 +1025,6 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
         self.status_message.setText("Refreshing spectrometers…")
         started = self.spectrometer_manager.refresh_async(start_monitoring=False, timeout_ms=10000)
         if not started:
-            self.btn_refresh.setEnabled(True)
             self.status_message.setText("Refresh already in progress")
 
     def _on_refresh_completed(self, success: bool, message: str) -> None:

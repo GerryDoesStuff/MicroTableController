@@ -257,8 +257,7 @@ class SpectrometerManager(QtCore.QObject):
             )
         except BaseException:
             logger.error("Unhandled error starting spectrometer refresh:\n%s", traceback.format_exc())
-            self._reset_refresh_state()
-            self.refresh_completed.emit(False, "Failed to start refresh")
+            self._finalize_refresh(False, "Failed to start refresh")
             return True
         if timeout_ms > 0:
             if self._refresh_timeout_timer is None:
