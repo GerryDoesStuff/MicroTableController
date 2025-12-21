@@ -398,6 +398,13 @@ class ToupcamCamera:
             try:
                 if evt != getattr(self._tp, "TOUPCAM_EVENT_IMAGE", 0x0001):
                     return
+                if (
+                    not self._is_streaming
+                    or self._cam is None
+                    or self._buf_ptr is None
+                    or self._arr is None
+                ):
+                    return
                 with self._stream_lock:
                     if (
                         not self._is_streaming
@@ -485,8 +492,8 @@ class ToupcamCamera:
             log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
+        self._is_streaming = False
         with self._stream_lock:
-            self._is_streaming = False
             try:
                 if self._cam:
                     self._cam.Stop()
