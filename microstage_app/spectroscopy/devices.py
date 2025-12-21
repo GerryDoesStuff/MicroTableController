@@ -148,12 +148,33 @@ class SpectrometerManager(QtCore.QObject):
 
         thread = self._poll_thread
         if thread is not None:
-            if thread.isRunning():
-                thread.quit()
-                thread.wait()
+            self._stop_qthread(thread, "poll")
             self._poll_thread = None
         self._poll_worker = None
         self._poll_in_flight = False
+
+        refresh_worker = self._refresh_worker
+        if refresh_worker is not None:
+            try:
+                refresh_worker.finished.disconnect(self._on_refresh_finished)
+            except (TypeError, RuntimeError):
+                pass
+
+        if self._refresh_timeout_timer is not None:
+            try:
+                self._refresh_timeout_timer.timeout.disconnect(self._on_refresh_timeout)
+            except (TypeError, RuntimeError):
+                pass
+            self._refresh_timeout_timer.stop()
+
+        refresh_thread = self._refresh_thread
+        if refresh_thread is not None:
+            self._stop_qthread(refresh_thread, "refresh")
+            self._refresh_thread = None
+        self._refresh_worker = None
+        self._refresh_in_flight = False
+        self._refresh_was_paused = False
+        self._refresh_start_monitoring = False
 
     close = shutdown
 
@@ -244,6 +265,32 @@ class SpectrometerManager(QtCore.QObject):
         except BaseException:
             logger.warning("Unhandled error starting spectrometer poll:\n%s", traceback.format_exc())
             self._reset_poll_state(stop_thread=True)
+
+    def _stop_qthread(self, thread: Optional[QtCore.QThread], label: str) -> None:
+        if thread is None:
+            return
+        if QtCore.QThread.currentThread() is self.thread():
+            self._stop_qthread_on_owner(thread, label)
+        else:
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "_stop_qthread_on_owner",
+                QtCore.Qt.BlockingQueuedConnection,
+                QtCore.Q_ARG(object, thread),
+                QtCore.Q_ARG(str, label),
+            )
+
+    @QtCore.Slot(object, str)
+    def _stop_qthread_on_owner(self, thread: Optional[QtCore.QThread], label: str) -> None:
+        if thread is None:
+            return
+        if not thread.isRunning():
+            return
+        thread.quit()
+        if not thread.wait(2000):
+            logger.warning("Spectrometer %s thread did not stop; terminating", label)
+            thread.terminate()
+            thread.wait()
 
     @QtCore.Slot(object, object)
     def _on_polled_devices(self, devices, err) -> None:
@@ -382,6 +429,7 @@ class SpectrometerManager(QtCore.QObject):
         if not self._refresh_in_flight or self._refresh_worker is None:
             return
         logger.warning("Spectrometer refresh timed out")
+        self._stop_qthread(self._refresh_thread, "refresh")
         self._finalize_refresh(False, "Driver did not respond")
 
     @QtCore.Slot(object, object)
