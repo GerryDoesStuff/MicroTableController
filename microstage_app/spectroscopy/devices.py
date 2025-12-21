@@ -8,6 +8,7 @@ import importlib.util
 import logging
 import threading
 import traceback
+import time
 import numpy as np
 from PySide6 import QtCore
 
@@ -164,11 +165,34 @@ class SpectrometerManager(QtCore.QObject):
             threading.get_ident(),
         )
         devices: List[SpectrometerDescriptor] = []
+        slow_threshold_s = 2.0
         for provider in self._providers:
+            provider_name = provider.__class__.__name__
+            logger.info("Starting spectrometer enumeration for %s", provider_name)
+            start_time = time.perf_counter()
             try:
                 devices.extend(provider.list_devices())
             except BaseException as exc:  # pragma: no cover - defensive
-                logger.warning("Failed to enumerate spectrometers: %s\n%s", exc, traceback.format_exc())
+                logger.warning(
+                    "Spectrometer enumeration failed for %s: %s: %s\n%s",
+                    provider_name,
+                    type(exc).__name__,
+                    exc,
+                    traceback.format_exc(),
+                )
+            finally:
+                elapsed = time.perf_counter() - start_time
+                logger.info(
+                    "Completed spectrometer enumeration for %s in %.2fs",
+                    provider_name,
+                    elapsed,
+                )
+                if elapsed > slow_threshold_s:
+                    logger.warning(
+                        "Spectrometer enumeration slow: %s took %.1fs",
+                        provider_name,
+                        elapsed,
+                    )
         logger.info(
             "[thread=%s] Enumerated %d spectrometer device(s)",
             threading.get_ident(),
