@@ -91,8 +91,23 @@ def _deserialize_descriptors(payload: Iterable[object]) -> list[SpectrometerDesc
     return descriptors
 
 
+def _initialize_oceanoptics_backend() -> None:
+    try:
+        seabreeze = importlib.import_module("seabreeze")
+    except BaseException as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to import seabreeze in helper process: %s", exc)
+        return
+    use_backend = getattr(seabreeze, "use", None)
+    if callable(use_backend):
+        try:
+            use_backend("pyseabreeze")
+        except BaseException as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to select seabreeze backend in helper process: %s", exc)
+
+
 def _ocean_optics_pipe_worker(conn: multiprocessing.connection.Connection) -> None:
     try:
+        _initialize_oceanoptics_backend()
         while True:
             try:
                 command = conn.recv()
@@ -279,45 +294,6 @@ class SpectrometerManager(QtCore.QObject):
             if process.is_alive():
                 process.terminate()
                 process.join(2.0)
-
-    def _request_oceanoptics_enumeration(
-        self,
-        timeout_s: float,
-    ) -> tuple[list[SpectrometerDescriptor], bool, bool]:
-        conn = self._oceanoptics_conn
-        process = self._oceanoptics_process
-        if conn is None or process is None or not process.is_alive():
-            logger.warning("Ocean Optics helper not available for enumeration")
-            return [], True, True
-        with self._oceanoptics_lock:
-            while conn.poll():
-                try:
-                    conn.recv()
-                except (EOFError, OSError):
-                    break
-            try:
-                conn.send("enumerate")
-            except (BrokenPipeError, OSError) as exc:
-                logger.warning("Failed to send Ocean Optics enumeration request: %s", exc)
-                return [], True, True
-            if not conn.poll(timeout_s):
-                logger.warning(
-                    "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
-                    timeout_s,
-                )
-                return [], True, False
-            try:
-                status, payload = conn.recv()
-            except (EOFError, OSError) as exc:
-                logger.warning("Failed to read Ocean Optics enumeration response: %s", exc)
-                return [], True, True
-        if status == "error":
-            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
-            return [], False, True
-        if status != "ok":
-            logger.warning("Unexpected Ocean Optics response: %s", status)
-            return [], False, True
-        return _deserialize_descriptors(payload), False, False
 
     def _enumerate_devices(self, *, capture_timeouts: bool = False) -> List[SpectrometerDescriptor]:
         logger.info(
@@ -954,10 +930,42 @@ class OceanOpticsSpectrometerProvider:
                     f"{type(exc).__name__}: {exc}",
                 )
                 return []
-        devices, timed_out, had_error = manager._request_oceanoptics_enumeration(self._timeout_s)
-        self._timed_out = timed_out
-        if timed_out or had_error:
+        conn = manager._oceanoptics_conn
+        process = manager._oceanoptics_process
+        if conn is None or process is None or not process.is_alive():
+            logger.warning("Ocean Optics helper not available for enumeration")
+            self._timed_out = True
             return list(self._cached_devices)
+        with manager._oceanoptics_lock:
+            while conn.poll():
+                try:
+                    conn.recv()
+                except (EOFError, OSError):
+                    break
+            try:
+                conn.send("enumerate")
+            except (BrokenPipeError, OSError) as exc:
+                logger.warning("Failed to send Ocean Optics enumeration request: %s", exc)
+                return list(self._cached_devices)
+            if not conn.poll(self._timeout_s):
+                logger.warning(
+                    "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
+                    self._timeout_s,
+                )
+                self._timed_out = True
+                return list(self._cached_devices)
+            try:
+                status, payload = conn.recv()
+            except (EOFError, OSError) as exc:
+                logger.warning("Failed to read Ocean Optics enumeration response: %s", exc)
+                return list(self._cached_devices)
+        if status == "error":
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
+            return list(self._cached_devices)
+        if status != "ok":
+            logger.warning("Unexpected Ocean Optics response: %s", status)
+            return list(self._cached_devices)
+        devices = _deserialize_descriptors(payload)
         self._cached_devices = list(devices)
         return list(devices)
 
