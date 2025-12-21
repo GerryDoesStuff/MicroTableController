@@ -168,6 +168,8 @@ class ToupcamCamera:
         self._avg_proc_ms = 0.0
 
         self._is_streaming = False
+        self._callback_active = False
+        self._stream_failed = False
 
         self._open()
         self._query_binning_options()
@@ -283,12 +285,18 @@ class ToupcamCamera:
                     pass
             result["ok"] = success
 
+        def apply_change():
+            if self._is_streaming or self._callback_active:
+                self._restart_stream(do_set, f"pixel format {target_fmt}")
+            else:
+                do_set()
+
         if self._cb_thread is not None and threading.current_thread() is self._cb_thread:
-            thread = threading.Thread(target=do_set)
+            thread = threading.Thread(target=apply_change)
             thread.start()
             thread.join()
         else:
-            do_set()
+            apply_change()
         return bool(result["ok"])
 
     def _init_usb_and_speed(self):
@@ -367,6 +375,8 @@ class ToupcamCamera:
         self._cam = self._tp.Toupcam.Open(self._id)
         if not self._cam:
             raise RuntimeError("Toupcam.Open returned null")
+        self._callback_active = False
+        self._stream_failed = False
 
         # Determine supported color depths from capability flags
         self._color_depths = [8]
@@ -417,6 +427,7 @@ class ToupcamCamera:
                         result = self._cam.PullImageV2(self._buf_ptr, self._bits, None)
                     except Exception as e:
                         log(f"Camera: PullImageV2 exception: {e}")
+                        self._stream_failed = True
                         self._disable_streaming("PullImageV2 exception")
                         return
                     if isinstance(result, int) and result != 0:
@@ -466,18 +477,12 @@ class ToupcamCamera:
 
     def _disable_streaming(self, reason: str):
         with self._stream_lock:
-            if not self._is_streaming:
-                return
+            was_streaming = self._is_streaming or self._callback_active
             self._is_streaming = False
             self._streaming_event.clear()
         log(f"Camera: streaming disabled ({reason})")
-        self._detach_callback()
-        try:
-            if self._cam:
-                self._cam.Stop()
-                log("Camera: stopped")
-        except Exception as e:
-            log(f"Camera: stop error: {e}")
+        if was_streaming:
+            self._stop_callback()
 
     def _detach_callback(self):
         if not self._cam or not hasattr(self._cam, "StartPullModeWithCallback"):
@@ -489,6 +494,70 @@ class ToupcamCamera:
                 self._cam.StartPullModeWithCallback(None)
         except Exception as e:
             log(f"Camera: detach callback failed: {e}")
+
+    def _stop_callback(self):
+        if not self._cam:
+            self._callback_active = False
+            return
+        try:
+            self._cam.Stop()
+            log("Camera: stopped")
+        except Exception as e:
+            log(f"Camera: stop error: {e}")
+        self._callback_active = False
+        self._detach_callback()
+
+    def _start_callback(self) -> bool:
+        if self._stream_failed:
+            log("Camera: stream failed; manual reconnect required")
+            return False
+        if self._callback_active:
+            log("Camera: callback already active; skipping StartPullModeWithCallback")
+            return False
+        try:
+            try:
+                self._cam.StartPullModeWithCallback(self._on_event, self)
+            except TypeError:
+                self._cam.StartPullModeWithCallback(self._on_event)
+            self._callback_active = True
+            log("Camera: pull mode started")
+            return True
+        except Exception as e:
+            log(f"Camera: start_stream error: {e}")
+            self._callback_active = False
+            return False
+
+    def _begin_streaming(self) -> bool:
+        self._force_rgb_or_raw()
+        try:
+            self._cam.put_AutoExpoEnable(0)
+        except Exception:
+            pass
+        if self._start_callback():
+            with self._stream_lock:
+                self._is_streaming = True
+                self._streaming_event.set()
+            return True
+        return False
+
+    def _restart_stream(self, reconfigure_fn, reason: str):
+        with self._stream_lock:
+            was_streaming = self._is_streaming
+            self._is_streaming = False
+            self._streaming_event.clear()
+        if was_streaming or self._callback_active:
+            log(f"Camera: restarting stream ({reason})")
+            self._stop_callback()
+        try:
+            reconfigure_fn()
+        except Exception as e:
+            log(f"Camera: restart stream failed ({reason}): {e}")
+        try:
+            self._update_dimensions()
+        except Exception:
+            pass
+        if was_streaming and not self._stream_failed:
+            self._begin_streaming()
 
     # ---------------- public API used by UI ----------------
 
@@ -502,25 +571,15 @@ class ToupcamCamera:
         with self._stream_lock:
             if self._is_streaming:
                 return
+            if self._stream_failed:
+                log("Camera: stream failed; manual reconnect required")
+                return
 
         try:
             if self._buf is None:
                 self._update_dimensions()
 
-            self._force_rgb_or_raw()
-            try:
-                self._cam.put_AutoExpoEnable(0)
-            except Exception:
-                pass
-
-            try:
-                self._cam.StartPullModeWithCallback(self._on_event, self)
-            except TypeError:
-                self._cam.StartPullModeWithCallback(self._on_event)
-            log("Camera: pull mode started")
-            with self._stream_lock:
-                self._is_streaming = True
-                self._streaming_event.set()
+            self._begin_streaming()
         except Exception as e:
             log(f"Camera: start_stream error: {e}")
 
@@ -528,23 +587,16 @@ class ToupcamCamera:
         with self._stream_lock:
             self._is_streaming = False
             self._streaming_event.clear()
-        self._detach_callback()
+        self._stop_callback()
         with self._stream_lock:
             try:
                 if self._cam:
-                    self._cam.Stop()
-                    log("Camera: stopped")
-            except Exception as e:
-                log(f"Camera: stop error: {e}")
+                    self._cam.Close()
             finally:
-                try:
-                    if self._cam:
-                        self._cam.Close()
-                finally:
-                    self._cam = None
-                    self._buf = None
-                    self._buf_ptr = None
-                    self._arr = None
+                self._cam = None
+                self._buf = None
+                self._buf_ptr = None
+                self._arr = None
 
     def get_latest_frame(self):
         with self._lock:
@@ -605,9 +657,10 @@ class ToupcamCamera:
         # stop streaming temporarily as some cameras require this for size changes
         was_streaming = False
         try:
-            if self._is_streaming:
-                self._cam.Stop()
+            if self._is_streaming or self._callback_active:
+                self._stop_callback()
                 self._is_streaming = False
+                self._streaming_event.clear()
                 was_streaming = True
         except Exception:
             was_streaming = False
@@ -670,7 +723,7 @@ class ToupcamCamera:
 
         if was_streaming:
             try:
-                self.start_stream()
+                self._begin_streaming()
             except Exception:
                 pass
 
@@ -742,14 +795,15 @@ class ToupcamCamera:
 
     def set_binning(self, n: int):
         n = max(1, int(n))
-        try:
-            if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BINNING"):
-                val = 1 if n <= 1 else (0x80 | n)
-                self._cam.put_Option(self._tp.TOUPCAM_OPTION_BINNING, val)
-                self._binning = n
-                self._update_dimensions()
-        except Exception as e:
-            log(f"Camera: set_binning failed: {e}")
+        def do_set():
+            try:
+                if hasattr(self._cam, "put_Option") and hasattr(self._tp, "TOUPCAM_OPTION_BINNING"):
+                    val = 1 if n <= 1 else (0x80 | n)
+                    self._cam.put_Option(self._tp.TOUPCAM_OPTION_BINNING, val)
+                    self._binning = n
+            except Exception as e:
+                log(f"Camera: set_binning failed: {e}")
+        self._restart_stream(do_set, "binning update")
 
     # ---- color depth -------------------------------------------------
 
@@ -804,96 +858,65 @@ class ToupcamCamera:
             return 0
 
     def set_resolution_index(self, idx: int):
-        was_streaming = self._is_streaming
-        try:
-            if self._is_streaming:
+        def do_set():
+            try:
+                self._cam.put_eSize(int(idx))
+                # Resolution change resets the full sensor size
                 try:
-                    self._cam.Stop()
+                    self._sensor_w, self._sensor_h = self._cam.get_Size()
                 except Exception:
                     pass
-                self._is_streaming = False
-
-            self._cam.put_eSize(int(idx))
-            # Resolution change resets the full sensor size
-            try:
-                self._sensor_w, self._sensor_h = self._cam.get_Size()
-            except Exception:
-                pass
-            self._update_dimensions()
-            log(f"Camera: resolution index={idx} -> {self._w}x{self._h}")
-        except Exception as e:
-            log(f"Camera: set_resolution_index failed: {e}")
-
-        if was_streaming and not self._is_streaming:
-            try:
-                self.start_stream()
-            except Exception:
-                pass
+                try:
+                    w, h = self._cam.get_Size()
+                    log(f"Camera: resolution index={idx} -> {w}x{h}")
+                except Exception:
+                    log(f"Camera: resolution index={idx}")
+            except Exception as e:
+                log(f"Camera: set_resolution_index failed: {e}")
+        self._restart_stream(do_set, f"resolution index {idx}")
 
     def set_center_roi(self, w: int, h: int):
         """Center a ROI via put_Roi if supported; otherwise try put_Size."""
-        was_streaming = False
-        try:
-            if hasattr(self._cam, "put_Roi"):
-                was_streaming = self._is_streaming
-                if was_streaming:
-                    try:
-                        self._cam.Stop()
-                    except Exception:
-                        pass
-                    self._is_streaming = False
-
-                if w <= 0 or h <= 0:
-                    # clear ROI and refresh full sensor size
-                    self._cam.put_Roi(0, 0, 0, 0)
-                    try:
-                        self._sensor_w, self._sensor_h = self._cam.get_Size()
-                    except Exception:
-                        pass
-                    log("Camera: ROI cleared")
-                else:
-                    w = max(16, min(int(w), self._sensor_w))
-                    h = max(16, min(int(h), self._sensor_h))
-                    # enforce even alignment to avoid sensor stride issues
-                    w &= ~1
-                    h &= ~1
-                    # center in original sensor coordinates
-                    x = max(0, (self._sensor_w - w) // 2)
-                    y = max(0, (self._sensor_h - h) // 2)
-                    x &= ~1
-                    y &= ~1
-                    self._cam.put_Roi(x, y, w, h)
-                    log(f"Camera: ROI {x},{y},{w},{h}")
-
-            else:
-                # fall back to put_Size if exposed by wrapper
-                if hasattr(self._cam, "put_Size"):
-                    w = max(16, int(w))
-                    h = max(16, int(h))
-                    w &= ~1
-                    h &= ~1
-                    self._cam.put_Size(w, h)
-                    try:
-                        self._sensor_w, self._sensor_h = self._cam.get_Size()
-                    except Exception:
-                        pass
-                    log(f"Camera: Size {w}x{h}")
-                else:
-                    log("Camera: ROI/Size not supported by this wrapper")
-        except Exception as e:
-            log(f"Camera: set_center_roi failed: {e}")
-        finally:
-            # Always refresh dimensions so buffer/stride match the new ROI
+        def do_set():
             try:
-                self._update_dimensions()
-            except Exception:
-                pass
-            if was_streaming and not self._is_streaming:
-                try:
-                    self._cam.StartPullModeWithCallback(self._on_event, self)
-                except TypeError:
-                    self._cam.StartPullModeWithCallback(self._on_event)
-                self._is_streaming = True
+                if hasattr(self._cam, "put_Roi"):
+                    if w <= 0 or h <= 0:
+                        # clear ROI and refresh full sensor size
+                        self._cam.put_Roi(0, 0, 0, 0)
+                        try:
+                            self._sensor_w, self._sensor_h = self._cam.get_Size()
+                        except Exception:
+                            pass
+                        log("Camera: ROI cleared")
+                    else:
+                        w_clamped = max(16, min(int(w), self._sensor_w))
+                        h_clamped = max(16, min(int(h), self._sensor_h))
+                        # enforce even alignment to avoid sensor stride issues
+                        w_aligned = w_clamped & ~1
+                        h_aligned = h_clamped & ~1
+                        # center in original sensor coordinates
+                        x = max(0, (self._sensor_w - w_aligned) // 2)
+                        y = max(0, (self._sensor_h - h_aligned) // 2)
+                        x &= ~1
+                        y &= ~1
+                        self._cam.put_Roi(x, y, w_aligned, h_aligned)
+                        log(f"Camera: ROI {x},{y},{w_aligned},{h_aligned}")
+                else:
+                    # fall back to put_Size if exposed by wrapper
+                    if hasattr(self._cam, "put_Size"):
+                        w_aligned = max(16, int(w)) & ~1
+                        h_aligned = max(16, int(h)) & ~1
+                        self._cam.put_Size(w_aligned, h_aligned)
+                        try:
+                            self._sensor_w, self._sensor_h = self._cam.get_Size()
+                        except Exception:
+                            pass
+                        log(f"Camera: Size {w_aligned}x{h_aligned}")
+                    else:
+                        log("Camera: ROI/Size not supported by this wrapper")
+            except Exception as e:
+                log(f"Camera: set_center_roi failed: {e}")
+        self._restart_stream(do_set, "ROI update")
 
     def set_raw_fast_mono(self, enable: bool):
         self._raw_mode = bool(enable)
