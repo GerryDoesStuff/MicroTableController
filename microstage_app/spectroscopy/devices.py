@@ -173,6 +173,7 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_start_monitoring = False
         self._last_refresh_successful = False
         self._last_enumeration_timeouts: list[str] = []
+        self._last_enumeration_message: Optional[str] = None
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
@@ -303,6 +304,7 @@ class SpectrometerManager(QtCore.QObject):
         devices: List[SpectrometerDescriptor] = []
         device_providers: dict[SpectrometerDescriptor, _SpectrometerProvider] = {}
         timeouts: list[str] = []
+        messages: list[str] = []
         slow_threshold_s = 2.0
         for provider in self._providers:
             provider_name = provider.__class__.__name__
@@ -310,6 +312,9 @@ class SpectrometerManager(QtCore.QObject):
             start_time = time.perf_counter()
             try:
                 provider_devices = provider.list_devices()
+                provider_message = getattr(provider, "last_error_message", None)
+                if provider_message:
+                    messages.append(provider_message)
                 if getattr(provider, "timed_out", False):
                     timeouts.append(provider_name)
                     provider_devices = self._provider_devices.get(provider, [])
@@ -355,6 +360,7 @@ class SpectrometerManager(QtCore.QObject):
         self._device_providers = device_providers
         if capture_timeouts:
             self._last_enumeration_timeouts = timeouts
+            self._last_enumeration_message = messages[0] if messages else None
         return devices
 
     def _reset_poll_state(self, *, stop_thread: bool = False) -> None:
@@ -566,6 +572,7 @@ class SpectrometerManager(QtCore.QObject):
             message = str(err) or "Device refresh failed"
             self._finalize_refresh(False, message)
             return
+        message_override = self._last_enumeration_message
         try:
             self._update_devices(devices)
         except BaseException:
@@ -574,6 +581,8 @@ class SpectrometerManager(QtCore.QObject):
             return
         if "OceanOpticsSpectrometerProvider" in self._last_enumeration_timeouts:
             self._finalize_refresh(True, "Ocean Optics driver did not respond; refresh timed out")
+        elif message_override:
+            self._finalize_refresh(True, message_override)
         else:
             self._finalize_refresh(True, "Device refresh complete")
 
@@ -727,12 +736,27 @@ class SpectrometerManager(QtCore.QObject):
 
 
 class OceanOpticsSpectrometer:
+    _missing_pyusb_message: Optional[str] = None
+    _missing_pyusb_logged = False
+
     def __init__(self, descriptor: SpectrometerDescriptor):
         self.descriptor = descriptor
         self._device = None
         self._connected = False
         self._integration_time_ms = 10.0
         self._averages = 1
+
+    @staticmethod
+    def _record_pyusb_missing() -> None:
+        message = "pyusb missing; Ocean Optics spectrometers disabled"
+        OceanOpticsSpectrometer._missing_pyusb_message = message
+        if not OceanOpticsSpectrometer._missing_pyusb_logged:
+            logger.warning(message)
+            OceanOpticsSpectrometer._missing_pyusb_logged = True
+
+    @staticmethod
+    def missing_pyusb_message() -> Optional[str]:
+        return OceanOpticsSpectrometer._missing_pyusb_message
 
     @staticmethod
     def _get_backend():
@@ -745,6 +769,12 @@ class OceanOpticsSpectrometer:
             return None
         try:
             return importlib.import_module("seabreeze.spectrometers")
+        except ModuleNotFoundError as exc:
+            if exc.name == "usb":
+                OceanOpticsSpectrometer._record_pyusb_missing()
+                return None
+            logger.warning("Failed to import seabreeze backend: %s", exc)
+            return None
         except BaseException as exc:  # pragma: no cover - defensive
             logger.warning("Failed to import seabreeze backend: %s", exc)
             return None
@@ -757,6 +787,12 @@ class OceanOpticsSpectrometer:
         descriptors: List[SpectrometerDescriptor] = []
         try:
             devices = backend.list_devices()
+        except ModuleNotFoundError as exc:
+            if exc.name == "usb":
+                OceanOpticsSpectrometer._record_pyusb_missing()
+                return []
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
+            return []
         except BaseException as exc:  # pragma: no cover - defensive
             logger.warning("Failed to enumerate OceanOptics spectrometers: %s", exc)
             return []
@@ -903,6 +939,7 @@ class OceanOpticsSpectrometerProvider:
         self._timed_out = False
         self._manager: Optional[SpectrometerManager] = None
         self._cached_devices: list[SpectrometerDescriptor] = []
+        self._last_error_message: Optional[str] = None
 
     def set_manager(self, manager: SpectrometerManager) -> None:
         self._manager = manager
@@ -918,12 +955,19 @@ class OceanOpticsSpectrometerProvider:
     def set_timed_out(self, value: bool) -> None:
         self._timed_out = bool(value)
 
+    @property
+    def last_error_message(self) -> Optional[str]:
+        return self._last_error_message
+
     def list_devices(self) -> List[SpectrometerDescriptor]:
         self._timed_out = False
+        self._last_error_message = None
         manager = self._manager
         if manager is None:
             try:
-                return list(OceanOpticsSpectrometer.enumerate())
+                devices = list(OceanOpticsSpectrometer.enumerate())
+                self._last_error_message = OceanOpticsSpectrometer.missing_pyusb_message()
+                return devices
             except BaseException as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "Failed to enumerate OceanOptics spectrometers: %s",
@@ -961,6 +1005,8 @@ class OceanOpticsSpectrometerProvider:
                 return list(self._cached_devices)
         if status == "error":
             logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
+            if "No module named 'usb'" in str(payload):
+                self._last_error_message = "pyusb missing; Ocean Optics spectrometers disabled"
             return list(self._cached_devices)
         if status != "ok":
             logger.warning("Unexpected Ocean Optics response: %s", status)

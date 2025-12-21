@@ -17,5 +17,6 @@ h5py>=3.11
 matplotlib>=3.9
 # Ocean Optics spectrometer support
 seabreeze>=2.5
+pyusb>=1.2
 # Optional: NVIDIA GPU metrics for SystemMonitorTab
 nvidia-ml-py3>=7.352.0
