@@ -1034,7 +1034,10 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
             self.status_message.setText(message or "Device refresh complete")
         else:
             failure_detail = message or "driver did not respond"
-            self.status_message.setText(f"Refresh failed—{failure_detail}")
+            if "timed out" in failure_detail.lower():
+                self.status_message.setText("Refresh timed out")
+            else:
+                self.status_message.setText(f"Refresh failed—{failure_detail}")
         self._apply_monitoring_state()
 
     def _on_monitor_toggled(self, checked: bool) -> None:
