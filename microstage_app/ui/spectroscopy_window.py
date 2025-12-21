@@ -809,6 +809,9 @@ class SpectroscopyWindow(QtWidgets.QMainWindow):
                 self._capture_thread.deleteLater()
             else:
                 LOG.warning("Capture thread did not finish before window closed")
+                self.status_message.setText("Shutdown still in progress. Please wait…")
+                event.ignore()
+                return
         self.spectrometer_manager.shutdown()
         self.spectrometer_manager.disconnect()
         try:
