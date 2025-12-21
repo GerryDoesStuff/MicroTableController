@@ -660,6 +660,9 @@ class MainWindow(QtWidgets.QMainWindow):
             elif isinstance(w, QtWidgets.QCheckBox):
                 val = self.profiles.get(path, w.isChecked(), expected_type=bool)
                 w.setChecked(val)
+            elif isinstance(w, QtWidgets.QAction):
+                val = self.profiles.get(path, w.isChecked(), expected_type=bool)
+                w.setChecked(val)
             elif isinstance(w, QtWidgets.QComboBox):
                 data = w.currentData()
                 default = data if data is not None else w.currentText()
@@ -676,7 +679,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 w.setText(val)
 
         if self._auto_connect_on_start_override is not None:
-            self.auto_connect_checkbox.setChecked(self._auto_connect_on_start_override)
+            self.act_auto_connect_on_start.setChecked(self._auto_connect_on_start_override)
 
         # ensure sliders match spins after loading persisted values
         self.brightness_slider.setValue(self.brightness_spin.value())
@@ -726,6 +729,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_show_cameras.triggered.connect(self._show_camera_dialog)
         self.act_show_stages.triggered.connect(self._show_stage_dialog)
         self.act_show_spectroscopy.triggered.connect(self._open_spectroscopy)
+        devices_menu.addSeparator()
+        self.act_auto_connect_on_start = devices_menu.addAction(
+            "Auto-connect devices on startup"
+        )
+        self.act_auto_connect_on_start.setCheckable(True)
+        self.act_auto_connect_on_start.setChecked(True)
 
         view_menu = self.menuBar().addMenu("View")
         self.act_dark_mode = view_menu.addAction("Dark Theme")
@@ -747,8 +756,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dimmer_status = QtWidgets.QLabel("Illumination: —")
         self.dimmer_status.setTextFormat(QtCore.Qt.PlainText)
         self.spectrometer_status = QtWidgets.QLabel("Spectrometer: —")
-        self.auto_connect_checkbox = QtWidgets.QCheckBox("Auto-connect devices on startup")
-        self.auto_connect_checkbox.setChecked(True)
         self.profile_combo = QtWidgets.QComboBox()
         self.btn_reload_profiles = QtWidgets.QPushButton("Reload Profiles")
         self.profile_label = QtWidgets.QLabel("Profile:")
@@ -762,7 +769,6 @@ class MainWindow(QtWidgets.QMainWindow):
         left.addWidget(self.cam_status)
         left.addWidget(self.dimmer_status)
         left.addWidget(self.spectrometer_status)
-        left.addWidget(self.auto_connect_checkbox)
 
         # Legacy single-dimmer controls kept hidden; illumination now configured on the
         # Camera tab.
@@ -2214,7 +2220,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _should_auto_connect(self) -> bool:
         if self._auto_connect_on_start_override is not None:
             return self._auto_connect_on_start_override
-        return self.auto_connect_checkbox.isChecked()
+        return self.act_auto_connect_on_start.isChecked()
 
     def _auto_connect_async(self):
         log("UI: auto-connect starting (camera/stage/dimmer/illumination)")
@@ -4229,7 +4235,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (self.speed_spin, "camera.usb_speed"),
             (self.lens_combo, "measurement.current_lens"),
             (self.chk_scale_bar, "ui.scale_bar"),
-            (self.auto_connect_checkbox, "ui.auto_connect_on_start"),
+            (self.act_auto_connect_on_start, "ui.auto_connect_on_start"),
             (self.dimmer_host_edit, "illumination.dimmer.host"),
             (self.dimmer_toggle, "illumination.dimmer.on"),
             (self.dimmer_brightness_spin, "illumination.dimmer.brightness"),
@@ -4252,6 +4258,8 @@ class MainWindow(QtWidgets.QMainWindow):
             elif isinstance(w, QtWidgets.QAbstractSpinBox):
                 val = w.value()
             elif isinstance(w, QtWidgets.QCheckBox):
+                val = w.isChecked()
+            elif isinstance(w, QtWidgets.QAction):
                 val = w.isChecked()
             elif isinstance(w, QtWidgets.QComboBox):
                 data = w.currentData()
