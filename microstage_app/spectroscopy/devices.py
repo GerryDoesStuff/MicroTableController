@@ -8,6 +8,7 @@ import importlib.util
 import logging
 import threading
 import traceback
+import queue
 import time
 import numpy as np
 from PySide6 import QtCore
@@ -99,6 +100,7 @@ class SpectrometerManager(QtCore.QObject):
         self._refresh_was_paused = False
         self._refresh_start_monitoring = False
         self._last_refresh_successful = False
+        self._last_enumeration_timeouts: list[str] = []
         self._monitor_timer = QtCore.QTimer(self)
         self._monitor_timer.setInterval(2000)
         self._monitor_timer.timeout.connect(self._poll_devices)
@@ -158,12 +160,13 @@ class SpectrometerManager(QtCore.QObject):
     def devices(self) -> List[SpectrometerDescriptor]:
         return list(self._devices)
 
-    def _enumerate_devices(self) -> List[SpectrometerDescriptor]:
+    def _enumerate_devices(self, *, capture_timeouts: bool = False) -> List[SpectrometerDescriptor]:
         logger.info(
             "[thread=%s] Enumerating spectrometer devices",
             threading.get_ident(),
         )
         devices: List[SpectrometerDescriptor] = []
+        timeouts: list[str] = []
         slow_threshold_s = 2.0
         for provider in self._providers:
             provider_name = provider.__class__.__name__
@@ -171,6 +174,8 @@ class SpectrometerManager(QtCore.QObject):
             start_time = time.perf_counter()
             try:
                 devices.extend(provider.list_devices())
+                if getattr(provider, "timed_out", False):
+                    timeouts.append(provider_name)
             except BaseException as exc:  # pragma: no cover - defensive
                 logger.warning(
                     "Spectrometer enumeration failed for %s (%s: %s)",
@@ -201,6 +206,8 @@ class SpectrometerManager(QtCore.QObject):
             threading.get_ident(),
             len(devices),
         )
+        if capture_timeouts:
+            self._last_enumeration_timeouts = timeouts
         return devices
 
     def _reset_poll_state(self, *, stop_thread: bool = False) -> None:
@@ -258,18 +265,73 @@ class SpectrometerManager(QtCore.QObject):
         self._devices = list(devices)
         self.devices_changed.emit(list(devices))
 
-    def refresh(self, *, start_monitoring: bool = False) -> List[SpectrometerDescriptor]:
-        was_paused = self._monitor_paused_for_active
-        if was_paused:
-            self._monitor_paused_for_active = False
-        if start_monitoring:
-            self.start_monitoring(force=True)
-        devices = self._enumerate_devices()
-        self._update_devices(devices)
-        if was_paused and self._active:
-            self._pause_monitoring_for_active_use()
-        elif not start_monitoring:
-            self.stop_monitoring()
+    def refresh(
+        self,
+        *,
+        start_monitoring: bool = False,
+        timeout_ms: int = 10000,
+    ) -> List[SpectrometerDescriptor]:
+        if QtCore.QCoreApplication.instance() is None:
+            was_paused = self._monitor_paused_for_active
+            if was_paused:
+                self._monitor_paused_for_active = False
+            if start_monitoring:
+                self.start_monitoring(force=True)
+            devices: List[SpectrometerDescriptor] = []
+            err: Optional[BaseException] = None
+            done = threading.Event()
+
+            def worker() -> None:
+                nonlocal devices, err
+                try:
+                    devices = self._enumerate_devices(capture_timeouts=True)
+                except BaseException as exc:  # pragma: no cover - defensive
+                    err = exc
+                finally:
+                    done.set()
+
+            thread = threading.Thread(target=worker, name="SpectrometerRefresh", daemon=True)
+            thread.start()
+            if not done.wait(max(0.0, timeout_ms / 1000.0)):
+                logger.warning("Spectrometer refresh timed out")
+                if was_paused and self._active:
+                    self._pause_monitoring_for_active_use()
+                elif not start_monitoring:
+                    self.stop_monitoring()
+                return list(self._devices)
+            if err:
+                logger.warning("Spectrometer refresh failed: %s\n%s", err, _format_exception(err))
+                if was_paused and self._active:
+                    self._pause_monitoring_for_active_use()
+                elif not start_monitoring:
+                    self.stop_monitoring()
+                return list(self._devices)
+            self._update_devices(devices)
+            if was_paused and self._active:
+                self._pause_monitoring_for_active_use()
+            elif not start_monitoring:
+                self.stop_monitoring()
+            return list(self._devices)
+
+        loop = QtCore.QEventLoop()
+        completed = {"done": False}
+
+        def _on_completed(_success: bool, _message: str) -> None:
+            completed["done"] = True
+            loop.quit()
+
+        self.refresh_completed.connect(_on_completed)
+        try:
+            started = self.refresh_async(start_monitoring=start_monitoring, timeout_ms=timeout_ms)
+            if not started:
+                return list(self._devices)
+            if not completed["done"]:
+                loop.exec()
+        finally:
+            try:
+                self.refresh_completed.disconnect(_on_completed)
+            except (TypeError, RuntimeError):
+                pass
         return list(self._devices)
 
     def refresh_async(self, *, start_monitoring: bool = False, timeout_ms: int = 10000) -> bool:
@@ -283,7 +345,7 @@ class SpectrometerManager(QtCore.QObject):
         if start_monitoring:
             self.start_monitoring(force=True)
         try:
-            thread, worker = run_async(self._enumerate_devices, parent=self)
+            thread, worker = run_async(self._enumerate_devices, capture_timeouts=True, parent=self)
             self._refresh_thread = thread
             self._refresh_worker = worker
             worker.finished.connect(self._on_refresh_finished)
@@ -336,7 +398,10 @@ class SpectrometerManager(QtCore.QObject):
             logger.warning("Unhandled error applying refreshed devices:\n%s", traceback.format_exc())
             self._finalize_refresh(False, "Device refresh failed")
             return
-        self._finalize_refresh(True, "Device refresh complete")
+        if "OceanOpticsSpectrometerProvider" in self._last_enumeration_timeouts:
+            self._finalize_refresh(True, "Ocean Optics driver did not respond; refresh timed out")
+        else:
+            self._finalize_refresh(True, "Device refresh complete")
 
     def connect(self, descriptor: SpectrometerDescriptor) -> Optional[SpectrometerDevice]:
         if descriptor in self._active:
@@ -665,8 +730,48 @@ class MockSpectrometer:
 
 
 class OceanOpticsSpectrometerProvider:
+    def __init__(self, *, timeout_s: float = 5.0) -> None:
+        self._timeout_s = float(timeout_s)
+        self._timed_out = False
+
+    @property
+    def timed_out(self) -> bool:
+        return self._timed_out
+
     def list_devices(self) -> List[SpectrometerDescriptor]:
-        return OceanOpticsSpectrometer.enumerate()
+        self._timed_out = False
+        result_queue: queue.Queue[tuple[List[SpectrometerDescriptor], Optional[BaseException]]] = queue.Queue(
+            maxsize=1
+        )
+
+        def worker() -> None:
+            try:
+                result_queue.put((OceanOpticsSpectrometer.enumerate(), None))
+            except BaseException as exc:  # pragma: no cover - defensive
+                result_queue.put(([], exc))
+
+        thread = threading.Thread(
+            target=worker,
+            name="OceanOpticsEnumerate",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(self._timeout_s)
+        if thread.is_alive():
+            self._timed_out = True
+            logger.warning(
+                "Ocean Optics backend unresponsive; enumeration timed out after %.1fs",
+                self._timeout_s,
+            )
+            return []
+        try:
+            devices, err = result_queue.get_nowait()
+        except queue.Empty:
+            return []
+        if err:
+            logger.warning("Failed to enumerate OceanOptics spectrometers: %s", err)
+            return []
+        return devices
 
     def connect(self, descriptor: SpectrometerDescriptor) -> OceanOpticsSpectrometer:
         return OceanOpticsSpectrometer(descriptor)
