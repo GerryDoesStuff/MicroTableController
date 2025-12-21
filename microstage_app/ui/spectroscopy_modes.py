@@ -236,7 +236,7 @@ class CapturePage(BaseWizardPage):
         else:
             self.preset_combo = None
         layout.addWidget(self.btn_capture)
-        charts_row = QtWidgets.QHBoxLayout()
+        charts_column = QtWidgets.QVBoxLayout()
         live_group = QtWidgets.QGroupBox("Live spectrum")
         live_layout = QtWidgets.QVBoxLayout(live_group)
         (
@@ -259,9 +259,9 @@ class CapturePage(BaseWizardPage):
         self.stored_status = QtWidgets.QLabel("No capture yet.")
         stored_layout.addWidget(self.stored_chart_view)
         stored_layout.addWidget(self.stored_status)
-        charts_row.addWidget(live_group, 1)
-        charts_row.addWidget(stored_group, 1)
-        layout.addLayout(charts_row)
+        charts_column.addWidget(live_group, 1)
+        charts_column.addWidget(stored_group, 1)
+        layout.addLayout(charts_column)
         layout.addStretch(1)
 
         self.session.spectra_changed.connect(self._on_session_spectrum_changed)
@@ -270,6 +270,8 @@ class CapturePage(BaseWizardPage):
         self._live_timer.setInterval(750)
         self._live_timer.timeout.connect(self._refresh_live_chart)
         self._live_timer.start()
+        self._live_capture_in_flight = False
+        self._live_spectrum: Optional[np.ndarray] = None
 
     def _capture(self) -> None:
         self.wizard_ref.apply_preset_for_step(self.capture_key)
@@ -328,7 +330,20 @@ class CapturePage(BaseWizardPage):
         return "Intensity (counts)"
 
     def _refresh_live_chart(self) -> None:
-        data = self.session.raw_spectrum or self.session.reference_spectrum or self.session.dark_spectrum
+        if self._live_capture_in_flight:
+            return
+        params = self.wizard_ref.mode_params
+        integration = float(params.get("integration", 10.0))
+        averages = int(params.get("averages", 1))
+        self._live_capture_in_flight = True
+        try:
+            data = self.wizard_ref.capture_callback("preview", integration, averages)
+        finally:
+            self._live_capture_in_flight = False
+        if data is None:
+            data = self._live_spectrum
+        else:
+            self._live_spectrum = data
         label = "Live"
         color = QtGui.QColor("deepskyblue")
         self._plot_chart(self.live_chart, self.live_x_axis, self.live_y_axis, self.live_status, label, data, color)
@@ -388,11 +403,25 @@ class CapturePage(BaseWizardPage):
             ymin, ymax = 0.0, 1.0
         if ymin == ymax:
             ymax += 1.0
-        x_axis.setRange(float(np.nanmin(wl)), float(np.nanmax(wl)))
+        x_range = self._wavelength_range()
+        if x_range is None:
+            x_range = (float(np.nanmin(wl)), float(np.nanmax(wl)))
+        x_axis.setRange(*x_range)
         y_axis.setRange(ymin, ymax)
         x_axis.setTitleText(self._x_axis_title())
         y_axis.setTitleText(self._y_axis_title())
         status_label.setText("")
+
+    def _wavelength_range(self) -> Optional[Tuple[float, float]]:
+        range_vals = self.wizard_ref.mode_params.get("wavelength_range")
+        if isinstance(range_vals, (list, tuple)) and len(range_vals) == 2:
+            try:
+                low, high = float(range_vals[0]), float(range_vals[1])
+            except (TypeError, ValueError):
+                return None
+            if low < high:
+                return low, high
+        return None
 
     def _sync_axes(self) -> None:
         self.live_x_axis.setTitleText(self._x_axis_title())
