@@ -86,6 +86,7 @@ class AcquisitionSetupPage(BaseWizardPage):
         for spin in (self.min_spin, self.max_spin):
             spin.setSuffix(" nm")
             spin.setRange(0, 2000)
+            spin.setStyleSheet("QAbstractSpinBox { color: white; }")
             spin.valueChanged.connect(self._on_param_changed)
         wl_form.addRow("Min wavelength", self.min_spin)
         wl_form.addRow("Max wavelength", self.max_spin)
@@ -103,6 +104,7 @@ class AcquisitionSetupPage(BaseWizardPage):
         self.smoothing.setRange(1, 101)
         self.smoothing.setValue(wizard.initial_acquisition.get("smoothing", 5))
         for widget in (self.integration, self.averages, self.smoothing):
+            widget.setStyleSheet("QAbstractSpinBox { color: white; }")
             widget.valueChanged.connect(self._on_param_changed)
         acq_form.addRow("Integration time", self.integration)
         acq_form.addRow("Averages", self.averages)
