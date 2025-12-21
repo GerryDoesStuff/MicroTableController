@@ -460,8 +460,9 @@ class ToupcamCamera:
         if self._cam is None:
             self._open()
 
-        if self._is_streaming:
-            return
+        with self._stream_lock:
+            if self._is_streaming:
+                return
 
         try:
             if self._buf is None:
@@ -478,13 +479,14 @@ class ToupcamCamera:
             except TypeError:
                 self._cam.StartPullModeWithCallback(self._on_event)
             log("Camera: pull mode started")
-            self._is_streaming = True
+            with self._stream_lock:
+                self._is_streaming = True
         except Exception as e:
             log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
-        self._is_streaming = False
         with self._stream_lock:
+            self._is_streaming = False
             try:
                 if self._cam:
                     self._cam.Stop()
