@@ -394,6 +394,8 @@ class ToupcamCamera:
         self._init_usb_and_speed()
 
         def _on_event(evt, ctx=None):
+            if not self._is_streaming:
+                return
             if self._cb_thread is None:
                 self._cb_thread = threading.current_thread()
             try:
@@ -469,6 +471,24 @@ class ToupcamCamera:
             self._is_streaming = False
             self._streaming_event.clear()
         log(f"Camera: streaming disabled ({reason})")
+        self._detach_callback()
+        try:
+            if self._cam:
+                self._cam.Stop()
+                log("Camera: stopped")
+        except Exception as e:
+            log(f"Camera: stop error: {e}")
+
+    def _detach_callback(self):
+        if not self._cam or not hasattr(self._cam, "StartPullModeWithCallback"):
+            return
+        try:
+            try:
+                self._cam.StartPullModeWithCallback(None, self)
+            except TypeError:
+                self._cam.StartPullModeWithCallback(None)
+        except Exception as e:
+            log(f"Camera: detach callback failed: {e}")
 
     # ---------------- public API used by UI ----------------
 
@@ -505,8 +525,10 @@ class ToupcamCamera:
             log(f"Camera: start_stream error: {e}")
 
     def stop_stream(self):
-        self._is_streaming = False
-        self._streaming_event.clear()
+        with self._stream_lock:
+            self._is_streaming = False
+            self._streaming_event.clear()
+        self._detach_callback()
         with self._stream_lock:
             try:
                 if self._cam:
