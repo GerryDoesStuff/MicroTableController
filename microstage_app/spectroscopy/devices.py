@@ -92,17 +92,7 @@ def _deserialize_descriptors(payload: Iterable[object]) -> list[SpectrometerDesc
 
 
 def _initialize_oceanoptics_backend() -> None:
-    try:
-        seabreeze = importlib.import_module("seabreeze")
-    except BaseException as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to import seabreeze in helper process: %s", exc)
-        return
-    use_backend = getattr(seabreeze, "use", None)
-    if callable(use_backend):
-        try:
-            use_backend("pyseabreeze")
-        except BaseException as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to select seabreeze backend in helper process: %s", exc)
+    OceanOpticsSpectrometer._select_seabreeze_backend()
 
 
 def _ocean_optics_pipe_worker(conn: multiprocessing.connection.Connection) -> None:
@@ -123,7 +113,8 @@ def _ocean_optics_pipe_worker(conn: multiprocessing.connection.Connection) -> No
             except BaseException as exc:  # pragma: no cover - defensive
                 conn.send(("error", f"{type(exc).__name__}: {exc}"))
                 continue
-            conn.send(("ok", _serialize_descriptors(devices)))
+            message = OceanOpticsSpectrometer.missing_pyusb_message()
+            conn.send(("ok", _serialize_descriptors(devices), message))
     finally:
         try:
             conn.close()
@@ -755,29 +746,59 @@ class OceanOpticsSpectrometer:
             OceanOpticsSpectrometer._missing_pyusb_logged = True
 
     @staticmethod
+    def _record_libusb_missing() -> None:
+        message = (
+            "pyusb found but libusb backend missing; install libusb driver "
+            "(e.g., WinUSB/libusbK) for the Ocean Optics device."
+        )
+        OceanOpticsSpectrometer._missing_pyusb_message = message
+
+    @staticmethod
     def missing_pyusb_message() -> Optional[str]:
         return OceanOpticsSpectrometer._missing_pyusb_message
 
     @staticmethod
     def _get_backend():
-        try:
-            spec = importlib.util.find_spec("seabreeze.spectrometers")
-        except BaseException as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to check for seabreeze backend: %s", exc)
+        if importlib.util.find_spec("seabreeze") is None:
             return None
-        if spec is None:
+        import seabreeze
+
+        if not OceanOpticsSpectrometer._select_seabreeze_backend(seabreeze):
             return None
-        try:
-            return importlib.import_module("seabreeze.spectrometers")
-        except ModuleNotFoundError as exc:
-            if exc.name == "usb":
-                OceanOpticsSpectrometer._record_pyusb_missing()
-                return None
-            logger.warning("Failed to import seabreeze backend: %s", exc)
+        if importlib.util.find_spec("usb") is None:
+            OceanOpticsSpectrometer._record_pyusb_missing()
             return None
-        except BaseException as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to import seabreeze backend: %s", exc)
+        if importlib.util.find_spec("seabreeze.spectrometers") is None:
             return None
+        return importlib.import_module("seabreeze.spectrometers")
+
+    @staticmethod
+    def _select_seabreeze_backend(seabreeze=None) -> bool:
+        if seabreeze is None:
+            if importlib.util.find_spec("seabreeze") is None:
+                return False
+            import seabreeze
+        backend_errors: list[tuple[str, BaseException]] = []
+        for backend_name in ("pyusb", "pyseabreeze"):
+            try:
+                seabreeze.use(backend_name)
+                return True
+            except BaseException as exc:
+                backend_errors.append((backend_name, exc))
+                if isinstance(exc, ModuleNotFoundError) and exc.name == "usb":
+                    OceanOpticsSpectrometer._record_pyusb_missing()
+                if backend_name == "pyusb" and "No pyusb backend found" in str(exc):
+                    OceanOpticsSpectrometer._record_libusb_missing()
+        if backend_errors:
+            backend_name, exc = backend_errors[-1]
+            logger.warning(
+                "Failed to select seabreeze backend (%s): %s. "
+                "pyusb may be installed but libusb backend missing; install libusb driver "
+                "(e.g., WinUSB/libusbK).",
+                backend_name,
+                exc,
+            )
+        return False
 
     @classmethod
     def enumerate(cls) -> List[SpectrometerDescriptor]:
@@ -999,14 +1020,26 @@ class OceanOpticsSpectrometerProvider:
                 self._timed_out = True
                 return list(self._cached_devices)
             try:
-                status, payload = conn.recv()
+                response = conn.recv()
             except (EOFError, OSError) as exc:
                 logger.warning("Failed to read Ocean Optics enumeration response: %s", exc)
                 return list(self._cached_devices)
+        response_message = None
+        if isinstance(response, tuple) and len(response) == 3:
+            status, payload, response_message = response
+        else:
+            status, payload = response
+        if response_message:
+            self._last_error_message = response_message
         if status == "error":
             logger.warning("Failed to enumerate OceanOptics spectrometers: %s", payload)
             if "No module named 'usb'" in str(payload):
                 self._last_error_message = "pyusb missing; Ocean Optics spectrometers disabled"
+            if "No pyusb backend found" in str(payload):
+                self._last_error_message = (
+                    "pyusb found but libusb backend missing; install libusb driver "
+                    "(e.g., WinUSB/libusbK) for the Ocean Optics device."
+                )
             return list(self._cached_devices)
         if status != "ok":
             logger.warning("Unexpected Ocean Optics response: %s", status)
