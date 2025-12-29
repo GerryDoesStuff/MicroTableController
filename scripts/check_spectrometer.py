@@ -53,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
     manager = SpectrometerManager(auto_start=False)
 
@@ -82,27 +84,29 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         wavelengths = device.get_wavelengths()
-        print("Model       :", descriptor.model)
-        print("Serial      :", descriptor.serial_number)
-        print("Path        :", descriptor.path)
-        print("Vendor      :", descriptor.vendor)
-        print("Wavelengths :", len(wavelengths))
+        logger.info("Model       : %s", descriptor.model)
+        logger.info("Serial      : %s", descriptor.serial_number)
+        logger.info("Path        : %s", descriptor.path)
+        logger.info("Vendor      : %s", descriptor.vendor)
+        logger.info("Wavelengths : %d", len(wavelengths))
 
         if args.capture:
             intensities = device.capture()
             sample_count = min(5, len(intensities))
             sample_pairs = list(zip(wavelengths, intensities))[:sample_count]
-            print("Capture     : captured spectrum")
-            print(
-                "Wavelength range: %.2f - %.2f nm"
-                % (min(wavelengths), max(wavelengths))
+            logger.info("Capture     : captured spectrum")
+            logger.info(
+                "Wavelength range: %.2f - %.2f nm",
+                min(wavelengths),
+                max(wavelengths),
             )
-            print(
-                "First %d wavelength/intensity pairs (nm, counts): %s"
-                % (sample_count, sample_pairs)
+            logger.info(
+                "First %d wavelength/intensity pairs (nm, counts): %s",
+                sample_count,
+                sample_pairs,
             )
         else:
-            print("Capture     : skipped (use --capture to measure)")
+            logger.info("Capture     : skipped (use --capture to measure)")
 
     except Exception:
         logger.exception("Unexpected error while checking spectrometer")

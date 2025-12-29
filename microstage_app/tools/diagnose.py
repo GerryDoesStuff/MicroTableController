@@ -1,16 +1,40 @@
-import sys, os, time, datetime
+import datetime
+import logging
+import os
+import sys
+import time
 from pathlib import Path
+
+
+def _setup_logger(log_path: Path) -> logging.Logger:
+    logger = logging.getLogger("microstage_diagnostics")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+    return logger
+
 
 def main():
     ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     outdir = Path(os.getcwd()) / 'diagnostics'
     outdir.mkdir(exist_ok=True)
     log_path = outdir / f'diag_{ts}.txt'
-    def log(*a):
+    logger = _setup_logger(log_path)
+
+    def log(*a, level=logging.INFO):
         s = ' '.join(str(x) for x in a)
-        print(s)
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(s + '\n')
+        logger.log(level, s)
 
     log('=== MicroStage Diagnostics ===', ts)
     log('Python:', sys.version)
@@ -18,9 +42,9 @@ def main():
     for mod in ['serial', 'toupcam', 'numpy', 'PySide6', 'opencv-python']:
         try:
             __import__(mod if mod != 'opencv-python' else 'cv2')
-            log(f'[OK] module available:', mod)
+            log('[OK] module available:', mod)
         except Exception as e:
-            log(f'[WARN] module missing:', mod, '|', repr(e))
+            log('[WARN] module missing:', mod, '|', repr(e), level=logging.WARNING)
 
     # Serial
     log('\n-- Serial / Marlin discovery --')
@@ -44,20 +68,22 @@ def main():
                 if 'firmware_name:marlin' in low:
                     if EXPECTED_MACHINE_NAME and EXPECTED_MACHINE_NAME.lower() not in low:
                         log(
-                            f"[WARN] {p.device} Marlin but machine name mismatch. Response snippet: {resp[:120]!r}"
+                            f"[WARN] {p.device} Marlin but machine name mismatch. Response snippet: {resp[:120]!r}",
+                            level=logging.WARNING,
                         )
                     elif EXPECTED_MACHINE_UUID and EXPECTED_MACHINE_UUID.lower() not in low:
                         log(
-                            f"[WARN] {p.device} Marlin with matching machine name but UUID mismatch. Response snippet: {resp[:120]!r}"
+                            f"[WARN] {p.device} Marlin with matching machine name but UUID mismatch. Response snippet: {resp[:120]!r}",
+                            level=logging.WARNING,
                         )
                     else:
                         log(f'[OK] Marlin matched on {p.device}')
                 else:
                     log(f'[INFO] No Marlin signature on {p.device}. Response snippet: {resp[:120]!r}')
             except Exception as e:
-                log(f'[ERR] Could not open/query {p.device}: {e}')
+                log(f'[ERR] Could not open/query {p.device}: {e}', level=logging.ERROR)
     except Exception as e:
-        log('[ERR] Serial discovery failed:', e)
+        log('[ERR] Serial discovery failed:', e, level=logging.ERROR)
 
     # Camera / Toupcam
     log('\n-- Camera / ToupCam SDK --')
@@ -81,24 +107,28 @@ def main():
                             _ = cam.PullImageV3(w, h, 24)
                             log('[OK] PullImageV3 returned some data.')
                         except Exception as e:
-                            log('[WARN] PullImageV3 failed:', e)
+                            log('[WARN] PullImageV3 failed:', e, level=logging.WARNING)
                     except Exception as e:
-                        log('[WARN] Could not get size:', e)
+                        log('[WARN] Could not get size:', e, level=logging.WARNING)
                     cam.Stop()
                 except Exception as e:
-                    log('[ERR] StartPullModeWithCallback failed:', e)
+                    log('[ERR] StartPullModeWithCallback failed:', e, level=logging.ERROR)
                 finally:
                     try:
                         cam.Close()
                     except Exception as e:
-                        log('[WARN] camera close failed:', e)
+                        log('[WARN] camera close failed:', e, level=logging.WARNING)
                     cam = None
             else:
                 log('[INFO] No ToupCam devices detected by EnumV2().')
         except Exception as e:
-            log('[ERR] toupcam enumeration/open failed:', e)
+            log('[ERR] toupcam enumeration/open failed:', e, level=logging.ERROR)
     except Exception as e:
-        log('[WARN] toupcam module not importable (SDK/DLL missing?):', e)
+        log(
+            '[WARN] toupcam module not importable (SDK/DLL missing?):',
+            e,
+            level=logging.WARNING,
+        )
 
     log('\nDone. Log saved at:', str(log_path))
 
